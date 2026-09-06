@@ -1684,13 +1684,19 @@ async function scanModelSheet(){
   if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter the Web app URL and token first.</div>`; return; }
   // make sure the connection is set so readSource + later reads/writes hit this sheet
   conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; conn.connected=true;
-  const src={ ssid, tab:g('cnTab').value.trim(), labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
+  const manual={ ssid, tab:g('cnTab').value.trim(), labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
     headerRow:Math.max(1,parseInt(g('cnHeader').value)||1), firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
     months:Math.max(1,parseInt(g('cnMonths').value)||12) };
-  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Scanning the sheet…</div>`;
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Scanning the sheet &amp; detecting its layout…</div>`;
   try{
-    const F=await readSource(src);
-    if(!F.lines.length) throw new Error('No line items found — check the Label column, Header row, and First-month column.');
+    let F=null, src=manual, note='';
+    try{ const auto=await autoDetectAndRead({ssid, tab:manual.tab});
+      if(auto && auto.lines.length){ F=auto; src=Object.assign({}, manual, auto.detected);
+        note=`Auto-detected layout — labels in column ${auto.detected.labelCol}, ${auto.detected.months} periods from column ${auto.detected.firstCol} (header row ${auto.detected.headerRow}). `;
+        g('cnLabel').value=auto.detected.labelCol; g('cnHeader').value=String(auto.detected.headerRow); g('cnFirst').value=auto.detected.firstCol; g('cnMonths').value=String(auto.detected.months);
+      } }catch(e){}
+    if(!F){ F=await readSource(manual); src=manual; note='Used the layout you entered. '; }
+    if(!F.lines.length) throw new Error('No line items found. Set the Label column, Header row and First-month column manually below, then Scan again.');
     const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
     const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
     const usedK={}; const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
@@ -1711,7 +1717,7 @@ async function scanModelSheet(){
     model.sources=Object.assign({}, model.sources, {forecast:src});
     conn.sheets=conn.sheets||[]; saveConn();
     recompileAll(); saveModel();
-    fb.innerHTML=`<div class="write-feedback success">✓ Loaded ${newVars.length} line(s) from “${F.name||'your sheet'}”. Closing…</div>`;
+    fb.innerHTML=`<div class="write-feedback success">✓ ${note}Loaded ${newVars.length} line(s) from “${F.name||'your sheet'}”. Closing…</div>`;
     setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(`Loaded ${newVars.length} lines from the sheet`); },1100);
   }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Scan failed: ${err.message||err}</div>`; }
 }
@@ -1807,6 +1813,71 @@ function isRealNum(cell){ if(typeof cell==='number') return true; if(cell==null)
 function sectionMetric(title){ let t=String(title).replace(/\(\s*₹?\s*(cr|crore|lakh|l|k|mn|m)?\s*\)/i,'').trim();
   const parts=t.split(/[—–]/); if(parts.length>1) t=parts[parts.length-1].trim(); else t=t.replace(/^\s*\d+[.)]\s*/,'').trim();
   return t; }
+/* ---- Auto-detect the sheet's layout so the user doesn't have to type it ---- */
+/* Does this header cell look like a time period (month, quarter, year, P1/M1, or a date)? */
+function isPeriodHeader(v){
+  if(v==null||v==='') return false;
+  if(typeof v==='number') return (v>=1900&&v<=2100) || (v>=20000&&v<=80000); // a year, or a spreadsheet serial date
+  const s=String(v).trim(); if(!s) return false;
+  if(/(^|[^a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(s)) return true;
+  if(/^q[1-4]\b/i.test(s)) return true;
+  if(/^(fy|cy)?\s*'?\d{2,4}([-/]\d{1,2})?$/i.test(s)) return true;      // 2026, FY27, '26, 2026-01
+  if(/^(p|m|month|period|wk|week)\s*[-]?\d+/i.test(s)) return true;      // P1, M3, Week 2
+  if(/^\d{4}[-/]\d{1,2}/.test(s)) return true;                          // ISO-ish date
+  if(/^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(s)) return true;            // 01/04/2026
+  return false;
+}
+/* Turn a raw sheet grid (rows of cells) into line items — shared by manual and auto paths. */
+function parseLines(labels, headers, grid){
+  const lines=[]; let section='';
+  for(let i=0;i<labels.length;i++){ const nm=String(labels[i]==null?'':labels[i]).trim(); const row=grid[i]||[];
+    const nReal=headers.reduce((n,_,c)=>n+(isRealNum(row[c])?1:0),0);
+    if(nReal===0){
+      if(nm){ const dataBlank=headers.every((_,c)=>{const cl=row[c];return cl===''||cl==null;});
+        if(dataBlank || /[—–]/.test(nm) || /revenue|margin|ebitda|cost|expense|profit|opex|cash|balance|total|deals|customers|other/i.test(nm)) section=sectionMetric(nm); }
+      continue;
+    }
+    if(!nm) continue;
+    const series=headers.map((_,c)=>{ const cell=row[c]; return isRealNum(cell)?toNum(cell,conn.scale):null; });
+    lines.push({name:nm, series, metric:section});
+  }
+  return lines;
+}
+/* Find the label column, header row, first-period column and period count from a raw grid. */
+function detectLayoutFromGrid(grid){
+  if(!grid||!grid.length) return null;
+  const maxScan=Math.min(grid.length,40);
+  let headerRowIdx=-1, bestCount=1;
+  for(let r=0;r<maxScan;r++){ const row=grid[r]||[]; let cnt=0; for(let c=1;c<row.length;c++) if(isPeriodHeader(row[c])) cnt++; if(cnt>bestCount){ bestCount=cnt; headerRowIdx=r; } }
+  if(headerRowIdx<0) return null;                       // no row had >=2 period-like headers
+  const hrow=grid[headerRowIdx]||[];
+  let firstColIdx=-1; for(let c=1;c<hrow.length;c++){ if(isPeriodHeader(hrow[c])){ firstColIdx=c; break; } }
+  if(firstColIdx<0) return null;
+  let months=0; for(let c=firstColIdx;c<hrow.length;c++){ if(isPeriodHeader(hrow[c])) months++; else break; }
+  if(months<2) return null;
+  let labelColIdx=0, bestText=-1;
+  for(let c=0;c<firstColIdx;c++){ let t=0; for(let r=headerRowIdx+1;r<Math.min(grid.length,headerRowIdx+201);r++){ const cell=(grid[r]||[])[c]; if(cell==null) continue; const s=String(cell).trim(); if(s && !isRealNum(cell)) t++; } if(t>bestText){ bestText=t; labelColIdx=c; } }
+  return { labelColIdx, headerRowIdx, firstColIdx, months };
+}
+/* Read a broad block, detect the layout, and parse the lines — the "just works" path. */
+async function autoDetectAndRead(src){
+  const q=encodeURIComponent, cap=300, wideCol='BZ';
+  const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
+  const rng=`${qt}A1:${wideCol}${cap}`;
+  const url=`${conn.url}?action=read&token=${q(conn.token)}${src.ssid?`&ssid=${q(src.ssid)}`:''}&ranges=${q(rng)}`;
+  const data=await fetch(url,{redirect:'follow'}).then(r=>r.json());
+  if(!data.ok) throw new Error(data.error||'read failed');
+  const grid=data.values[rng]||[];
+  const det=detectLayoutFromGrid(grid);
+  if(!det) return null;
+  const { labelColIdx, headerRowIdx, firstColIdx, months }=det;
+  const hrow=grid[headerRowIdx]||[];
+  const headers=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) headers.push(String(hrow[c]==null?'':hrow[c]).trim());
+  const labels=[], dgrid=[];
+  for(let r=headerRowIdx+1;r<grid.length;r++){ const row=grid[r]||[]; labels.push(String(row[labelColIdx]==null?'':row[labelColIdx]).trim()); const dr=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) dr.push(row[c]); dgrid.push(dr); }
+  return { name:data.spreadsheet||'', headers, lines:parseLines(labels,headers,dgrid),
+    detected:{ labelCol:numToCol(labelColIdx+1), headerRow:headerRowIdx+1, firstCol:numToCol(firstColIdx+1), months } };
+}
 async function readSource(src){
   const rowsCap=300, q=encodeURIComponent;
   const lastCol=numToCol(colToNum(src.firstCol)+Math.max(1,src.months)-1);
@@ -1820,20 +1891,7 @@ async function readSource(src){
   const labels=(data.values[rL]||[]).map(r=>String(r[0]==null?'':r[0]).trim());
   const headers=((data.values[rH]||[])[0]||[]).map(h=>String(h==null?'':h).trim());
   const grid=data.values[rD]||[];
-  const lines=[]; let section='';
-  for(let i=0;i<labels.length;i++){ const nm=labels[i]; const row=grid[i]||[];
-    const nReal=headers.reduce((n,_,c)=>n+(isRealNum(row[c])?1:0),0);
-    if(nReal===0){
-      // a title/section/sub-header row — no numbers to compare. Update the section if it reads like one.
-      if(nm){ const dataBlank=headers.every((_,c)=>{const cl=row[c];return cl===''||cl==null;});
-        if(dataBlank || /[—–]/.test(nm) || /revenue|margin|ebitda|cost|expense|profit|opex|cash|balance|total|deals|customers|other/i.test(nm)) section=sectionMetric(nm); }
-      continue;   // never make a line out of a non-numeric row
-    }
-    if(!nm) continue;
-    const series=headers.map((_,c)=>{ const cell=row[c]; return isRealNum(cell)?toNum(cell,conn.scale):null; });
-    lines.push({name:nm, series, metric:section});
-  }
-  return {name:data.spreadsheet||'', headers, lines};
+  return {name:data.spreadsheet||'', headers, lines:parseLines(labels,headers,grid)};
 }
 async function importSources(){
   const g=id=>document.getElementById(id);
