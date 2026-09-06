@@ -1,0 +1,2010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niche Numbers 2.0</title>
+<meta name="description" content="Define your model, drive the assumptions, write inputs back.">
+<style>
+  :root{
+    --bg:#f4f6fa;--ink:#172033;--line:#dfe3eb;--line-2:#e7eaf0;--muted:#687189;--muted-2:#7b8398;--eyebrow:#798198;
+    --indigo:#4055c7;--indigo-ink:#3448b4;--indigo-mark:#3949ab;--indigo-soft:#edf0ff;--indigo-border:#d8ddfa;
+    --green:#12805a;--green-soft:#e8f7f1;--green-dot:#19a974;--green-ring:#e6f7f1;--green-ink:#28735b;
+    --red:#c23140;--red-soft:#fff0f1;--amber:#a65d2b;--amber-soft:#fff1e8;--teal:#0b8f9e;--dark:#1b2233;
+    --shadow:0 4px 18px rgba(40,52,85,.045);--r:14px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,Helvetica,sans-serif;--mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  button{font-family:inherit} h1,h2,h3{margin:0} .num{font-variant-numeric:tabular-nums}
+  .topbar{position:sticky;top:0;z-index:10;height:64px;padding:0 32px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.02em}
+  .brand-mark{width:32px;height:32px;border-radius:9px;background:var(--indigo-mark);color:#fff;display:grid;place-items:center}
+  .model-status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green-dot);box-shadow:0 0 0 3px var(--green-ring)}
+  .top-actions{display:flex;gap:8px}
+  .btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);transition:.15s}
+  .btn:hover{background:#f7f8fb} .btn svg{width:15px;height:15px}
+  .btn.sm{height:30px;font-size:12px;padding:0 11px}
+  .btn.primary{background:var(--dark);color:#fff;border-color:var(--dark)} .btn.primary:hover{background:#0f1626}
+  .btn.indigo{background:var(--indigo);border-color:var(--indigo);color:#fff} .btn.indigo:hover{background:#354aba}
+  .btn.ghost{border-style:dashed;color:var(--muted-2)}
+  .module-nav{position:sticky;top:64px;z-index:9;height:48px;padding:0 32px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;overflow-x:auto}
+  .tabs{display:flex;gap:22px;height:48px}
+  .tab{position:relative;display:inline-flex;align-items:center;gap:7px;height:48px;padding:0 3px;border:0;background:0;color:#6c7489;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .tab svg{width:15px;height:15px}
+  .tab[data-active="true"]{color:var(--indigo-ink)}
+  .tab[data-active="true"]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--indigo)}
+  .tab .badge{margin-left:3px;padding:2px 5px;border-radius:5px;background:#eef0f5;color:#8b92a2;font-size:8px;letter-spacing:.05em;text-transform:uppercase;font-weight:700}
+  .tab:disabled{cursor:not-allowed;color:#aab0be}
+  .page{max-width:1220px;margin:0 auto;padding:26px 32px 80px}
+  .eyebrow{text-transform:uppercase;letter-spacing:.1em;color:var(--eyebrow);font-size:10px;font-weight:700;margin:0 0 6px}
+  .hero h1{font-size:28px;letter-spacing:-.02em;font-weight:700}
+  .hero p{color:var(--muted);margin:8px 0 0;max-width:660px}
+  .hero-row{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+  .panel-pad{padding:20px 22px}
+  .card-heading{display:flex;justify-content:space-between;align-items:center;padding:15px 18px;border-bottom:1px solid var(--line-2);gap:12px;flex-wrap:wrap}
+  .card-heading h2{font-size:16px;letter-spacing:-.015em}
+  .mut{color:var(--muted-2)} .fz11{font-size:11px}.fz12{font-size:12px}.fz10{font-size:10px}
+  .field{display:grid;gap:5px}
+  .field label{color:var(--muted-2);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:700}
+  input,select,textarea{font-family:inherit}
+  select,.inp{appearance:none;height:34px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 11px;font-size:13px;color:var(--ink)}
+  select{background:#fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237b8398' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 9px center;padding-right:28px;cursor:pointer}
+  input:focus,select:focus,textarea:focus{outline:2px solid #cdd5f6;outline-offset:0}
+  .selrow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+  .selrow .arrow{color:#8b93a8;margin-bottom:9px}
+
+  /* builder table */
+  .vtbl{width:100%;border-collapse:collapse}
+  .vtbl th{text-align:left;background:#f7f8fb;color:#747d92;text-transform:uppercase;letter-spacing:.06em;font-size:9px;padding:9px 14px;font-weight:700}
+  .vtbl td{padding:11px 14px;font-size:12px;color:#344056;border-top:1px solid #eef0f4;vertical-align:middle}
+  .vtbl tr:hover td{background:#fcfcfe}
+  .kind-pill{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:3px 8px;border-radius:6px}
+  .kind-input{background:var(--indigo-soft);color:var(--indigo-ink)}
+  .kind-formula{background:#eef7f2;color:var(--green-ink)}
+  .kind-output{background:#fff1e8;color:var(--amber)}
+  .keychip{font-family:var(--mono);font-size:10px;color:#8b93a6;background:#f2f4f8;border-radius:5px;padding:1px 6px}
+  .expr{font-family:var(--mono);font-size:11px;color:#3a4763}
+  .cellref{font-family:var(--mono);font-size:11px;color:#7d8598}
+  .cellref.unmapped{color:#b6bccb;font-style:italic}
+  .rowacts{display:flex;gap:6px;justify-content:flex-end}
+  .iconbtn{border:1px solid var(--line);background:#fff;border-radius:7px;width:28px;height:28px;display:grid;place-items:center;cursor:pointer;color:#6c7489}
+  .iconbtn:hover{background:#f4f6fb}
+  .iconbtn svg{width:14px;height:14px}
+
+  .chainwrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#f8f9fc;border-radius:8px;padding:7px 11px;font-size:12px;color:#3a4763}
+  .chip.out{background:#eef7f2;border-color:#c9e6d8;color:var(--green-ink);font-weight:600}
+  .chip .k{font-family:var(--mono);font-size:9px;color:#98a0b2}
+  .chainwrap .arrow{color:#b6bccb}
+  .canvas{position:relative;height:440px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;background-image:radial-gradient(#e7eaf1 1px,transparent 1px);background-size:18px 18px;overflow:hidden;touch-action:none;cursor:grab}
+  .canvas .links{position:absolute;top:0;left:0;width:2600px;height:1500px;pointer-events:none}
+  .canvas .links .edgegrp{pointer-events:auto;cursor:pointer}
+  .canvas .links .edgegrp:hover .edge{stroke:#c23140;stroke-width:2.6}
+  .canvas .links .edgegrp:hover .hit{stroke:rgba(194,49,64,.07)}
+  .node2{position:absolute;min-width:118px;max-width:190px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px 8px 10px;box-shadow:0 2px 8px rgba(40,52,85,.08);cursor:grab;user-select:none}
+  .node2.formula{border-color:#c9e6d8;background:#f4fbf7} .node2.input{border-color:#d8ddfa;background:#f7f8ff} .node2.output{border-color:#f2d6bf;background:#fff8f1}
+  .node2 .nm{font-weight:600;font-size:12px;color:#2b3a55} .node2 .sub{font-family:var(--mono);font-size:9px;color:#8b93a6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .node2 .val{font-size:10px;color:#3a4763;margin-top:3px;font-variant-numeric:tabular-nums}
+  .canvas-inner{position:absolute;top:0;left:0;width:2600px;height:1500px;will-change:transform}
+  .pagebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 22px;margin-top:6px}
+  .ptab{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border:1px solid var(--line);border-radius:8px 8px 0 0;border-bottom:0;background:#f7f8fb;color:var(--muted-2);font-size:12px;font-weight:600;cursor:pointer}
+  .ptab.on{background:#fff;color:var(--indigo-ink);border-color:var(--indigo-border);box-shadow:0 -2px 0 var(--indigo) inset}
+  .ptab .pcount{font-size:9px;background:#e7eaf2;color:#7b8398;border-radius:6px;padding:1px 5px;font-weight:700}
+  .ptab.on .pcount{background:var(--indigo-soft);color:var(--indigo-ink)}
+  .ptab.add,.ptab.del{border-radius:8px;border-bottom:1px solid var(--line);background:#fff;color:var(--muted-2)}
+  .ptab.add:hover,.ptab.del:hover{background:#f2f4f9;color:var(--ink)}
+  .opgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .opbtn{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 8px;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;color:#3a4152}
+  .opbtn:hover{border-color:var(--indigo);background:#f6f7ff} .opbtn b{font-size:22px;line-height:1;color:var(--indigo-ink)} .opbtn span{font-size:12px}
+  .node2 .handle{position:absolute;right:-8px;top:50%;transform:translateY(-50%);width:15px;height:15px;border-radius:50%;background:var(--indigo);border:2px solid #fff;cursor:crosshair;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+  .node2 .handle:hover{background:var(--indigo-ink)}
+
+  /* forecasting assumptions */
+  .grid-forecast{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+  .asm{padding:16px 0;border-bottom:1px solid #edf0f4}
+  .asm:first-child{padding-top:2px} .asm:last-child{border-bottom:0}
+  .asm-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:9px}
+  .asm-head strong{font-size:13px} .asm-head .k{font-family:var(--mono);font-size:9px;color:#98a0b2}
+  .asm-base{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .asm-base .inp{height:30px;width:110px;font-size:12px;font-variant-numeric:tabular-nums}
+  .asm-base .lab{font-size:11px;color:var(--muted-2)}
+  .steps{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+  .stepchip{display:inline-flex;align-items:center;gap:6px;background:#eef0ff;border:1px solid #d8ddfa;color:#3a4680;border-radius:20px;padding:4px 6px 4px 10px;font-size:11px}
+  .stepchip .x{cursor:pointer;color:#8791c9;font-weight:700}
+  .stepadd{border:1px dashed var(--line);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--muted-2);cursor:pointer;background:#fff}
+  .shapechip{display:inline-flex;align-items:center;gap:5px;border:1px solid #d8ddfa;background:#eef0ff;color:#3a4680;border-radius:20px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:500}
+  .seg{display:inline-flex;background:#eef0f4;border-radius:9px;padding:3px;gap:2px}
+  .seg button{border:0;background:transparent;padding:7px 14px;border-radius:7px;font:600 12.5px var(--font);color:#6b7385;cursor:pointer}
+  .seg button.on{background:#fff;color:#2b3044;box-shadow:0 1px 2px rgba(43,48,68,.12)}
+  .sbars{display:flex;align-items:stretch;gap:3px;height:120px;padding:10px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(#fafbff,#fff);touch-action:none;position:relative}
+  .sbars .midline{position:absolute;left:10px;right:10px;height:1px;background:#dfe3ee;top:50%;pointer-events:none}
+  .sbar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;cursor:ns-resize;position:relative}
+  .sbar i{width:100%;max-width:22px;background:#4055c7;border-radius:3px 3px 0 0;transition:height .02s}
+  .sbar span{font-size:8px;color:#98a0b2;margin-top:3px;position:absolute;top:100%}
+  /* variance */
+  .vgrid{display:grid;grid-template-columns:minmax(430px,1fr) minmax(420px,1.05fr);gap:16px;align-items:start}
+  .selrow2{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+  .selrow2 .field label{display:block;font-size:11px;color:var(--muted-2);margin-bottom:4px}
+  .selrow2 select{height:34px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#2b3044}
+  .selrow2 .vsvs{padding-bottom:9px;color:#98a0b2;font-size:12px}
+  .scrollx{overflow-x:auto}
+  .vtable{border-collapse:collapse;width:100%;font-size:12.5px;min-width:520px}
+  .vtable th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);color:#7d8599;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  .vtable th.num,.vtable td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .vtable td{padding:9px 10px;border-bottom:1px solid #f0f2f6;white-space:nowrap}
+  .vrow{cursor:pointer} .vrow:hover{background:#fafbff} .vrow.sel{background:#f2f4ff;box-shadow:inset 3px 0 0 var(--indigo)}
+  .vrow.immaterial{opacity:.4} .vrow.immaterial:hover{opacity:.75}
+  .rtag{display:inline-block;margin-top:3px;font-size:10px;font-weight:600;color:#7a5b12;background:#fdf3dc;border:1px solid #f2e2b8;border-radius:5px;padding:1px 6px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+  .vreason{display:flex;gap:12px;align-items:flex-end;margin:2px 0 14px;flex-wrap:wrap}
+  .vreason .field label{display:block;font-size:11px;color:var(--muted-2);margin-bottom:4px}
+  .vreason select{height:36px;min-width:180px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#2b3044}
+  .vreason .inp{height:36px}
+  .rag{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}
+  .rag.g{background:#3aa981} .rag.a{background:#e6a44e} .rag.r{background:#d64550} .rag.na{background:#d3d7e0}
+  .vmeta{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .explbadge{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:#5a6377;font-weight:500}
+  .explbar{display:inline-block;width:64px;height:6px;border-radius:100px;background:#e9ebf1;overflow:hidden}
+  .explbar span{display:block;height:100%;background:#3aa981;border-radius:100px}
+  .sparkbox{margin:2px 0 14px}
+  .sparktitle{font-size:11px;color:#7d8599;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:5px}
+  .vspark{width:100%;height:46px;display:block}
+  .sparkx{display:flex;justify-content:space-between;font-size:8px;color:#a2a9ba;margin-top:2px}
+  .agglabel{border:1px solid var(--line);background:#f6f7fb;border-radius:5px;padding:1px 6px;font-size:9.5px;color:#8a90a4;cursor:pointer;text-transform:uppercase;letter-spacing:.03em;font-weight:600;vertical-align:middle}
+  .agglabel:hover{border-color:#c9cede;color:#5a6377}
+  .minisel{height:28px;border:1px solid var(--line);border-radius:7px;padding:0 6px;font-size:11.5px;background:#fff;color:#5a6377;max-width:120px;cursor:pointer}
+  .minisel.wide{max-width:150px} .minisel.set{border-color:#f2e2b8;background:#fdf9ef;color:#7a5b12}
+  .fucell{white-space:nowrap} .fucell .fu{margin-right:6px}
+  .fu.na{background:#eef0f4;color:#98a0b2}
+  .cbtn{border:1px solid var(--line);background:#fff;border-radius:7px;width:30px;height:28px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:#a2a9ba}
+  .cbtn svg{width:14px;height:14px} .cbtn:hover{border-color:#c9cede;color:#5a6377} .cbtn.has{background:#fdf9ef;border-color:#f2e2b8;color:#b4801f}
+  .rowacts{white-space:nowrap} .rowacts .cbtn{margin-left:4px} .cbtn.del:hover{border-color:#f0cdd2;color:#c23140;background:#fdeef0}
+  .metchip{display:inline-block;font-size:9.5px;font-weight:600;color:#3a4680;background:#eef0ff;border:1px solid #dde1fb;border-radius:5px;padding:1px 6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.02em}
+  .bridgenote{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 12px;padding:8px 10px;background:#fdf9ef;border:1px solid #f4ecd6;border-radius:9px}
+  .bridgenote .bnrem{font-size:12.5px;color:#5a6377} .bridgenote .cdrill{margin-left:auto}
+  .vscrim{position:fixed;inset:0;background:rgba(30,34,48,.32);opacity:0;pointer-events:none;transition:opacity .18s;z-index:60}
+  .vscrim.on{opacity:1;pointer-events:auto}
+  .vdrawer{position:fixed;top:0;right:0;height:100%;width:min(420px,92vw);background:var(--panel,#fff);box-shadow:-8px 0 30px rgba(30,34,48,.18);transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:61;padding:22px;overflow-y:auto}
+  .vdrawer.on{transform:translateX(0)}
+  .dwhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px} .dwhead h3{margin:2px 0 0;font-size:19px}
+  .dwhead .x{border:0;background:transparent;font-size:22px;line-height:1;color:#98a0b2;cursor:pointer}
+  .dwkpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+  .dwkpi>div{background:#f6f7fb;border-radius:9px;padding:9px 11px;display:flex;flex-direction:column;gap:3px}
+  .dwkpi span{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#7d8599} .dwkpi b{font-size:14px;font-variant-numeric:tabular-nums} .dwkpi i{font-style:normal;font-size:10px;align-self:flex-start}
+  .vtable td .fu{font-size:10.5px}
+  .cbars{display:flex;flex-direction:column;gap:9px}
+  .cbarrow{display:grid;grid-template-columns:180px 1fr auto auto;align-items:center;gap:14px}
+  .cbarrow.isbase .cbl{font-weight:700;color:#2b3044}
+  .cbl{font-size:12.5px;color:#5a6377} .cbl i{font-style:normal;font-size:9.5px;color:#8a90a4;background:#eef0f4;border-radius:4px;padding:1px 5px;margin-left:4px}
+  .cbtrack{height:22px;background:#f0f2f6;border-radius:6px;overflow:hidden;min-width:80px}
+  .cbfill{display:block;height:100%;background:#8091f0;border-radius:6px} .cbfill.b{background:#3aa981}
+  .cbv{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;min-width:80px;text-align:right}
+  .cbd{font-variant-numeric:tabular-nums;font-size:11.5px;font-weight:600;min-width:120px;text-align:right}
+  .cdiff{margin-top:16px;border-top:1px solid #edf0f4;padding-top:12px}
+  .cdiffhead{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+  .basecol{background:#f6f7fb} th.basecol{color:#3a4152}
+  .srcrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+  .srcgrp{border:1px solid var(--line);border-radius:10px;padding:12px 12px 10px;background:#fbfcff}
+  .vrow.nodata b{color:#9aa1b2;font-weight:500}
+  @media(max-width:640px){.srcrow{grid-template-columns:1fr}}
+  @media (max-width:640px){ .cbarrow{grid-template-columns:1fr auto;gap:6px} .cbtrack{grid-column:1/-1;order:3} .cbd{min-width:0} }
+  .vk{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:7px;vertical-align:middle}
+  .vk.input{background:#8091f0} .vk.formula{background:#3aa981} .vk.output{background:#e0894f}
+  .fu{display:inline-block;padding:2px 8px;border-radius:100px;font-size:10.5px;font-weight:600}
+  .fu.fav{background:var(--green-soft,#e2f3ea);color:#1f8a5b} .fu.unf{background:#fdeef0;color:#c23140}
+  .gdir{border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 7px;font-size:10.5px;color:#7a8296;cursor:pointer}
+  .pos{color:#1f8a5b} .negv{color:#c23140}
+  .wfwrap{padding:6px 0 0}
+  .wf{}
+  .wf.base,.wf.end{fill:#c9cede} .wf.up{fill:#3aa981} .wf.down{fill:#e06a6a}
+  .wfv{font-size:10px;fill:#48536c;font-variant-numeric:tabular-nums} .wfx{font-size:10px;fill:#7d8599} .wfb{font-size:10.5px;fill:#2b3044;font-weight:600;font-variant-numeric:tabular-nums}
+  .wfc{stroke:#c9cede;stroke-width:1;stroke-dasharray:3 3} .wfdrill{font-size:9.5px;fill:var(--indigo);cursor:pointer;text-decoration:underline}
+  .contrib{margin-top:14px;border-top:1px solid #edf0f4;padding-top:10px;display:flex;flex-direction:column;gap:2px}
+  .crow{display:grid;grid-template-columns:14px 1fr auto auto;align-items:center;gap:10px;padding:5px 2px;font-size:12.5px}
+  .cdot{width:9px;height:9px;border-radius:2px} .cdot.up{background:#3aa981} .cdot.down{background:#e06a6a}
+  .cn{color:#3a4152} .cdrill,.cdrill:hover{border:0;background:transparent;color:var(--indigo);cursor:pointer;font-size:11px;padding:0;text-decoration:underline}
+  .cv{font-variant-numeric:tabular-nums;font-weight:600} .cp{font-size:11px;text-align:right}
+  @media (max-width:900px){ .vgrid{grid-template-columns:1fr} }
+  .change-pill{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:7px;background:var(--green-soft);color:var(--green);font-size:12px;font-weight:700}
+  .change-pill.neg{background:#eef0fa;color:#48536c}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:3px;background:#e6e9f1;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid var(--indigo);cursor:pointer;box-shadow:0 1px 3px rgba(30,40,80,.25)}
+  .slider-labels{display:flex;justify-content:space-between;color:#99a0b0;font-size:9px;margin-top:6px}
+
+  .results-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .results-head h2{font-size:16px;letter-spacing:-.015em}
+  .result-controls{display:flex;gap:10px;flex-wrap:wrap}
+  .result-controls .field label{font-size:9px}
+  .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #e5e8ef;border-radius:10px;overflow:hidden;margin:16px 0}
+  .kpi-row>div{padding:12px 15px;border-right:1px solid #e5e8ef;display:grid;gap:4px}
+  .kpi-row>div:last-child{border-right:0;grid-template-columns:auto auto;align-items:center}
+  .kpi-row span{color:#7d8599;text-transform:uppercase;letter-spacing:.07em;font-size:10px}
+  .kpi-row strong{font-size:17px} .kpi-row small{grid-column:2;justify-self:end;font-weight:700;font-size:12px}
+  .pos{color:var(--green)} .negv{color:var(--red)}
+  .legend{display:flex;justify-content:flex-end;gap:16px;color:#70798f;font-size:10px;margin-bottom:2px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:6px} .legend i{width:18px;height:3px;border-radius:2px}
+  .legend i.base{background:#aeb5c4} .legend i.scen{background:#4055c7}
+  .chart-wrap svg{width:100%;height:270px;overflow:visible;touch-action:none}
+  .base-line{fill:none;stroke:#aeb5c4;stroke-width:2.5;stroke-dasharray:5 5;stroke-linejoin:round}
+  .scenario-line{fill:none;stroke:#4055c7;stroke-width:2.5;stroke-linejoin:round}
+  .grid-line{stroke:#eef0f4;stroke-width:1}
+  .scenario-dot{fill:#fff;stroke:#4055c7;stroke-width:2;cursor:ns-resize} .scenario-dot:hover{r:6}
+  .axis-label{fill:#99a0b0;font-size:9px}
+  .drag-hint{display:inline-flex;align-items:center;gap:6px;color:#7b8398;font-size:11px;background:#f6f7fb;border:1px solid #e7eaf1;border-radius:8px;padding:6px 10px;margin-bottom:6px}
+  .drag-hint svg{width:13px;height:13px}
+  .linechips{display:flex;flex-wrap:wrap;gap:7px;margin:2px 0 4px}
+  .linechip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 12px 5px 10px;font-size:12px;cursor:pointer;color:#5a6377;user-select:none}
+  .linechip i{width:11px;height:11px;border-radius:50%;background:#c7ccd8;flex:none}
+  .linechip.on{border-color:transparent;color:#fff;font-weight:600}
+  .serieslegend{display:flex;flex-direction:column;gap:2px;margin-top:12px;border-top:1px solid #edf0f4;padding-top:10px}
+  .slrow{display:grid;grid-template-columns:14px 1fr auto auto;align-items:center;gap:10px;padding:5px 2px;font-size:12px}
+  .slrow i{width:12px;height:3px;border-radius:2px}
+  .slrow .nm{color:#3a4152;font-weight:600} .slrow .vv{font-variant-numeric:tabular-nums;color:#6b7385}
+  .slrow .dd{font-variant-numeric:tabular-nums;font-weight:700}
+  .ovchip{display:inline-flex;align-items:center;gap:6px;background:#fff4ec;border:1px solid #ffd9c4;color:#b4551f;border-radius:20px;padding:4px 6px 4px 10px;font-size:11px;margin:3px 4px 0 0}
+  .ovchip .x{cursor:pointer;color:#d98a5f;font-weight:700}
+  .fcbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:8px 0 4px}
+  .fcbar .drag-hint{margin:0}
+  .solveby{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 11px;font-size:12px;color:#4a5266;cursor:pointer;font-weight:500}
+  .solveby:hover{border-color:#c9cede}
+  .solveby b{color:#2b3044;font-weight:600}
+  .solveby .cog{width:13px;height:13px;color:#98a0b2}
+  .solvemsg{margin:8px 0 0;padding:8px 12px;border-radius:8px;background:#fff8ec;border:1px solid #f4e2c0;color:#8a5a12;font-size:12px}
+  .lvopt{display:flex;align-items:flex-start;gap:11px;padding:12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;margin-bottom:8px}
+  .lvopt.on{border-color:#ff9f86;background:#fff6f2}
+  .lvopt input{margin-top:2px}
+  .lvopt .t{font-weight:600;font-size:13px} .lvopt .d{font-size:11.5px;color:var(--muted-2);margin-top:2px;line-height:1.45}
+  .pinrow{display:flex;align-items:center;gap:9px;padding:8px 4px;border-bottom:1px solid #f0f2f6;font-size:12.5px}
+  .pinrow:last-child{border-bottom:0}
+  .pinbtn{margin-left:auto;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer;color:#7a8296}
+  .pinbtn.pinned{background:#eef0fa;border-color:#ccd3f2;color:#3a4680;font-weight:600}
+  .pinbtn svg{width:11px;height:11px}
+  .var-tabs{display:flex;gap:6px;border-top:1px solid #edf0f4;margin-top:14px;padding-top:12px;flex-wrap:wrap}
+  .var-tabs button{color:#6d7589;background:0;border:1px solid transparent;border-radius:7px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer}
+  .var-tabs button.selected{color:var(--indigo-ink);background:var(--indigo-soft);border-color:var(--indigo-border)}
+  .result-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid #edf0f4}
+  .result-foot .txt strong{font-size:12px;display:block} .result-foot .txt span{color:var(--muted-2);font-size:11px}
+  .result-foot .acts{display:flex;gap:8px;flex-wrap:wrap}
+
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}
+  .kv .k{color:var(--muted-2);text-transform:uppercase;letter-spacing:.07em;font-size:10px;font-weight:700}
+  .placeholder{display:grid;place-items:center;gap:10px;padding:64px 20px;text-align:center;color:var(--muted)}
+  .placeholder .ic{width:46px;height:46px;border-radius:12px;background:#eef0f5;display:grid;place-items:center;color:#8b92a2}
+  .placeholder h2{font-size:18px;color:var(--ink)}
+  .placeholder p{max-width:460px;font-size:12px}
+
+  .scrim{position:fixed;inset:0;background:rgba(20,26,42,.42);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .scrim.on{display:flex}
+  .modal{background:#fff;border-radius:16px;max-width:540px;width:100%;box-shadow:0 24px 70px rgba(20,26,42,.3);overflow:hidden}
+  .modal.wide{max-width:620px}
+  .modal .mhead{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line-2)}
+  .modal .mhead h3{font-size:16px}
+  .modal .mbody{padding:20px;max-height:76vh;overflow:auto}
+  .modal .x{border:0;background:0;cursor:pointer;color:var(--muted-2);font-size:20px;line-height:1}
+  /* account drill-down modal */
+  .modal:has(.acctview){max-width:880px}
+  .acctlegend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:0 0 14px;color:var(--muted);font-size:11px}
+  .acctlegend span{display:inline-flex;align-items:center;gap:6px}
+  .acctlegend .ln{width:16px;height:0;border-top:2px solid var(--indigo)} .acctlegend .ln.ac{border-top-color:var(--green)}
+  .acctlegend .sw{width:13px;height:11px;border-radius:2px;background:rgba(194,49,64,.14)}
+  .acctlegend .cut{width:16px;height:0;border-top:1.5px dashed #b8c0d6}
+  .acctcard{border:1px solid var(--line-2);border-radius:12px;padding:14px 16px 8px;margin-bottom:14px}
+  .acctcard-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+  .acctcard-head .metname{font-weight:700;font-size:14px;letter-spacing:-.01em}
+  .acctkpis{display:flex;gap:22px;margin-bottom:6px;flex-wrap:wrap}
+  .akpi{display:flex;flex-direction:column;gap:1px} .akpi label{color:var(--muted-2);text-transform:uppercase;letter-spacing:.07em;font-size:9.5px;font-weight:700} .akpi b{font-size:15px;font-variant-numeric:tabular-nums}
+  .akpi b.pos{color:var(--green)} .akpi b.negv{color:var(--red)}
+  .acctsvg{display:block;width:100%;height:auto;margin-top:2px}
+  .acctempty{background:var(--amber-soft);border:1px solid #f0dcc9;color:#7a5227;border-radius:10px;padding:11px 14px;font-size:12px;line-height:1.5;margin:0 0 14px}
+  .frow{display:grid;gap:12px;margin-bottom:14px}
+  .frow.two{grid-template-columns:1fr 1fr}
+  .inp,textarea.inp{width:100%}
+  textarea.inp{height:auto;min-height:40px;padding:9px 11px;line-height:1.5;font-family:var(--mono);font-size:12px}
+  .hintbox{background:#f5f7ff;border:1px solid #dbe0fa;border-radius:9px;padding:10px 12px;font-size:11px;color:#3a4763;line-height:1.5}
+  .scanbox{margin:10px 0 4px;padding:12px 14px;border:1px dashed var(--indigo-border);border-radius:11px;background:#fafbff}
+  .hintbox code{font-family:var(--mono);background:#e6eaff;padding:1px 5px;border-radius:4px}
+  .tokbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+  .tok{border:1px solid var(--line);background:#f5f6fa;border-radius:7px;padding:4px 9px;font-family:var(--mono);font-size:11px;cursor:pointer;color:#3a4763}
+  .tok:hover{background:#edf0ff;border-color:var(--indigo-border)} .tok.op{color:#8791c9;font-weight:700}
+  .frow.three{grid-template-columns:1fr 90px 90px}
+  .rangeprev{font-family:var(--mono);font-size:11px;color:var(--indigo-ink);margin-top:6px}
+  .write-preview{display:grid;grid-template-columns:1fr 1fr;border:1px solid #e3e6ed;border-radius:10px;overflow:hidden}
+  .write-preview>div{padding:11px 12px;display:grid;gap:3px;border-right:1px solid #e3e6ed;border-bottom:1px solid #e3e6ed}
+  .write-preview>div:nth-child(2n){border-right:0} .write-preview>div:nth-last-child(-n+2){border-bottom:0}
+  .write-preview span{color:#7d8599;text-transform:uppercase;letter-spacing:.06em;font-size:9px}
+  .write-preview strong,.write-preview code{color:#263149;font-size:12px;font-family:var(--mono)}
+  .write-feedback{border-radius:8px;padding:10px 11px;font-size:11px;line-height:1.45;margin-top:12px}
+  .write-feedback.success{color:#196f53;background:#e8f7f1}
+  .wtable{width:100%;border-collapse:collapse;margin-top:6px}
+  .wtable th,.wtable td{text-align:left;font-size:11px;padding:7px 8px;border-bottom:1px solid #eef0f4}
+  .wtable th{color:#7d8599;text-transform:uppercase;font-size:8px;letter-spacing:.06em}
+  .wtable .cellref{font-size:10px}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:.25s;z-index:60;pointer-events:none}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media (max-width:900px){ .model-status{display:none} .grid-forecast{grid-template-columns:1fr} .kpi-row{grid-template-columns:1fr} .kpi-row>div{border-right:0;border-bottom:1px solid #e5e8ef} .kv{grid-template-columns:1fr} }
+  @media (max-width:600px){ .topbar,.module-nav{padding:0 15px} .page{padding:20px 15px 70px} .top-actions .btn:last-child{display:none} }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg></span><span>Niche Numbers 2.0</span></div>
+  <div class="model-status" id="modelStatus"><span class="status-dot"></span>No sheet connected<span>•</span>Local model</div>
+  <div class="top-actions">
+    <button class="btn sm" onclick="openConnect()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>Connect sheet</button>
+  </div>
+</header>
+<nav class="module-nav"><div class="tabs" id="tabs">
+  <button class="tab" data-tab="setup" data-active="true" onclick="switchTab('setup')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>Model setup</button>
+  <button class="tab" data-tab="forecast" onclick="switchTab('forecast')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/></svg>Forecasting</button>
+  <button class="tab" data-tab="variance" onclick="switchTab('variance')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Variance analysis</button>
+  <button class="tab" data-tab="compare" onclick="switchTab('compare')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Compare scenarios</button>
+  <button class="tab" data-tab="treasury" disabled title="After forecasting">Treasury<span class="badge">Later</span></button>
+</div></nav>
+<main class="page" id="main"></main>
+<div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   NICHE NUMBERS 2.0 — generic model builder
+   Variables (input / formula / output) form a graph.
+   You edit INPUTS; formulas compute; write-back pushes inputs
+   into your sheet's own cells. Nothing hardcoded.
+   ============================================================ */
+
+/* ---- time axis ---- */
+const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function genMonths(n,startM=8,startY=26){ let m=startM,y=startY,out=[]; for(let i=0;i<n;i++){ out.push(MN[m]+" ’"+y); m++; if(m>11){m=0;y++;} } return out; }
+
+/* ---- expression compiler (shunting-yard → RPN) ---- */
+function compile(expr){
+  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[()+\-*/]/g))||[];
+  const out=[],ops=[],prec={'+':1,'-':1,'*':2,'/':2};
+  for(const t of toks){
+    if(/^[\d.]/.test(t)) out.push({n:+t});
+    else if(/^[A-Za-z_]/.test(t)) out.push({v:t});
+    else if(t==='(') ops.push(t);
+    else if(t===')'){ while(ops.length&&ops[ops.length-1]!=='(') out.push({op:ops.pop()}); ops.pop(); }
+    else { while(ops.length&&prec[ops[ops.length-1]]>=prec[t]) out.push({op:ops.pop()}); ops.push(t); }
+  }
+  while(ops.length) out.push({op:ops.pop()});
+  const deps=[...new Set(out.filter(x=>'v' in x).map(x=>x.v))];
+  return {rpn:out,deps};
+}
+function evalRPN(rpn,scope){
+  const st=[];
+  for(const x of rpn){
+    if('n' in x) st.push(x.n);
+    else if('v' in x) st.push(Number(scope[x.v.toLowerCase()])||0);   // case-insensitive var lookup
+    else { const b=st.pop(),a=st.pop(); st.push(x.op==='+'?a+b:x.op==='-'?a-b:x.op==='*'?a*b:a/((b)||1)); }
+  }
+  return st.length?st[st.length-1]:0;
+}
+
+/* ---- the model ---- */
+let model={
+  periods:genMonths(12),
+  closed:0,
+  displayVars:["revenue"],
+  chartVar:"revenue",
+  levers:null,
+  goalseek:"price",
+  scenarioName:"Plan",
+  vars:[
+    {key:"price",          name:"Price per unit",        unit:"₹", kind:"input",   base:950, steps:[], delta:0, range:"", writable:true},
+    {key:"distributors",   name:"Distributors",          unit:"#", kind:"input",   base:100, steps:[], delta:0, range:"", writable:true},
+    {key:"units_per_dist", name:"Units per distributor",  unit:"#", kind:"input",   base:120, steps:[], delta:0, range:"", writable:true},
+    {key:"volume",         name:"Volume",                unit:"#", kind:"formula", expr:"distributors * units_per_dist"},
+    {key:"revenue",        name:"Net revenue",           unit:"₹", kind:"formula", expr:"price * volume"}
+  ]
+};
+let conn={connected:false,url:"",token:"",scale:1,sheets:[],actualsSsid:"",actualsSheets:[]};
+function extractSsid(s){ if(!s) return ""; const m=String(s).match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/); if(m) return m[1]; return String(s).trim().replace(/[^a-zA-Z0-9_-]/g,''); }
+let uiTab="setup";
+
+/* ---- A1 range helpers (sheet + column letter + row → full range across periods) ---- */
+function colToNum(c){ let n=0; for(const ch of String(c).toUpperCase()) if(ch>='A'&&ch<='Z') n=n*26+(ch.charCodeAt(0)-64); return n; }
+function numToCol(n){ let s=""; while(n>0){ const r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26); } return s; }
+function buildRange(sheet,col,row,span){ if(!sheet||!col||!row) return ""; const c1=colToNum(col); if(!c1) return ""; const c2=c1+Math.max(1,span)-1; const sh=/[^A-Za-z0-9_]/.test(sheet)?`'${sheet}'`:sheet; return `${sh}!${numToCol(c1)}${row}:${numToCol(c2)}${row}`; }
+function parseRange(rng){ const m=String(rng||"").match(/^(?:'([^']+)'|([^'!]+))?!?\s*([A-Za-z]+)(\d+)/); if(!m) return {sheet:"",col:"",row:""}; return {sheet:(m[1]||m[2]||"").trim(),col:(m[3]||"").toUpperCase(),row:m[4]||""}; }
+
+function P(){ return model.periods.length; }
+function vget(k){ return model.vars.find(v=>v.key===k); }
+function inputs(){ return model.vars.filter(v=>v.kind==="input"); }
+function formulas(){ return model.vars.filter(v=>v.kind==="formula"); }
+function outputs(){ return model.vars.filter(v=>v.kind==="output"); }
+function recompileAll(){ formulas().forEach(v=>{ try{ v.compiled=compile(v.expr); v.err=""; }catch(e){ v.compiled={rpn:[],deps:[]}; v.err=String(e);} }); }
+
+/* baseline level of an input over time: a RAMP (start→target over N months) OR
+   base + forward-filled step changes. */
+function levelArray(v){
+  const n=P();
+  if(v.ramp && v.ramp.on){
+    const r=v.ramp, s=Math.max(0,Math.min(n-1,r.start|0)), m=Math.max(1,r.months|0),
+      from=(r.from!=null?r.from:0), to=(r.to!=null?r.to:v.base);
+    const arr=new Array(n);
+    for(let p=0;p<n;p++){ arr[p]= p<s?from : p>=s+m?to : from+(to-from)*((p-s+1)/m); }
+    return arr;
+  }
+  const arr=new Array(n).fill(v.base);
+  (v.steps||[]).slice().sort((a,b)=>a.from-b.from).forEach(st=>{ for(let p=st.from;p<n;p++) arr[p]=st.value; });
+  return arr;
+}
+/* SEASONALITY: a per-period multiplier around the level (default 1.0). value = level × phase. */
+function schedule(v){
+  const n=P();
+  let arr=levelArray(v);
+  if(v.phase && v.phase.length){ arr=arr.map((x,p)=> x*(v.phase[p]!=null?v.phase[p]:1)); }
+  return arr;
+}
+function hasShape(v){ return (v.ramp&&v.ramp.on) || (v.phase&&v.phase.some(x=>Math.abs((x==null?1:x)-1)>1e-6)); }
+/* scenario overrides are ANCHORS: model.ov[key][period] = value you dragged that month to.
+   An anchor carries FORWARD — every later month keeps the baseline's own month-to-month
+   movement but re-based to the dragged level (additive shift):
+     scenario[q] = anchorValue + (baseline[q] - baseline[anchorPeriod])   for q >= anchorPeriod
+   Flat baseline → the level just holds; a rising baseline keeps rising from the new level. */
+function inputVal(v,p,scenario){
+  const sched=schedule(v);
+  if(scenario && model.ov && model.ov[v.key]){
+    let a=-1; for(const k in model.ov[v.key]){ const ap=+k; if(ap<=p && ap>a) a=ap; }
+    if(a>=0) return model.ov[v.key][a] + (sched[p]-sched[a]);
+  }
+  return sched[p];
+}
+function setOv(key,p,val){ if(!model.ov) model.ov={}; if(!model.ov[key]) model.ov[key]={}; model.ov[key][p]=+(+val).toFixed(4); }
+function delOv(key,p){ if(model.ov&&model.ov[key]){ delete model.ov[key][p]; if(!Object.keys(model.ov[key]).length) delete model.ov[key]; } }
+function hasOv(key){ return model.ov&&model.ov[key]&&Object.keys(model.ov[key]).length; }
+function clearScenario(){ model.ov={}; renderAssumptions(); renderForecast(); saveModel(); }
+/* evaluate the whole graph, per period. scenario=true applies per-period input overrides */
+function evalModel(scenario){
+  const n=P(), res={}; model.vars.forEach(v=>res[v.key]=new Array(n).fill(0));
+  for(let p=0;p<n;p++){
+    const scope={};
+    inputs().forEach(v=>{ let val=inputVal(v,p,scenario); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
+    outputs().forEach(v=>{ scope[v.key.toLowerCase()]=(v.read&&v.read[p])||0; res[v.key][p]=scope[v.key.toLowerCase()]; });
+    let rem=formulas().slice();
+    for(let it=0; it<rem.length+2 && rem.length; it++){
+      rem=rem.filter(v=>{ if((v.compiled?.deps||[]).every(d=>d.toLowerCase() in scope)){ const val=evalRPN(v.compiled.rpn,scope); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; return false; } return true; });
+    }
+  }
+  return res;
+}
+
+/* ---- formatting ---- */
+function fmtNum(v){ return Math.round(v).toLocaleString('en-IN'); }
+function fmtMoney(v){ const a=Math.abs(v),s=v<0?"−":""; if(a>=1e7)return s+"₹"+(a/1e7).toFixed(2)+"Cr"; if(a>=1e5)return s+"₹"+(a/1e5).toFixed(2)+"L"; if(a>=1000)return s+"₹"+fmtNum(a); return s+"₹"+(Math.round(a*100)/100); }
+function fmtVar(v,unit){ if(unit==="#")return fmtNum(v); if(unit==="%")return v.toFixed(1)+"%"; return fmtMoney(v); }
+function fmtDelta(v,unit){ const s=v>=0?"+":"−",a=Math.abs(v); if(unit==="#")return s+fmtNum(a); if(unit==="%")return s+a.toFixed(1)+"%"; const m=fmtMoney(a); return s+m.replace("₹","₹"); }
+function fmtPct(v){ return (v>=0?"+":"")+v.toFixed(1)+"%"; }
+
+/* ============================ ROUTING ============================ */
+function switchTab(t){ if(t==="treasury")return; uiTab=t; document.querySelectorAll('.tab').forEach(b=>b.dataset.active=(b.dataset.tab===t)); render(); window.scrollTo({top:0,behavior:"instant"}); }
+function render(){ recompileAll(); const el=document.getElementById('main');
+  if(uiTab==="setup"){ el.innerHTML=viewSetup(); renderCanvas(); }
+  else if(uiTab==="forecast"){ el.innerHTML=viewForecast(); mountForecast(); }
+  else if(uiTab==="variance"){ el.innerHTML=viewVariance(); mountVariance(); }
+  else if(uiTab==="compare"){ el.innerHTML=viewCompare(); mountCompare(); }
+}
+
+/* ============================ MODEL SETUP (builder) ============================ */
+function viewSetup(){
+  const startLbl=model.periods[0]||"", endLbl=model.periods[P()-1]||"";
+  const rows=model.vars.map((v,i)=>{
+    const kindCls=v.kind==="input"?"kind-input":v.kind==="formula"?"kind-formula":"kind-output";
+    const def = v.kind==="formula" ? `<span class="expr">${v.expr}</span>${v.err?` <span class="negv fz10">⚠ ${v.err}</span>`:''}`
+      : v.kind==="input" ? `<span class="mut fz11">base ${fmtVar(v.base,v.unit)}${(v.steps&&v.steps.length)?` · ${v.steps.length} step${v.steps.length>1?'s':''}`:''}</span>`
+      : `<span class="mut fz11">read from sheet</span>`;
+    const cell = v.range ? `<span class="cellref">${v.range}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}` : `<span class="cellref unmapped">— not mapped —</span>`;
+    return `<tr>
+      <td><strong>${v.name}</strong> <span class="keychip">${v.key}</span></td>
+      <td><span class="kind-pill ${kindCls}">${v.kind}</span></td>
+      <td>${def}</td>
+      <td>${cell}</td>
+      <td><div class="rowacts">
+        <button class="iconbtn" title="Edit" onclick="editVar(${i})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button class="iconbtn" title="Delete" onclick="delVar(${i})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="hero hero-row">
+    <div><p class="eyebrow">Model builder</p>
+      <h1>Define your model. The tool drives the inputs.</h1>
+      <p>Write the formulas your model uses, break any variable into its drivers, and point each input at the cell it lives in. When you plan, the tool changes those inputs — never the outputs.</p></div>
+    <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected':'Connect sheet'}</button>
+  </div>
+
+  <div class="panel" style="margin-top:22px">
+    <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Timeline — set your forecast period</p><h2>${startLbl} → ${endLbl} · ${P()} periods</h2></div></div>
+    <div class="panel-pad"><div class="selrow">
+      <div class="field"><label>Start month</label><select id="tlStart" onchange="setTimeline()">${MN.map((m,i)=>`<option value="${i}" ${i===startMonthIdx()?'selected':''}>${m}</option>`).join('')}</select></div>
+      <div class="field"><label>Start year</label><select id="tlYear" onchange="setTimeline()">${[25,26,27,28].map(y=>`<option value="${y}" ${y===startYear()?'selected':''}>20${y}</option>`).join('')}</select></div>
+      <div class="field"><label>Periods (months)</label><input class="inp" id="tlN" type="number" min="1" max="60" value="${P()}" style="width:110px" onchange="setTimeline()"></div>
+      <div class="field"><label>Closed / actual so far</label><input class="inp" id="tlClosed" type="number" min="0" max="${P()}" value="${model.closed}" style="width:110px" onchange="setTimeline()"></div>
+    </div></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Variables &amp; formulas</p><h2>What each number is, and where it lives</h2></div>
+      <div style="display:flex;gap:8px">${model.vars.length?`<button class="btn sm" onclick="clearModel()" title="Remove every line and start blank">Clear all</button>`:''}<button class="btn sm indigo" onclick="addVar()">+ Add variable</button></div></div>
+    <div style="overflow-x:auto"><table class="vtbl">
+      <thead><tr><th>Variable</th><th>Type</th><th>Definition</th><th>Sheet cell(s)</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Calculation lineage</p><h2>How it all connects</h2></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" onclick="addVarKind('input')">+ Input</button><button class="btn sm" onclick="addVarKind('formula')">+ Formula</button><button class="btn sm" onclick="autoArrange()">Auto-arrange</button></div></div>
+    <div class="pagebar" id="pageBar"></div>
+    <div class="panel-pad">
+      <div class="canvas" id="lineageCanvas"><svg class="links" id="lineLinks"></svg></div>
+      <p class="mut fz11" style="margin-top:10px">Drag from a node's <b style="color:var(--indigo-ink)">● handle</b> onto another line to feed it in (pick ＋ − × ÷) · <b style="color:#c23140">click a link</b> to remove it · drag a node to move it · <b>drag the empty canvas to pan</b> · double-click a node to edit. Every link is a real formula dependency — it flows into forecasting <i>and</i> becomes the driver bridge in Variance. Use the <b>page tabs</b> above to spread many formulas across boards (a line's page is set in its edit dialog); links still work across pages.</p>
+    </div>
+  </div>`;
+}
+function addVarKind(kind){ varModal(null); const k=document.getElementById('vKind'); if(k){ k.value=kind; varKindToggle(); } }
+const CANW=2600, CANH=1500;
+let _pan={x:0,y:0};
+function autoArrange(){ autoLayout(); _pan={x:0,y:0}; renderCanvas(); saveModel(); }   // keeps pages, retidies positions
+
+/* ---- canvas pages: several boards you can name & switch, to organise many formulas ---- */
+function ensurePages(){ if(!Array.isArray(model.pages)||!model.pages.length) model.pages=['Page 1'];
+  if(model.canvasPage==null||model.canvasPage>=model.pages.length) model.canvasPage=0; }
+function nodePage(k){ const p=model.nodePos&&model.nodePos[k]; return (p&&p.pg)||0; }
+function curPage(){ ensurePages(); return model.canvasPage||0; }
+function refreshPageBar(){ const bar=document.getElementById('pageBar'); if(!bar) return; ensurePages();
+  bar.innerHTML=model.pages.map((nm,i)=>`<button class="ptab ${i===curPage()?'on':''}" onclick="switchPage(${i})" ondblclick="renamePage(${i})" title="Double-click to rename">${esc(nm)}<span class="pcount">${model.vars.filter(v=>nodePage(v.key)===i).length}</span></button>`).join('')
+    +`<button class="ptab add" onclick="addPage()" title="Add a page">＋ Page</button>`
+    +(model.pages.length>1?`<button class="ptab del" onclick="deletePage(${curPage()})" title="Delete this page (its lines move to the first page)">🗑</button>`:'');
+}
+function switchPage(i){ ensurePages(); model.canvasPage=Math.max(0,Math.min(model.pages.length-1,i)); _pan={x:0,y:0}; saveModel(); renderCanvas(); refreshPageBar(); }
+function addPage(){ ensurePages(); model.pages.push('Page '+(model.pages.length+1)); model.canvasPage=model.pages.length-1; _pan={x:0,y:0}; saveModel(); renderCanvas(); refreshPageBar(); }
+function renamePage(i){ ensurePages(); showModal(`<div class="mhead"><h3>Rename page</h3><button class="x" onclick="closeModal()">×</button></div>
+  <div class="mbody"><div class="field"><label>Page name</label><input class="inp" id="pgName" value="${esc(model.pages[i]||'')}" onkeydown="if(event.key==='Enter')document.getElementById('pgSaveBtn').click()"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="pgSaveBtn" onclick="doRenamePage(${i})">Save</button></div></div>`);
+  setTimeout(()=>{const el=document.getElementById('pgName');if(el){el.focus();el.select();}},50); }
+function doRenamePage(i){ const nm=(document.getElementById('pgName').value||'').trim(); if(nm) model.pages[i]=nm; saveModel(); closeModal(); refreshPageBar(); }
+function deletePage(i){ ensurePages(); if(model.pages.length<=1) return;
+  model.vars.forEach(v=>{ const pg=nodePage(v.key); if(model.nodePos&&model.nodePos[v.key]){ if(pg===i) model.nodePos[v.key].pg=0; else if(pg>i) model.nodePos[v.key].pg=pg-1; } });
+  model.pages.splice(i,1); model.canvasPage=Math.max(0,Math.min(model.pages.length-1,i)); _pan={x:0,y:0};
+  saveModel(); renderCanvas(); refreshPageBar(); toast('Page deleted — its lines moved to '+model.pages[0]); }
+
+/* ---- clear the whole model (blank slate) ---- */
+function clearModel(){ showModal(`<div class="mhead"><h3>Clear the whole model?</h3><button class="x" onclick="closeModal()">×</button></div>
+  <div class="mbody"><p class="mut fz12" style="margin:0 0 12px">This removes <b>all ${model.vars.length} line(s)</b> and their connections, leaving a blank canvas to build from. Your sheet connection and timeline stay. This can't be undone.</p>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" style="background:#c23140;border-color:#c23140;color:#fff" onclick="doClearModel()">Clear everything</button></div></div>`); }
+function doClearModel(){ model.vars=[]; model.nodePos={}; model.displayVars=[]; model.pages=['Page 1']; model.canvasPage=0;
+  _pan={x:0,y:0}; _vState.line=null; if(typeof _cState==='object'&&_cState) _cState.line=null;
+  recompileAll(); saveModel(); closeModal(); render(); toast('Model cleared — blank slate'); }
+
+/* ---- drag-and-drop lineage canvas ---- */
+function nodeDepth(){
+  const depth={};
+  function d(v,seen){ if(depth[v.key]!=null) return depth[v.key]; if(v.kind!=='formula') return depth[v.key]=0; if(seen.has(v.key)) return 0; seen.add(v.key);
+    const deps=(v.compiled?compile(v.expr).deps:compile(v.expr).deps); let mx=0;
+    deps.forEach(k=>{ const dv=model.vars.find(x=>x.key.toLowerCase()===k.toLowerCase()); if(dv) mx=Math.max(mx,d(dv,seen)+1); }); return depth[v.key]=mx; }
+  model.vars.forEach(v=>d(v,new Set())); return depth;
+}
+function autoLayout(){
+  const cv=document.getElementById('lineageCanvas'); const W=cv?cv.clientWidth:900;
+  const depth=nodeDepth(); const maxD=Math.max(0,...Object.values(depth));
+  const colX = maxD>0 ? Math.max(150,Math.min(210,(W-170)/maxD)) : 190;
+  model.nodePos=model.nodePos||{};
+  // lay each page out independently, preserving each node's page
+  const perColByPage={};
+  model.vars.forEach(v=>{ const pg=nodePage(v.key); const c=depth[v.key]||0;
+    const pc=perColByPage[pg]=perColByPage[pg]||{}; pc[c]=pc[c]||0;
+    model.nodePos[v.key]={x:24+c*colX, y:22+pc[c]*84, pg}; pc[c]++; });
+}
+function renderCanvas(){
+  const cv=document.getElementById('lineageCanvas'); if(!cv) return;
+  recompileAll();
+  ensurePages(); const cur=curPage();
+  if(!model.nodePos) model.nodePos={};
+  if(model.vars.some(v=>!model.nodePos[v.key])) autoLayout();
+  refreshPageBar();
+  let inner=cv.querySelector('.canvas-inner');
+  if(!inner){ inner=document.createElement('div'); inner.className='canvas-inner'; const svg=cv.querySelector('#lineLinks'); if(svg) inner.appendChild(svg); cv.appendChild(inner); }
+  inner.style.transform=`translate(${_pan.x}px,${_pan.y}px)`;
+  const base=evalModel(false);
+  inner.querySelectorAll('.node2').forEach(n=>n.remove());
+  model.vars.forEach((v,i)=>{
+    if(nodePage(v.key)!==cur) return;                 // only this page's nodes
+    const p=model.nodePos[v.key]||{x:20,y:20};
+    const val = base[v.key] ? fmtVar(base[v.key][0]||0, v.unit) : '';
+    const el=document.createElement('div');
+    el.className='node2 '+v.kind; el.style.left=p.x+'px'; el.style.top=p.y+'px'; el.dataset.key=v.key; el.dataset.i=i;
+    el.innerHTML=`<div class="nm">${v.name}</div><div class="sub">${v.kind==='formula'?esc(v.expr):v.key}</div><div class="val">${val}</div><div class="handle" data-handle="1" title="Drag onto another line to feed it in"></div>`;
+    inner.appendChild(el);
+  });
+  redrawLinks(); attachCanvas(cv);
+}
+function redrawLinks(){
+  const cv=document.getElementById('lineageCanvas'), svg=document.getElementById('lineLinks'); if(!cv||!svg) return;
+  svg.setAttribute('viewBox',`0 0 ${CANW} ${CANH}`);
+  const el=k=>cv.querySelector(`.node2[data-key="${(window.CSS&&CSS.escape)?CSS.escape(k):k}"]`);
+  let out=`<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#b6bccb"/></marker></defs>`;
+  formulas().forEach(f=>{ const fe=el(f.key); if(!fe) return; const fp=model.nodePos[f.key]; const fx=fp.x, fy=fp.y+fe.offsetHeight/2;
+    compile(f.expr).deps.forEach(dk=>{ const dv=model.vars.find(x=>x.key.toLowerCase()===dk.toLowerCase()); if(!dv) return; const de=el(dv.key); if(!de) return;
+      const dp=model.nodePos[dv.key]; const sx=dp.x+de.offsetWidth, sy=dp.y+de.offsetHeight/2, mx=(sx+fx)/2;
+      const d=`M${sx},${sy} C${mx},${sy} ${mx},${fy} ${fx-2},${fy}`;
+      out+=`<g class="edgegrp" onclick="removeLink('${dv.key}','${f.key}')"><title>Click to remove: ${esc(dv.name)} → ${esc(f.name)}</title><path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="15"/><path class="edge" d="${d}" fill="none" stroke="#b6bccb" stroke-width="1.6" marker-end="url(#ah)"/></g>`; }); });
+  svg.innerHTML=out;
+}
+/* strip a variable from a formula expression (tokenizer-based), collapsing the
+   adjacent binary operator. Returns the new expression, or null if unsafe. */
+function stripVarFromExpr(expr,varKey){
+  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[()+\-*/]/g))||[];
+  const isOp=t=>['+','-','*','/'].includes(t);
+  const out=[];
+  for(let i=0;i<toks.length;i++){ const t=toks[i];
+    if(/^[A-Za-z_]/.test(t)&&t.toLowerCase()===varKey.toLowerCase()){
+      if(out.length&&isOp(out[out.length-1])) out.pop();               // drop preceding operator
+      else if(i+1<toks.length&&isOp(toks[i+1])) i++;                    // else drop following operator
+      continue;
+    }
+    out.push(t);
+  }
+  let s=out.join(' ').replace(/\(\s*\)/g,'').replace(/\(\s+/g,'(').replace(/\s+\)/g,')').trim();
+  if(!s||isOp(s[0])||isOp(s[s.length-1])) return null;                  // dangling operator → unsafe
+  let bal=0; for(const c of s){ if(c==='(')bal++; if(c===')')bal--; if(bal<0) return null; } if(bal!==0) return null;
+  return s;
+}
+function removeLink(srcKey,tgtKey){
+  const t=vget(tgtKey), src=vget(srcKey); if(!t||!src) return;
+  const next=stripVarFromExpr(t.expr||'',srcKey);
+  const body = next==null
+    ? `<p class="mut fz12" style="margin:0 0 4px">${src.name} is woven into ${t.name}’s formula in a way that isn’t safe to auto-remove:</p>
+       <p style="font-family:var(--mono);font-size:12px;background:#f4f6fb;padding:10px;border-radius:8px;margin:0 0 4px">${esc(t.expr)}</p>
+       <p class="mut fz12">Open ${t.name} and edit the formula by hand.</p>
+       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="closeModal();editVar(${model.vars.indexOf(t)})">Edit formula</button></div>`
+    : `<p class="mut fz12" style="margin:0 0 8px">Remove the link <b>${src.name} → ${t.name}</b>? This rewrites ${t.name}’s formula:</p>
+       <div style="font-family:var(--mono);font-size:12px;display:flex;flex-direction:column;gap:6px">
+         <div style="background:#fdeef0;color:#a33d4d;padding:9px 10px;border-radius:8px">− ${esc(t.expr)}</div>
+         <div style="background:#e8f6ee;color:#1f8a5b;padding:9px 10px;border-radius:8px">+ ${esc(next||'(empty)')}</div>
+       </div>
+       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="applyRemoveLink('${srcKey}','${tgtKey}')">Remove link</button></div>`;
+  showModal(`<div class="mhead"><h3>Remove connection</h3><button class="x" onclick="closeModal()">×</button></div><div class="mbody">${body}</div>`);
+}
+function applyRemoveLink(srcKey,tgtKey){
+  const t=vget(tgtKey); const next=stripVarFromExpr(t.expr||'',srcKey); if(next==null){ closeModal(); return; }
+  t.expr=next; recompileAll(); saveModel(); closeModal(); renderCanvas(); toast(`Removed ${vget(srcKey).name} → ${t.name}`);
+}
+function attachCanvas(cv){
+  if(cv._bound) return; cv._bound=true;
+  let mode=null,cur=null,off=null,from=null,tmp=null,panS=null;
+  const inner=()=>cv.querySelector('.canvas-inner');
+  const esc2=k=>(window.CSS&&CSS.escape)?CSS.escape(k):k;
+  cv.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest('[data-handle]'), node=e.target.closest('.node2');
+    if(handle&&node){ mode='link'; from=node.dataset.key; try{cv.setPointerCapture(e.pointerId);}catch(_){}
+      tmp=document.createElementNS('http://www.w3.org/2000/svg','path'); tmp.setAttribute('stroke','#4055c7'); tmp.setAttribute('stroke-width','2'); tmp.setAttribute('fill','none'); tmp.setAttribute('stroke-dasharray','4 3'); document.getElementById('lineLinks').appendChild(tmp); e.preventDefault(); return; }
+    if(node){ mode='drag'; cur=node; const r=cv.getBoundingClientRect(); const p=model.nodePos[node.dataset.key]; off={dx:e.clientX-r.left-_pan.x-p.x, dy:e.clientY-r.top-_pan.y-p.y}; try{cv.setPointerCapture(e.pointerId);}catch(_){}; node.style.cursor='grabbing'; e.preventDefault(); return; }
+    mode='pan'; panS={x:e.clientX,y:e.clientY,px:_pan.x,py:_pan.y}; try{cv.setPointerCapture(e.pointerId);}catch(_){}; cv.style.cursor='grabbing'; e.preventDefault();
+  });
+  cv.addEventListener('pointermove',e=>{
+    const r=cv.getBoundingClientRect();
+    if(mode==='drag'&&cur){ let x=e.clientX-r.left-_pan.x-off.dx, y=e.clientY-r.top-_pan.y-off.dy; x=Math.max(0,Math.min(CANW-60,x)); y=Math.max(0,Math.min(CANH-40,y)); model.nodePos[cur.dataset.key]={x,y,pg:nodePage(cur.dataset.key)}; cur.style.left=x+'px'; cur.style.top=y+'px'; redrawLinks(); }
+    else if(mode==='link'&&tmp){ const fe=cv.querySelector(`.node2[data-key="${esc2(from)}"]`); if(!fe)return; const p=model.nodePos[from]; const sx=p.x+fe.offsetWidth, sy=p.y+fe.offsetHeight/2, tx=e.clientX-r.left-_pan.x, ty=e.clientY-r.top-_pan.y; tmp.setAttribute('d',`M${sx},${sy} L${tx},${ty}`); }
+    else if(mode==='pan'&&panS){ _pan.x=panS.px+(e.clientX-panS.x); _pan.y=panS.py+(e.clientY-panS.y); const inn=inner(); if(inn) inn.style.transform=`translate(${_pan.x}px,${_pan.y}px)`; }
+  });
+  cv.addEventListener('pointerup',e=>{
+    if(mode==='link'){ if(tmp){tmp.remove();tmp=null;} const el=document.elementFromPoint(e.clientX,e.clientY); const tn=el&&el.closest('.node2'); if(tn&&tn.dataset.key!==from) appendDep(from,tn.dataset.key); }
+    if(mode==='drag'&&cur){ cur.style.cursor='grab'; saveModel(); }
+    if(mode==='pan'){ cv.style.cursor=''; }
+    mode=null;cur=null;from=null;panS=null;
+  });
+  cv.addEventListener('pointercancel',()=>{ if(tmp){tmp.remove();tmp=null;} mode=null;cur=null;from=null;panS=null; cv.style.cursor=''; });
+  cv.addEventListener('dblclick',e=>{ const node=e.target.closest('.node2'); if(node) editVar(+node.dataset.i); });
+}
+function appendDep(srcKey,tgtKey){
+  const t=vget(tgtKey), src=vget(srcKey); if(!t||!src||srcKey===tgtKey) return;
+  if(t.kind==='input'){ toast(`${t.name} is an input you set directly — drop onto a total/formula line instead.`); return; }
+  if(compile(t.expr||'').deps.map(d=>d.toLowerCase()).includes(srcKey.toLowerCase())){ toast(`${src.name} already feeds ${t.name}`); return; }
+  openOpPicker(srcKey,tgtKey);
+}
+/* pick how the dropped line combines: + − × ÷ (a P&L subtotal is add/subtract, not multiply) */
+function openOpPicker(srcKey,tgtKey){
+  const t=vget(tgtKey), src=vget(srcKey); const first=!(t.expr&&t.expr.trim());
+  const btn=(op,lab,sym)=>`<button class="opbtn" onclick="doAppend('${srcKey}','${tgtKey}','${op}')"><b>${sym}</b><span>${lab}</span></button>`;
+  showModal(`<div class="mhead"><h3>How does ${esc(src.name)} feed ${esc(t.name)}?</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 12px">${first?`This becomes the first term of <b>${esc(t.name)}</b>.`:`Currently: <span class="k">${esc(t.name)} = ${esc(t.expr)}</span>`}</p>
+      <div class="opgrid">${btn('+','Add','＋')}${btn('-','Subtract','−')}${btn('*','Multiply','×')}${btn('/','Divide','÷')}</div>
+      ${t.kind==='output'?`<p class="mut fz11" style="margin:14px 0 0"><b>${esc(t.name)}</b> becomes a <b>formula</b> line, computed from its parts. Its figures already read from the sheet stay as the forecast/actual — any gap between them and the sum of parts shows as “unexplained” in the bridge.</p>`:''}
+    </div>`);
+}
+function doAppend(srcKey,tgtKey,op){
+  const t=vget(tgtKey), src=vget(srcKey); if(!t||!src) return;
+  if(t.kind==='output') t.kind='formula';
+  const first=!(t.expr&&t.expr.trim());
+  t.expr = first ? (op==='-'?`0 - ${srcKey}`:srcKey) : `${t.expr} ${op} ${srcKey}`;
+  recompileAll(); saveModel(); closeModal();
+  if(uiTab==='setup') render(); else renderCanvas();
+  const word={'+':'added to','-':'subtracted from','*':'multiplied into','/':'divides'}[op];
+  toast(`${src.name} ${word} ${t.name}`);
+}
+function startMonthIdx(){ const m=(model.periods[0]||"Sep ’26").split(" ")[0]; return Math.max(0,MN.indexOf(m)); }
+function startYear(){ const s=(model.periods[0]||"Sep ’26").split("’")[1]; return s?+s:26; }
+function setTimeline(){
+  const sm=+document.getElementById('tlStart').value, sy=+document.getElementById('tlYear').value;
+  const n=Math.max(1,Math.min(60,+document.getElementById('tlN').value||12));
+  const cl=Math.max(0,Math.min(n,+document.getElementById('tlClosed').value||0));
+  model.periods=genMonths(n,sm,sy); model.closed=cl; render();
+}
+
+/* ---- add / edit variable ---- */
+function varModal(idx){
+  const v = idx==null ? {key:"",name:"",unit:"₹",kind:"input",base:0,steps:[],delta:0,expr:"",range:"",writable:true} : JSON.parse(JSON.stringify(model.vars[idx]));
+  const nodePg = idx!=null ? nodePage(v.key) : curPage();
+  const others = model.vars.filter((_,i)=>i!==idx);
+  const rp = parseRange(v.range);
+  const knownSheets=[...new Set([...(conn.sheets||[]).map(s=>s.name), ...model.vars.map(x=>parseRange(x.range).sheet)].filter(Boolean))];
+  const sheetField = (conn.sheets&&conn.sheets.length)
+    ? `<select id="vSheet" oninput="updRangePrev()">${['',...conn.sheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===rp.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
+    : `<input class="inp" id="vSheet" list="sheetList" value="${esc(rp.sheet)}" placeholder="Assumptions" oninput="updRangePrev()"><datalist id="sheetList">${knownSheets.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>`;
+  const chips = others.map(o=>`<button type="button" class="tok" onclick="insTok('${o.key}')" title="${esc(o.name)}">${o.key}</button>`).join('');
+  showModal(`<div class="mhead"><h3>${idx==null?'Add variable':'Edit variable'}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <div class="frow two">
+        <div class="field"><label>Name</label><input class="inp" id="vName" value="${esc(v.name)}" placeholder="Price per unit" oninput="autoKey()"></div>
+        <div class="field"><label>Key (used in formulas)</label><input class="inp" id="vKey" value="${esc(v.key)}" placeholder="price" style="font-family:var(--mono)"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>Type</label><select id="vKind" onchange="varKindToggle()">
+          <option value="input" ${v.kind==='input'?'selected':''}>Input — I set / plan it</option>
+          <option value="formula" ${v.kind==='formula'?'selected':''}>Formula — computed from others</option>
+          <option value="output" ${v.kind==='output'?'selected':''}>Output — read from sheet only</option>
+        </select></div>
+        <div class="field"><label>Unit</label><select id="vUnit"><option ${v.unit==='₹'?'selected':''}>₹</option><option ${v.unit==='#'?'selected':''}>#</option><option ${v.unit==='%'?'selected':''}>%</option></select></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>Over a period, roll up as</label><select id="vAgg">
+          <option value="" ${!v.agg?'selected':''}>Auto — ${v.kind==='input'?'Average':'Sum'} for this type</option>
+          <option value="sum" ${v.agg==='sum'?'selected':''}>Sum — flows (revenue, units sold)</option>
+          <option value="avg" ${v.agg==='avg'?'selected':''}>Average — rates (price, margin %)</option>
+          <option value="last" ${v.agg==='last'?'selected':''}>Period-end — stocks (headcount, balance)</option>
+        </select></div>
+        <div class="field"><label>Canvas page</label><select id="vPage">${(model.pages||['Page 1']).map((nm,i)=>`<option value="${i}" ${i===nodePg?'selected':''}>${esc(nm)}</option>`).join('')}</select></div>
+      </div>
+      <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
+        <div class="field"><label>Formula</label><textarea class="inp" id="vExpr" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
+        <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Insert:</span>${chips||'<span class="mut fz11">add other variables first</span>'}${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}</div>
+      </div>
+      <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
+        <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
+      </div>
+      <p class="eyebrow" style="margin:16px 0 6px">Where it lives in the sheet ${conn.connected?'':'<span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(you can map this any time)</span>'}</p>
+      <div class="frow three">
+        <div class="field"><label>Sheet / tab</label>${sheetField}</div>
+        <div class="field"><label>Column</label><input class="inp" id="vCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updRangePrev()"></div>
+        <div class="field"><label>Start row</label><input class="inp" id="vRow" type="number" value="${esc(rp.row)}" placeholder="11" oninput="updRangePrev()"></div>
+      </div>
+      <div class="rangeprev" id="rangePrev"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-2);margin-top:10px" id="vWritableRow"><input type="checkbox" id="vWritable" ${v.writable?'checked':''}> This is an input cell — write my plan back here</label>
+      ${conn.actualsSsid?(()=>{ const ra=parseRange(v.actualRange||''); const asheet=(conn.actualsSheets&&conn.actualsSheets.length)
+          ? `<select id="vaSheet" oninput="updActualPrev()">${['',...conn.actualsSheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===ra.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
+          : `<input class="inp" id="vaSheet" value="${esc(ra.sheet)}" placeholder="Actuals" oninput="updActualPrev()">`;
+        return `<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(in your separate actuals sheet)</span></p>
+        <div class="frow three"><div class="field"><label>Tab</label>${asheet}</div>
+          <div class="field"><label>Column</label><input class="inp" id="vaCol" value="${esc(ra.col)}" placeholder="K" style="text-transform:uppercase" oninput="updActualPrev()"></div>
+          <div class="field"><label>Start row</label><input class="inp" id="vaRow" type="number" value="${esc(ra.row)}" placeholder="11" oninput="updActualPrev()"></div></div>
+        <div class="rangeprev" id="actualPrev"></div>`; })():''}
+      <div id="vErr" class="negv fz11" style="margin-top:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save'}</button></div>
+    </div>`);
+  varKindToggle(); updRangePrev(); updActualPrev();
+}
+function varKindToggle(){ const k=document.getElementById('vKind').value;
+  document.getElementById('vFormulaRow').style.display=k==='formula'?'':'none';
+  document.getElementById('vBaseRow').style.display=k==='input'?'':'none';
+  document.getElementById('vWritableRow').style.display=k==='input'?'flex':'none';
+}
+function autoKey(){ const kEl=document.getElementById('vKey'); if(kEl.value) return; kEl.value=document.getElementById('vName').value.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,''); }
+function insTok(t){ const e=document.getElementById('vExpr'); if(!e)return; const cur=e.value; e.value=(cur&&!/[\s(]$/.test(cur)?cur+' ':cur)+t+(/[a-z0-9_]/i.test(t)?' ':''); e.focus(); }
+function updRangePrev(){ const el=document.getElementById('rangePrev'); if(!el)return;
+  const sh=(document.getElementById('vSheet')||{}).value||'', col=(document.getElementById('vCol')||{}).value||'', row=(document.getElementById('vRow')||{}).value||'';
+  const r=buildRange(sh,col,row,P());
+  el.innerHTML = r ? `→ maps to <b>${r}</b> · ${P()} cells across your timeline` : `<span class="mut">pick a sheet, column &amp; row to map (${P()} cells will span the timeline)</span>`;
+}
+function updActualPrev(){ const el=document.getElementById('actualPrev'); if(!el)return;
+  const sh=(document.getElementById('vaSheet')||{}).value||'', col=(document.getElementById('vaCol')||{}).value||'', row=(document.getElementById('vaRow')||{}).value||'';
+  const r=buildRange(sh,col,row,P());
+  el.innerHTML = r ? `→ actuals from <b>${r}</b> in your actuals sheet` : `<span class="mut">pick tab, column &amp; row for this line's actuals</span>`;
+}
+function addVar(){ varModal(null); }
+function editVar(i){ varModal(i); }
+function delVar(i){ const v=model.vars[i]; if(!confirm(`Delete “${v.name}”?`))return; model.vars.splice(i,1); render(); saveModel(); }
+function saveVar(idx){
+  const name=document.getElementById('vName').value.trim();
+  let key=document.getElementById('vKey').value.trim().replace(/[^A-Za-z0-9_]/g,'_');
+  const kind=document.getElementById('vKind').value, unit=document.getElementById('vUnit').value;
+  const err=document.getElementById('vErr');
+  if(!name||!key){ err.textContent="Name and key are required."; return; }
+  if(!/^[A-Za-z_]/.test(key)){ err.textContent="Key must start with a letter."; return; }
+  if(model.vars.some((v,i)=>v.key.toLowerCase()===key.toLowerCase() && i!==(idx==null?-1:idx))){ err.textContent="That key is already used."; return; }
+  const range=buildRange((document.getElementById('vSheet')||{}).value||'', (document.getElementById('vCol')||{}).value||'', (document.getElementById('vRow')||{}).value||'', P());
+  const prev = idx!=null ? model.vars[idx] : {};
+  const v={key,name,unit,kind,range};
+  ['phase','ramp','good','favOverride','actuals','actualRange','forecast','read','metric','account','group','srcLine'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
+  const aggSel=(document.getElementById('vAgg')||{}).value; if(aggSel) v.agg=aggSel; else delete v.agg;
+  if(document.getElementById('vaSheet')){ const ar=buildRange(document.getElementById('vaSheet').value||'', (document.getElementById('vaCol')||{}).value||'', (document.getElementById('vaRow')||{}).value||'', P()); if(ar) v.actualRange=ar; else delete v.actualRange; }
+  if(kind==='input'){ v.base=parseFloat(document.getElementById('vBase').value)||0; v.steps=(idx!=null&&model.vars[idx].kind==='input')?model.vars[idx].steps:[]; v.delta=(idx!=null&&model.vars[idx].delta)||0; v.writable=document.getElementById('vWritable').checked; }
+  else if(kind==='formula'){ v.expr=document.getElementById('vExpr').value.trim(); const c=compile(v.expr);
+      const known=model.vars.filter((_,i)=>i!==(idx==null?-1:idx)).map(x=>x.key.toLowerCase()); const missing=c.deps.filter(d=>!known.includes(d.toLowerCase()));
+      if(!v.expr){ err.textContent="Enter a formula (use the Insert buttons)."; return; }
+      if(missing.length){ err.textContent="Unknown variable(s): "+missing.join(", ")+". Use the Insert buttons to add existing ones."; return; } }
+  if(idx==null) model.vars.push(v); else model.vars[idx]=v;
+  // canvas page + node position bookkeeping
+  model.nodePos=model.nodePos||{};
+  const pgSel=Math.max(0,parseInt((document.getElementById('vPage')||{}).value)||0);
+  const oldKey=prev.key;
+  if(idx!=null && oldKey && oldKey!==key && model.nodePos[oldKey]){ model.nodePos[key]=model.nodePos[oldKey]; delete model.nodePos[oldKey]; }
+  if(!model.nodePos[key]){ const onPage=model.vars.filter(x=>x.key!==key && nodePage(x.key)===pgSel).length; model.nodePos[key]={x:24, y:22+onPage*84, pg:pgSel}; }
+  else model.nodePos[key].pg=pgSel;
+  if(idx==null && window.__pendingChart){ if(!Array.isArray(model.displayVars)) model.displayVars=[]; if(!model.displayVars.includes(v.key)) model.displayVars.push(v.key); window.__pendingChart=false; }
+  recompileAll(); closeModal(); render(); saveModel();
+}
+
+/* ============================ FORECASTING ============================ */
+function viewForecast(){
+  return `
+  <div class="hero">
+    <div class="hero-row">
+      <div><p class="eyebrow">Forecast</p><h1>Chart your lines. Drag a point. Watch the model move.</h1>
+        <p>Pick the lines you want to see, drag any point to a new value, and every connected line recomputes live. Only your input assumptions get written back to the sheet — formulas recalculate themselves.</p></div>
+      <div class="selrow">
+        <div class="field"><label>Scenario</label><input class="inp" id="scName" value="${esc(model.scenarioName)}" style="width:150px" onchange="model.scenarioName=this.value;renderForecast()"></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-forecast" style="margin-top:16px">
+    <div class="panel panel-pad">
+      <div class="results-head" style="margin-bottom:6px"><div><p class="eyebrow">Assumptions</p><h2 style="font-size:16px">Inputs over time</h2></div>
+        <button class="btn sm" title="Clear all dragged scenario edits" onclick="clearScenario()">Reset scenario</button></div>
+      <div id="asmList"></div>
+    </div>
+    <div class="panel panel-pad">
+      <div class="results-head"><div><p class="eyebrow">Scenario comparison</p><h2 id="resTitle" style="font-size:16px"></h2></div></div>
+      <p class="mut fz11" style="margin:2px 0 6px">Choose which lines to chart:</p>
+      <div class="linechips" id="lineChips"></div>
+      <div class="fcbar">
+        <div class="drag-hint" id="dragHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Drag any point — dashed = baseline, solid = scenario</div>
+        <button class="solveby" id="solveBtn" onclick="openSolveMenu()"></button>
+      </div>
+      <div class="chart-wrap"><svg id="chart" viewBox="0 0 760 265" preserveAspectRatio="none"></svg></div>
+      <div class="solvemsg" id="solveMsg" hidden></div>
+      <div class="serieslegend" id="serieslegend"></div>
+      <div class="result-foot" style="margin-top:12px">
+        <div class="txt"><strong>Scenario is a plan, not yet saved</strong><span>Write-back pushes only the input assumptions you changed — formulas recompute themselves.</span></div>
+        <div class="acts"><button class="btn sm" onclick="saveVersionModal()">Save as version</button><button class="btn sm" onclick="openWriteback()">Review write-back</button></div>
+      </div>
+    </div>
+  </div>`;
+}
+let __pendingChart=false;
+function mountForecast(){ renderAssumptions(); renderLineChips(); renderSolveBar(); renderForecast(); }
+
+/* leaf inputs across all charted formula/output lines (what a drag could touch) */
+function chartedLeaves(){ const s=new Set(); visibleKeys().forEach(k=>{ const v=vget(k); if(v&&v.kind!=='input') leavesOf(k).forEach(l=>s.add(l)); }); return [...s].map(k=>vget(k)).filter(Boolean); }
+const SOLVE_LABEL={proportional:'Spread proportionally',single:'Move one driver',balanced:'Balanced (least change)'};
+function renderSolveBar(){
+  const el=document.getElementById('solveBtn'); if(!el) return;
+  const mode=model.solveMode||'proportional';
+  let lab=SOLVE_LABEL[mode];
+  if(mode==='single'&&model.solveDriver&&vget(model.solveDriver)) lab='Move '+vget(model.solveDriver).name;
+  const np=(model.pins||[]).length;
+  el.innerHTML=`<svg class="cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>When I drag: <b>${lab}</b>${np?` · ${np} pinned`:''}`;
+}
+function openSolveMenu(){
+  const mode=model.solveMode||'proportional';
+  const leaves=chartedLeaves();
+  const driverOpts=leaves.map(v=>`<option value="${v.key}" ${model.solveDriver===v.key?'selected':''}>${v.name}</option>`).join('');
+  const opt=(id,t,d)=>`<label class="lvopt ${mode===id?'on':''}"><input type="radio" name="smode" value="${id}" ${mode===id?'checked':''} onchange="setSolveMode('${id}')"><span><span class="t">${t}</span><span class="d">${d}</span>${id==='single'?`<select class="inp" style="margin-top:8px;height:32px" onchange="model.solveDriver=this.value;renderSolveBar()" onclick="event.preventDefault()">${driverOpts||'<option>— no drivers —</option>'}</select>`:''}</span></label>`;
+  const pinRows=leaves.length?leaves.map(v=>`<div class="pinrow"><b>${v.name}</b> <span class="keychip">${v.key}</span><button class="pinbtn ${isPinned(v.key)?'pinned':''}" onclick="togglePin('${v.key}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 10.8V5a3 3 0 0 1 6 0v5.8l2 3.2H7z"/></svg>${isPinned(v.key)?'Pinned':'Hold'}</button></div>`).join(''):'<p class="mut fz12">Chart a formula line to see its drivers here.</p>';
+  showModal(`<div class="mhead"><h3>How should a drag resolve?</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 12px">When you drag a calculated line (like revenue), the tool changes the <b>input assumptions underneath it</b> — never the formula. Choose how the change spreads across those inputs.</p>
+      ${opt('proportional','Spread proportionally','Every free driver moves by the same % — keeps the current mix. The safe default, like breakback in Anaplan.')}
+      ${opt('single','Move one driver','Hold everything else; make a single driver absorb the whole change. Most legible — “units went from 100 to 137.”')}
+      ${opt('balanced','Balanced (least change)','Move each driver in proportion to how much it actually shifts the line — the smallest overall change. Good for messy trees.')}
+      <div style="margin-top:16px"><p class="eyebrow" style="margin-bottom:8px">Hold drivers fixed</p>
+        <div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${pinRows}</div></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn primary" onclick="closeModal();renderForecast()">Done</button></div>
+    </div>`);
+}
+function setSolveMode(m){ model.solveMode=m; document.querySelectorAll('.lvopt').forEach(l=>l.classList.toggle('on',l.querySelector('input').value===m)); renderSolveBar(); saveModel(); }
+function togglePin(k,btn){ const p=model.pins||(model.pins=[]); const i=p.indexOf(k); if(i>=0)p.splice(i,1); else p.push(k);
+  btn.classList.toggle('pinned',i<0); btn.innerHTML=btn.innerHTML.replace(i<0?'Hold':'Pinned', i<0?'Pinned':'Hold'); renderSolveBar(); saveModel(); }
+
+/* which variables are charted (multi-select) */
+function visibleKeys(){ let ks=(model.displayVars||[]).filter(k=>vget(k)); if(!ks.length){ ks=[(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key].filter(Boolean); model.displayVars=ks.slice(); } return ks; }
+function renderLineChips(){
+  const el=document.getElementById('lineChips'); if(!el) return;
+  const sel=new Set(visibleKeys());
+  el.innerHTML=model.vars.map((v,i)=>{ const on=sel.has(v.key); const col=COLORS[[...sel].indexOf(v.key)%COLORS.length];
+    return `<span class="linechip ${on?'on':''}" style="${on?`background:${col};`:''}" onclick="toggleLine('${v.key}')"><i style="${on?'background:#fff':''}"></i>${v.name}</span>`; }).join('')
+    +`<span class="linechip" onclick="window.__pendingChart=true;addVar()" style="border-style:dashed;color:#8a92a4">＋ new variable</span>`;
+}
+function toggleLine(k){
+  const dv=model.displayVars||[]; const i=dv.indexOf(k);
+  if(i>=0){ if(dv.length>1) dv.splice(i,1); else { toast('Keep at least one line on the chart.'); return; } }
+  else dv.push(k);
+  model.displayVars=dv; renderLineChips(); renderForecast(); saveModel();
+}
+
+/* upstream leaf inputs of a variable (recurse formulas down to inputs) */
+function leavesOf(key){
+  const acc=new Set();
+  (function walk(k,seen){ const v=vget(k)||model.vars.find(x=>x.key.toLowerCase()===String(k).toLowerCase()); if(!v) return;
+    if(v.kind==='input'){ acc.add(v.key); return; } if(v.kind==='output'){ return; }
+    if(seen.has(v.key)) return; seen.add(v.key); compile(v.expr||'').deps.forEach(d=>walk(d,seen)); })(key,new Set());
+  return acc;
+}
+
+function renderAssumptions(){
+  const el=document.getElementById('asmList'); if(!el) return;
+  el.innerHTML=inputs().map(v=>{
+    const steps=(v.steps||[]).slice().sort((a,b)=>a.from-b.from).map((s,si)=>`<span class="stepchip">from ${model.periods[s.from]}: ${fmtVar(s.value,v.unit)} <span class="x" onclick="delStep('${v.key}',${si})">✕</span></span>`).join('');
+    const ov=(model.ov&&model.ov[v.key])||{};
+    const ovChips=Object.keys(ov).map(p=>+p).sort((a,b)=>a-b).map(p=>`<span class="ovchip">from ${model.periods[p].split(' ')[0]}: ${fmtVar(ov[p],v.unit)} <span class="x" onclick="delOvClick('${v.key}',${p})">✕</span></span>`).join('');
+    const rampOn=v.ramp&&v.ramp.on, seasonOn=v.phase&&v.phase.some(x=>Math.abs((x==null?1:x)-1)>1e-6);
+    const shapeChip = rampOn?`<span class="shapechip" onclick="openShape('${v.key}')">↗ Ramp ${fmtVar(v.ramp.from!=null?v.ramp.from:0,v.unit)}→${fmtVar(v.ramp.to!=null?v.ramp.to:v.base,v.unit)} · ${v.ramp.months}mo</span>`
+      : seasonOn?`<span class="shapechip" onclick="openShape('${v.key}')">∿ Seasonal shape</span>`
+      : `<span class="stepadd" onclick="openShape('${v.key}')">＋ shape (ramp / seasonal)</span>`;
+    return `<div class="asm">
+      <div class="asm-head"><div><strong>${v.name}</strong> <span class="k">${v.key}</span></div>
+        ${hasOv(v.key)?`<span class="change-pill">edited</span>`:''}</div>
+      <div class="asm-base"><span class="lab">${rampOn?'Target':'Base'}</span><input class="inp num" type="number" step="any" value="${v.base}" onchange="setBase('${v.key}',this.value)"><span class="lab">${v.unit}</span></div>
+      <div class="steps">${rampOn?'':steps+`<span class="stepadd" onclick="addStep('${v.key}')">＋ step change</span>`}${shapeChip}</div>
+      ${ovChips?`<div class="steps" style="margin-top:2px">${ovChips}</div>`:''}
+    </div>`;
+  }).join('');
+}
+function setBase(k,val){ vget(k).base=parseFloat(val)||0; renderForecast(); saveModel(); }
+function delOvClick(k,p){ delOv(k,p); renderAssumptions(); renderForecast(); saveModel(); }
+function addStep(k){
+  const v=vget(k);
+  showModal(`<div class="mhead"><h3>Step change · ${v.name}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody"><div class="frow two">
+      <div class="field"><label>From period</label><select id="stFrom">${model.periods.map((m,i)=>`<option value="${i}">${m}</option>`).join('')}</select></div>
+      <div class="field"><label>New value (${v.unit})</label><input class="inp" id="stVal" type="number" step="any" value="${v.base}"></div>
+    </div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="commitStep('${k}')">Add step</button></div></div>`);
+}
+function commitStep(k){ const v=vget(k); const from=+document.getElementById('stFrom').value, val=parseFloat(document.getElementById('stVal').value)||0;
+  v.steps=(v.steps||[]).filter(s=>s.from!==from); v.steps.push({from,value:val}); closeModal(); renderAssumptions(); renderForecast(); saveModel(); }
+function delStep(k,si){ const v=vget(k); const sorted=(v.steps||[]).slice().sort((a,b)=>a.from-b.from); const s=sorted[si]; v.steps=v.steps.filter(x=>x!==s); renderAssumptions(); renderForecast(); saveModel(); }
+
+/* ---- Shape editor: give an input a ramp or a seasonal curve over time ---- */
+const SEAS_MAX=2;   // seasonal multiplier range 0..2 (1 = flat)
+function shapeModeOf(v){ if(v.ramp&&v.ramp.on) return 'ramp'; if(v.phase&&v.phase.some(x=>Math.abs((x==null?1:x)-1)>1e-6)) return 'seasonal'; return 'flat'; }
+function openShape(k){ window.__shapeKey=k; window.__shapeMode=shapeModeOf(vget(k)); drawShapeModal(); }
+function drawShapeModal(){
+  const v=vget(window.__shapeKey), mode=window.__shapeMode||shapeModeOf(v), n=P();
+  const seg=`<div class="seg"><button class="${mode==='flat'?'on':''}" onclick="setShapeMode('flat')">Flat</button><button class="${mode==='ramp'?'on':''}" onclick="setShapeMode('ramp')">Ramp</button><button class="${mode==='seasonal'?'on':''}" onclick="setShapeMode('seasonal')">Seasonal</button></div>`;
+  let bodyInner='';
+  if(mode==='flat'){
+    bodyInner=`<p class="mut fz12" style="margin:6px 0 0">This assumption holds its base value (with any step changes you add) — flat over time. Switch to <b>Ramp</b> to grow it from a start to a target over N months, or <b>Seasonal</b> to give it a repeating monthly shape.</p>`;
+  } else if(mode==='ramp'){
+    const r=v.ramp||{}; const from=r.from!=null?r.from:0, to=r.to!=null?r.to:v.base, start=r.start|0, months=r.months||6;
+    bodyInner=`<div class="frow two" style="margin-top:12px">
+        <div class="field"><label>Start from (${v.unit})</label><input class="inp" id="rFrom" type="number" step="any" value="${from}" oninput="commitRamp()"></div>
+        <div class="field"><label>Reach (${v.unit})</label><input class="inp" id="rTo" type="number" step="any" value="${to}" oninput="commitRamp()"></div></div>
+      <div class="frow two">
+        <div class="field"><label>Starting month</label><select id="rStart" onchange="commitRamp()">${model.periods.map((m,i)=>`<option value="${i}" ${i===start?'selected':''}>${m}</option>`).join('')}</select></div>
+        <div class="field"><label>Over how many months</label><input class="inp" id="rMonths" type="number" min="1" max="${n}" value="${months}" oninput="commitRamp()"></div></div>
+      <p class="mut fz11" style="margin:10px 0 0">Ramps linearly, then holds at the target. The <b>Reach</b> value is this assumption's base.</p>`;
+  } else {
+    bodyInner=`<p class="mut fz12" style="margin:8px 0 10px">Drag the bars to shape each month as a multiple of the base (middle line = 1.0×). The base value stays your reference level.</p>
+      <div class="sbars" id="sbars"><div class="midline"></div>${model.periods.map((m,i)=>{const ph=(v.phase&&v.phase[i]!=null)?v.phase[i]:1; const h=Math.max(2,Math.min(100,ph/SEAS_MAX*100)); return `<div class="sbar" data-i="${i}"><i style="height:${h}%"></i><span>${m.split(' ')[0]}</span></div>`;}).join('')}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:26px"><button class="btn sm" onclick="seasonPreset('flat')">Reset to flat</button><span class="mut fz11">tip: drag up = above base, down = below</span></div>`;
+  }
+  showModal(`<div class="mhead"><h3>Shape over time · ${v.name}</h3><button class="x" onclick="closeShape()">×</button></div>
+    <div class="mbody">${seg}<div style="margin-top:6px">${bodyInner}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button class="btn primary" onclick="closeShape()">Done</button></div>
+    </div>`);
+  if(mode==='seasonal') bindSeasonBars();
+}
+function setShapeMode(m){
+  const v=vget(window.__shapeKey); window.__shapeMode=m;
+  if(m==='flat'){ if(v.ramp) v.ramp.on=false; v.phase=null; }
+  if(m==='ramp'){ v.phase=null; if(!v.ramp) v.ramp={}; v.ramp.on=true; if(v.ramp.from==null)v.ramp.from=0; if(v.ramp.to==null)v.ramp.to=v.base; if(v.ramp.start==null)v.ramp.start=0; if(!v.ramp.months)v.ramp.months=Math.min(6,P()); }
+  if(m==='seasonal'){ if(v.ramp) v.ramp.on=false; if(!v.phase||!v.phase.length) v.phase=new Array(P()).fill(1); }
+  drawShapeModal(); renderAssumptions(); renderForecast(); saveModel();
+}
+function commitRamp(){ const v=vget(window.__shapeKey); if(!v.ramp)v.ramp={on:true};
+  v.ramp.from=parseFloat(document.getElementById('rFrom').value)||0;
+  v.ramp.to=parseFloat(document.getElementById('rTo').value)||0; v.base=v.ramp.to;
+  v.ramp.start=+document.getElementById('rStart').value|0;
+  v.ramp.months=Math.max(1,parseInt(document.getElementById('rMonths').value)||1);
+  renderAssumptions(); renderForecast(); saveModel(); }
+function seasonPreset(kind){ const v=vget(window.__shapeKey); if(kind==='flat') v.phase=new Array(P()).fill(1); drawShapeModal(); renderAssumptions(); renderForecast(); saveModel(); }
+function bindSeasonBars(){
+  const box=document.getElementById('sbars'); if(!box) return;
+  const v=vget(window.__shapeKey); let active=null;
+  const setFrom=(bar,clientY)=>{ const r=box.getBoundingClientRect(); let t=1-(clientY-r.top-10)/(r.height-20); t=Math.max(0,Math.min(1,t)); const val=+(t*SEAS_MAX).toFixed(2); const i=+bar.dataset.i; if(!v.phase)v.phase=new Array(P()).fill(1); v.phase[i]=val; bar.querySelector('i').style.height=Math.max(2,t*100)+'%'; renderForecast(); };
+  box.querySelectorAll('.sbar').forEach(bar=>{ bar.addEventListener('pointerdown',e=>{ active=bar; bar.setPointerCapture(e.pointerId); setFrom(bar,e.clientY); e.preventDefault(); }); });
+  box.addEventListener('pointermove',e=>{ if(active) setFrom(active,e.clientY); });
+  const end=()=>{ if(active){ active=null; renderAssumptions(); saveModel(); } };
+  box.addEventListener('pointerup',end); box.addEventListener('pointercancel',end);
+}
+function closeShape(){ closeModal(); renderAssumptions(); renderForecast(); saveModel(); }
+
+const CH={x0:34,x1:730,y0:26,y1:224,h:265};
+const COLORS=['#4055c7','#0b8f9e','#a65d2b','#12805a','#c23140','#7b46c9','#d98324'];
+let _dragging=false, _domains={};
+
+/* per-series y-domain, padded; flat lines get a ±band so they're still draggable */
+function seriesDomain(baseArr,scenArr){
+  const all=(baseArr||[]).concat(scenArr||[]).filter(x=>isFinite(x));
+  let lo=all.length?Math.min(...all):0, hi=all.length?Math.max(...all):1;
+  if(hi-lo<1e-9){ const c=Math.abs(hi)||1; lo=hi-c*0.6; hi=hi+c*0.6; }
+  else { const pad=(hi-lo)*0.18; lo-=pad; hi+=pad; }
+  return {lo,hi};
+}
+const chX=(i,n)=>CH.x0+(CH.x1-CH.x0)*(i/Math.max(1,n-1));
+const chY=(val,d)=>CH.y1-(CH.y1-CH.y0)*((val-d.lo)/((d.hi-d.lo)||1));
+
+function renderForecast(){
+  const base=evalModel(false), scen=evalModel(true);
+  const keys=visibleKeys(), L=P()-1;
+  const rt=document.getElementById('resTitle');
+  if(rt) rt.textContent=`${keys.length>1?keys.length+' lines':vget(keys[0]).name} · ${model.periods[0]} to ${model.periods[L]}`;
+  drawChart(base,scen);
+  const leg=document.getElementById('serieslegend');
+  if(leg) leg.innerHTML=keys.map((k,si)=>{ const v=vget(k),col=COLORS[si%COLORS.length];
+    const bL=(base[k]||[])[L]||0, sL=(scen[k]||[])[L]||0, imp=sL-bL, pct=bL!==0?imp/Math.abs(bL)*100:0;
+    const cls=imp>0?'pos':imp<0?'negv':'';
+    return `<div class="slrow"><i style="background:${col}"></i><span class="nm">${v.name}</span><span class="vv">${fmtVar(bL,v.unit)} → ${fmtVar(sL,v.unit)}</span><span class="dd ${cls}">${imp===0?'—':fmtDelta(imp,v.unit)+' ('+(pct>=0?'+':'')+pct.toFixed(1)+'%)'}</span></div>`;
+  }).join('')+`<div class="mut fz11" style="margin-top:6px">${model.periods[L].split(' ')[0]} baseline → scenario. Each line is drawn on its own scale so trends stay visible.</div>`;
+  const sm=document.getElementById('solveMsg'); if(sm){ sm.hidden=!_solveMsg; sm.textContent=_solveMsg||''; }
+  renderSolveBar();
+}
+
+function drawChart(base,scen){
+  const svg=document.getElementById('chart'); if(!svg) return;
+  const keys=visibleKeys(), n=P();
+  if(!_dragging){ _domains={}; keys.forEach(k=>_domains[k]=seriesDomain(base[k],scen[k])); }
+  let g=''; for(let r=0;r<4;r++){const y=CH.y0+(CH.y1-CH.y0)*r/3;g+=`<line class="grid-line" x1="${CH.x0}" y1="${y}" x2="${CH.x1}" y2="${y}"/>`;}
+  let body='';
+  keys.forEach((k,si)=>{ const v=vget(k), col=COLORS[si%COLORS.length], d=_domains[k]||{lo:0,hi:1};
+    const b=base[k]||[], s=scen[k]||[];
+    const bp=b.map((val,i)=>`${chX(i,n)},${chY(val,d)}`).join(' ');
+    const sp=s.map((val,i)=>`${chX(i,n)},${chY(val,d)}`).join(' ');
+    body+=`<polyline points="${bp}" fill="none" stroke="${col}" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.4" stroke-linejoin="round"/>`;
+    body+=`<polyline id="scen_${k}" points="${sp}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linejoin="round"/>`;
+    const drag=v.kind!=='output';
+    body+=s.map((val,i)=>`<circle class="scenario-dot" data-key="${k}" data-i="${i}" cx="${chX(i,n)}" cy="${chY(val,d)}" r="4.2" style="fill:#fff;stroke:${col};${drag?'cursor:ns-resize':'cursor:default;opacity:.45'}"></circle>`).join('');
+  });
+  const every=n>13?2:1;
+  const labels=model.periods.map((m,i)=>(i%every===0)?`<text class="axis-label" x="${chX(i,n)}" y="258" text-anchor="middle">${m.split(' ')[0]}</text>`:'').join('');
+  svg.innerHTML=`${g}${body}${labels}`;
+  bindDrag(svg);
+}
+
+/* redraw the moving lines/dots ONLY (no innerHTML rebuild) so the held dot keeps pointer capture */
+function updateDuringDrag(){
+  const svg=document.getElementById('chart'); if(!svg) return;
+  const scen=evalModel(true), keys=visibleKeys(), n=P();
+  keys.forEach(k=>{ const d=_domains[k]||{lo:0,hi:1}, s=scen[k]||[];
+    const pl=svg.querySelector('[id="scen_'+k+'"]'); if(pl) pl.setAttribute('points', s.map((val,i)=>`${chX(i,n)},${chY(val,d)}`).join(' '));
+    svg.querySelectorAll('.scenario-dot[data-key="'+k+'"]').forEach(dot=>{ const i=+dot.dataset.i; dot.setAttribute('cy', chY(s[i],d)); });
+  });
+}
+
+function bindDrag(svg){ let active=null;
+  const toVal=(cy,d)=>{ const r=svg.getBoundingClientRect(); const yPx=(cy-r.top)/r.height*CH.h; let t=(CH.y1-yPx)/(CH.y1-CH.y0); t=Math.max(0,Math.min(1,t)); return d.lo+(d.hi-d.lo)*t; };
+  svg.querySelectorAll('.scenario-dot').forEach(dot=>{
+    const v=vget(dot.dataset.key); if(!v||v.kind==='output') return; // outputs (actuals) aren't draggable
+    dot.addEventListener('pointerdown',e=>{ active={key:dot.dataset.key,i:+dot.dataset.i}; _dragging=true; dot.setPointerCapture(e.pointerId); e.preventDefault(); });
+  });
+  svg.addEventListener('pointermove',e=>{ if(!active) return; const d=_domains[active.key]||{lo:0,hi:1}; applyDrag(active.key,active.i,toVal(e.clientY,d)); updateDuringDrag(); });
+  const end=()=>{ if(active){ active=null; _dragging=false; renderForecast(); renderAssumptions(); saveModel(); } };
+  svg.addEventListener('pointerup',end); svg.addEventListener('pointercancel',end);
+}
+
+/* ============================ ALLOCATION ENGINE ============================
+   Drag a line to a target at one period → decide how the change flows down the
+   driver tree to LEAF inputs, write only those, carry forward. Three modes, all
+   robust with numeric root-finding (no LP solver):
+     proportional  – every free leaf moves by a common factor (bisection). Default.
+     single        – one chosen leaf absorbs it, others held (bisection).
+     balanced      – damped Newton on a numeric Jacobian: each leaf moves in
+                     proportion to its marginal effect ∂output/∂leaf (least-change).
+   Pinned leaves are removed from the free set. If the free set can't reach the
+   target, we solve as close as possible and flag it (feasibility guard). */
+let _solveMsg='';
+function isPinned(k){ return (model.pins||[]).includes(k); }
+function freeLeavesOf(key){
+  const pins=new Set(model.pins||[]);
+  let ls=[...leavesOf(key)].map(k=>vget(k)).filter(v=>v&&v.kind==='input'&&!pins.has(v.key));
+  if((model.solveMode||'proportional')==='single' && model.solveDriver){
+    const d=ls.find(v=>v.key===model.solveDriver); if(d) ls=[d];
+  }
+  return ls;
+}
+/* value a leaf would have at `period` from baseline + earlier anchors, i.e. ignoring
+   this exact period's own anchor — a stable reference so a live drag doesn't drift. */
+function stableCur(v,period){
+  const o=model.ov&&model.ov[v.key];
+  const had=o&&(period in o); let saved;
+  if(had){ saved=o[period]; delete o[period]; }
+  const base=inputVal(v,period,true);
+  if(had){ if(!model.ov[v.key]) model.ov[v.key]={}; model.ov[v.key][period]=saved; }
+  return base;
+}
+function outAt(key,period){ return (evalModel(true)[key]||[])[period]||0; }
+
+function applyDrag(key,period,target){
+  const v=vget(key); if(!v) return;
+  if(v.kind==='input'){ setOv(key,period,target); _solveMsg=''; return; }
+  backsolvePeriod(key,period,target);
+}
+function backsolvePeriod(key,period,target){
+  const mode=model.solveMode||'proportional';
+  const leaves=freeLeavesOf(key);
+  if(!leaves.length){ _solveMsg='All drivers of this line are pinned — release one to plan it.'; return false; }
+  const cur=leaves.map(v=>stableCur(v,period));
+
+  if(mode==='balanced'){
+    // damped Newton: Δxᵢ = gᵢ·(target−y)/Σgⱼ² , iterate, halve step on overshoot
+    leaves.forEach((v,i)=>setOv(v.key,period,cur[i]));           // start from stable base
+    let prev=Infinity;
+    for(let it=0;it<60;it++){
+      const y=outAt(key,period), res=target-y;
+      if(Math.abs(res)<=Math.max(1e-6,Math.abs(target)*1e-7)){ _solveMsg=''; return true; }
+      const g=leaves.map(v=>{ const x0=inputVal(v,period,true), eps=Math.max(1e-4,Math.abs(x0)*1e-4);
+        setOv(v.key,period,x0+eps); const yp=outAt(key,period); setOv(v.key,period,x0); return (yp-y)/eps; });
+      const g2=g.reduce((s,x)=>s+x*x,0);
+      if(g2<1e-20){ _solveMsg='These drivers barely move this line — try another driver.'; return false; }
+      let damp=1; if(Math.abs(res)>prev) damp=0.5; prev=Math.abs(res);
+      leaves.forEach((v,i)=>{ const x0=inputVal(v,period,true); setOv(v.key,period,x0+g[i]*res/g2*damp); });
+    }
+    const y=outAt(key,period); _solveMsg = Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4)?`Closest reachable: ${fmtVar(y,vget(key).unit)} (drivers maxed out).`:''; return true;
+  }
+
+  // proportional / single: common factor r on the free leaves, bisected
+  if(cur.every(x=>Math.abs(x)<1e-12)){ _solveMsg='These drivers are zero at this month — nothing to scale. Set a base or pick another driver.'; return false; }
+  const f=r=>{ leaves.forEach((v,i)=>setOv(v.key,period,cur[i]*r)); return outAt(key,period); };
+  let lo=0.0001,hi=8,flo=f(lo),fhi=f(hi), tries=0;
+  while(((fhi>flo)?(fhi<target):(fhi>target)) && tries<50){ hi*=1.6; fhi=f(hi); tries++; }   // expand to bracket
+  if(flo===fhi){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); _solveMsg='This line doesn’t respond to these drivers.'; return false; }
+  for(let it=0;it<54;it++){ const mid=(lo+hi)/2,val=f(mid); if((fhi>flo)?val<target:val>target) lo=mid; else hi=mid; }
+  const r=(lo+hi)/2; const y=f(r);
+  _solveMsg = Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4)?`Closest reachable: ${fmtVar(y,vget(key).unit)}.`:'';
+  return true;
+}
+
+/* ============================ VARIANCE ANALYSIS ============================
+   Compare any two versions (Plan / Scenario / Actuals) and explain the gap.
+   The bridge decomposes a line's variance into DRIVER contributions using
+   successive substitution — swap each driver from reference to comparison,
+   one at a time, and attribute the step. Works through the whole formula tree
+   for driver-based models, and degrades to a plain line variance for flat ones.
+   Favourable/Unfavourable respects each line's "good direction". */
+function hasActuals(){ return model.vars.some(v=>v.actuals&&v.actuals.some(x=>x!=null&&x!=='')); }
+function hasForecastSrc(){ return model.vars.some(v=>v.forecast&&v.forecast.some(x=>x!=null&&x!=='')); }
+/* last period (inclusive) that has any actual recorded, else -1 */
+function lastActualIdx(){ let m=-1; model.vars.forEach(v=>{ if(v.actuals) for(let p=0;p<v.actuals.length;p++) if(v.actuals[p]!=null&&v.actuals[p]!=='') m=Math.max(m,p); }); return m; }
+const PRIOR_LABEL={1:'Previous month',3:'Previous quarter',12:'Previous year'};
+function versionData(which,ctxA){
+  if(which==='scenario') return evalModel(true);
+  if(which==='plan') return evalModel(false);
+  if(which==='forecast'){   // read forecast series where present, else the driver model's plan
+    const plan=evalModel(false), n=P(), res={};
+    model.vars.forEach(v=>{ res[v.key]=Array.from({length:n},(_,p)=> (v.forecast&&v.forecast[p]!=null&&v.forecast[p]!=='')?Number(v.forecast[p]):plan[v.key][p]); });
+    return res;
+  }
+  if(which==='actual'){    // actuals ONLY — null where no actual is recorded (never plan-filled)
+    const n=P(), res={};
+    model.vars.forEach(v=>{ res[v.key]=Array.from({length:n},(_,p)=> (v.actuals&&v.actuals[p]!=null&&v.actuals[p]!=='')?Number(v.actuals[p]):null); });
+    return res;
+  }
+  if(which==='prior'){ const N=_vState.priorN||1, src=ctxA||evalModel(true), n=P(), res={};
+    model.vars.forEach(v=>{ res[v.key]=Array.from({length:n},(_,p)=> p-N>=0?src[v.key][p-N]:null); }); return res; }
+  if(which&&which.slice(0,2)==='v:'){ const ver=(model.versions||[]).find(x=>x.id===which.slice(2)), n=P(), res={};
+    model.vars.forEach(v=>{ const arr=(ver&&ver.data&&ver.data[v.key])||[]; res[v.key]=Array.from({length:n},(_,p)=>arr[p]!=null?arr[p]:0); }); return res; }
+  return evalModel(false);
+}
+/* does this version have real data for this line within the window? */
+function versionHasData(which,key,win){
+  if(which==='actual'){ const v=vget(key); if(!v||!v.actuals) return false; for(let p=win[0];p<=win[1];p++) if(v.actuals[p]!=null&&v.actuals[p]!=='') return true; return false; }
+  return true;
+}
+function verLabel(which){
+  if(which==='plan')return 'Plan (baseline)'; if(which==='scenario')return 'Scenario (your plan)';
+  if(which==='forecast')return 'Forecast (from sheet)';
+  if(which==='actual')return 'Actuals'; if(which==='prior')return PRIOR_LABEL[_vState.priorN||1]||'Prior period';
+  if(which&&which.slice(0,2)==='v:'){ const v=(model.versions||[]).find(x=>x.id===which.slice(2)); return v?v.name:'(deleted version)'; }
+  return which;
+}
+function verShort(which){ if(which&&which.slice(0,2)==='v:'){ const v=(model.versions||[]).find(x=>x.id===which.slice(2)); return v?(v.name.length>14?v.name.slice(0,13)+'…':v.name):'—'; } return {plan:'Plan',scenario:'Scenario',forecast:'Forecast',actual:'Actuals',prior:PRIOR_LABEL[_vState.priorN||1]||'Prior'}[which]||which; }
+function goodDir(v){ return v.good||'up'; }
+function isFav(v,variance){
+  if(v.favOverride==='fav') return true;
+  if(v.favOverride==='unf') return false;
+  if(Math.abs(variance)<1e-9) return null;
+  const g=goodDir(v); if(g==='neutral') return null;
+  return g==='up' ? variance>0 : variance<0;
+}
+/* one control for both: direction (auto) + manual override */
+function fuMode(v){ if(v.favOverride==='fav') return 'force_fav'; if(v.favOverride==='unf') return 'force_unf'; const g=goodDir(v); return g==='down'?'lower':g==='neutral'?'neutral':'higher'; }
+function setFU(k,mode){ const v=vget(k); if(!v) return;
+  if(mode==='force_fav'){ v.favOverride='fav'; } else if(mode==='force_unf'){ v.favOverride='unf'; }
+  else { delete v.favOverride; v.good = mode==='lower'?'down':mode==='neutral'?'neutral':'up'; }
+  saveModel(); renderVariance(); }
+const FU_OPTS=[['higher','Higher is better'],['lower','Lower is better'],['neutral','Neutral (no F/U)'],['force_fav','Force favourable'],['force_unf','Force unfavourable']];
+
+/* ---- saved versions (snapshots you can compare against) ---- */
+function saveVersionModal(){
+  const suggested = model.versions.some(v=>/budget/i.test(v.name))?'':'Budget FY';
+  showModal(`<div class="mhead"><h3>Save this plan as a version</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 10px">Freezes the current plan (your scenario, with every assumption) as a named snapshot. Compare against it later as Actuals come in — Budget vs Forecast vs Actual.</p>
+      <div class="field"><label>Version name</label><input class="inp" id="verName" placeholder="e.g. Budget FY27, Forecast Q1" value="${esc(suggested)}" onkeydown="if(event.key==='Enter')commitSaveVersion()"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="commitSaveVersion()">Save version</button></div>
+    </div>`);
+  setTimeout(()=>{const e=document.getElementById('verName'); if(e){e.focus();e.select();}},30);
+}
+function commitSaveVersion(){
+  const name=(document.getElementById('verName').value||'').trim(); if(!name){ return; }
+  const scen=evalModel(true), n=P(), data={}; model.vars.forEach(v=>data[v.key]=scen[v.key].slice(0,n));
+  model.versions.push({id:'v'+Date.now().toString(36), name, at:Date.now(), periods:n, data});
+  closeModal(); saveModel(); toast(`Saved version “${name}”`);
+  if(uiTab==='variance') renderVariance();
+}
+function deleteVersion(id){ model.versions=(model.versions||[]).filter(v=>v.id!==id);
+  ['A','B'].forEach(s=>{ if(_vState[s]==='v:'+id) _vState[s]= s==='A'?'scenario':'plan'; }); saveModel(); renderVariance(); }
+function openVersions(){
+  const rows=(model.versions||[]).length? model.versions.map(v=>`<div class="pinrow"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}</span><button class="pinbtn" style="margin-left:auto" onclick="deleteVersion('${v.id}')">Delete</button></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save your current plan to compare against it later.</p>';
+  showModal(`<div class="mhead"><h3>Saved versions</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody"><div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${rows}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:14px"><button class="btn" onclick="saveVersionModal()">＋ Save current plan</button><button class="btn primary" onclick="closeModal()">Done</button></div>
+    </div>`);
+}
+
+/* sum a variable over the active period window */
+/* how a line rolls up over a period: flows sum, rates/stocks average (default by kind) */
+const AGG_LABEL={sum:'Sum',avg:'Average',last:'Period-end'};
+function aggMethod(v){ if(v&&v.agg) return v.agg; if(v){ if(v.unit==='%') return 'avg'; if(v.kind==='input') return 'avg'; } return 'sum'; }
+function aggArr(arr,method){
+  if(!arr||!arr.length) return 0;
+  if(method==='avg'){ const f=arr.filter(x=>x!=null); return f.length?f.reduce((a,b)=>a+b,0)/f.length:0; }
+  if(method==='last'){ for(let i=arr.length-1;i>=0;i--) if(arr[i]!=null) return arr[i]; return 0; }
+  return arr.reduce((a,b)=>a+(b||0),0);
+}
+function winArr(data,key,win){ const a=[]; for(let p=win[0];p<=win[1];p++) a.push((data[key]||[])[p]); return a; }
+function vAgg(data,key,win){ return aggArr(winArr(data,key,win), aggMethod(vget(key))); }
+
+/* per-period successive-substitution bridge, aggregated over the window by the line's method */
+function bridge(key,A,B,win){
+  const v=vget(key);
+  if(!v) return {steps:[],start:0,end:0,residual:0};
+  const m=aggMethod(v);
+  if(v.kind!=='formula'){
+    const st=vAgg(B,key,win), en=vAgg(A,key,win);
+    return {start:st,end:en,steps:[{key:v.key,name:v.name,delta:en-st}],residual:0};
+  }
+  const c=compile(v.expr), deps=c.deps.map(d=>vget(d)).filter(Boolean);
+  const startArr=[],endArr=[],stepArr={}; deps.forEach(d=>stepArr[d.key]=[]);
+  for(let p=win[0];p<=win[1];p++){
+    const val=(sub)=>{ const scope={}; deps.forEach(d=>{ scope[d.key.toLowerCase()]=(sub.has(d.key)?A:B)[d.key][p]; }); return evalRPN(c.rpn,scope); };
+    let prev=val(new Set()); startArr.push(prev); const used=new Set();
+    deps.forEach(d=>{ used.add(d.key); const now=val(used); stepArr[d.key].push(now-prev); prev=now; });
+    endArr.push(prev);
+  }
+  const start=aggArr(startArr,m), endComputed=aggArr(endArr,m), endActual=vAgg(A,key,win);
+  return {start,end:endActual,steps:deps.map(d=>({key:d.key,name:d.name,delta:aggArr(stepArr[d.key],m)})),residual:endActual-endComputed};
+}
+
+/* ---- variance reason codes + commentary ---- */
+const REASONS_DEFAULT=['Price change','Volume / demand','Mix shift','Timing / phasing','One-time / exceptional','FX / rate','Cost overrun','Cost saving','New / lost customer','Forecast revision','Data correction','Other'];
+function allReasons(){ return REASONS_DEFAULT.concat((model.reasonCodes||[]).filter(r=>!REASONS_DEFAULT.includes(r))); }
+function vnote(k){ return (model.vnotes&&model.vnotes[k])||{reason:'',remark:''}; }
+function setReason(k,val){ if(val==='__add__'){ addReasonModal(k); return; } if(!model.vnotes)model.vnotes={}; (model.vnotes[k]=model.vnotes[k]||{reason:'',remark:''}).reason=val; saveModel(); renderVariance(); }
+function setRemark(k,val){ if(!model.vnotes)model.vnotes={}; (model.vnotes[k]=model.vnotes[k]||{reason:'',remark:''}).remark=val; saveModel(); const t=document.querySelector(`.vrow[data-k="${k}"] .rtag`); }
+function addReasonModal(k){
+  showModal(`<div class="mhead"><h3>Add a reason</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody"><div class="field"><label>New reason label</label><input class="inp" id="newReason" placeholder="e.g. Channel promotion" onkeydown="if(event.key==='Enter')commitReason('${k}')"></div>
+      <p class="mut fz11" style="margin:8px 0 0">It’ll be saved to your reason list for every line.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="commitReason('${k}')">Add &amp; tag</button></div></div>`);
+  setTimeout(()=>{const e=document.getElementById('newReason'); if(e) e.focus();},30);
+}
+function commitReason(k){ const r=(document.getElementById('newReason').value||'').trim(); if(!r){ closeModal(); return; }
+  if(!model.reasonCodes)model.reasonCodes=[]; if(!allReasons().includes(r)) model.reasonCodes.push(r);
+  if(!model.vnotes)model.vnotes={}; (model.vnotes[k]=model.vnotes[k]||{reason:'',remark:''}).reason=r; closeModal(); saveModel(); renderVariance(); }
+function setMat(v){ model.matThresh=+v||0; saveModel(); renderVariance(); }
+
+let _vState={A:'scenario',B:'plan',line:null,win:null,priorN:1};
+function viewVariance(){
+  return `
+  <div class="hero">
+    <div class="hero-row">
+      <div><p class="eyebrow">Variance analysis</p><h1>Actuals vs plan — explain the gap, down to the driver.</h1>
+        <p>Compare your results (or any version) against a plan and decompose the difference into the drivers that caused it, with reasons, commentary and favourable/unfavourable. The bridge walks your formula tree, so the explanation is your model — not hardcoded lines. To line projections up against each other instead, use <b>Compare scenarios</b>.</p></div>
+    </div>
+  </div>
+  <div class="panel panel-pad" id="vControls" style="margin-top:16px"></div>
+  <div class="panel panel-pad" id="vBridge" style="margin-top:14px"></div>
+  <div class="panel panel-pad" id="vTable" style="margin-top:14px"></div>
+  <div class="vscrim" id="vScrim" onclick="closeCommentary()"></div>
+  <aside class="vdrawer" id="vDrawer"><div id="vDrawerIn"></div></aside>`;
+}
+/* auto-pick the most useful comparison until the user overrides it with the dropdowns.
+   With actuals loaded → Actuals vs Forecast (so real variance shows); otherwise Scenario vs Plan. */
+function autoDefaultVer(){
+  if(_vState.userVer){   // user chose explicitly — respect it, just keep it valid
+    if(_vState.A==='actual'&&!hasActuals()) _vState.A='scenario';
+    if(_vState.B==='actual'&&!hasActuals()) _vState.B='plan';
+    return;
+  }
+  if(hasActuals()){
+    _vState.A='actual'; _vState.B=hasForecastSrc()?'forecast':'plan';
+    const la=lastActualIdx(); if(la>=0 && !_vState.winUser) _vState.win=[0,la];
+  } else {
+    if(_vState.A==='actual') _vState.A='scenario';
+    if(_vState.B==='actual') _vState.B='plan';
+  }
+}
+function mountVariance(){
+  if(!_vState.win) _vState.win=[0,P()-1];
+  if(_vState.win[1]>P()-1) _vState.win=[0,P()-1];
+  autoDefaultVer();
+  // prefer the terminal output — a formula/output that nothing else feeds into
+  const fed=new Set(); model.vars.forEach(v=>{ if(v.kind==='formula') compile(v.expr||'').deps.forEach(d=>fed.add(d.toLowerCase())); });
+  const terminal=model.vars.filter(v=>v.kind!=='input'&&!fed.has(v.key.toLowerCase()));
+  const prefer=terminal[terminal.length-1]||model.vars.find(v=>v.kind==='formula')||model.vars[0];
+  if(!_vState.line||!vget(_vState.line)) _vState.line=prefer?prefer.key:null;
+  renderVariance();
+}
+function setVer(side,val){ _vState.userVer=true; _vState[side]=val; if(_vState.A===_vState.B){ _vState.B = _vState.A==='plan'?'scenario':'plan'; } renderVariance(); }
+function setVWin(v){ _vState.winUser=true; if(v==='all') _vState.win=[0,P()-1]; else { const p=+v; _vState.win=[p,p]; } renderVariance(); }
+function pickVLine(k){ _vState.line=k; renderVariance(); }
+function toggleGood(k){ const v=vget(k); v.good=goodDir(v)==='up'?'down':'up'; renderVariance(); saveModel(); }
+
+function setVerPrior(n){ _vState.priorN=+n; renderVariance(); }
+function ragOf(r){ if(Math.abs(r.d)<1e-9||r.b===0) return 'na'; if(r.fav) return 'g'; return Math.abs(r.pct)>=10?'r':'a'; }
+const RAG_TITLE={g:'On track / favourable',a:'Watch — moderate unfavourable',r:'Alert — large unfavourable',na:'No material variance'};
+function renderVariance(){
+  const A=versionData(_vState.A), win0=_vState.win.slice();
+  // prior-period: B = A shifted back N; restrict the window to periods that have history
+  let win=win0, priorNote='';
+  if(_vState.B==='prior'){ const N=_vState.priorN||1; let s=Math.max(win0[0],N), e=win0[1];
+    if(e<s){ s=Math.min(N,P()-1); e=P()-1; } win=[s,e];
+    priorNote=`Comparing each month to ${N} month${N>1?'s':''} earlier — the first ${N===1?'month has':N+' months have'} no prior and ${N===1?'is':'are'} excluded.`; }
+  const B=versionData(_vState.B,A);
+  const winLabel = win[0]===win[1]?model.periods[win[0]]:`${model.periods[win[0]].split(' ')[0]}–${model.periods[win[1]].split(' ')[0]}`;
+  const savedOpts=(model.versions||[]).map(v=>'v:'+v.id);
+  const opts=(sel,forB)=>['plan','scenario'].concat(hasForecastSrc()?['forecast']:[]).concat(hasActuals()?['actual']:[]).concat(savedOpts).concat(forB?['prior']:[])
+    .map(k=>`<option value="${k}" ${sel===k?'selected':''}>${verLabel(k)}</option>`).join('');
+  const perOpts=`<option value="all" ${win0[0]===0&&win0[1]===P()-1?'selected':''}>Full timeline</option>`+model.periods.map((m,i)=>`<option value="${i}" ${win0[0]===win0[1]&&win0[0]===i?'selected':''}>${m}</option>`).join('');
+
+  // ---- line table ----
+  const rows=model.vars.map(v=>{ const bHas=versionHasData(_vState.B,v.key,win), aHas=versionHasData(_vState.A,v.key,win);
+    const b=bHas?vAgg(B,v.key,win):null, a=aHas?vAgg(A,v.key,win):null;
+    const d=(a!=null&&b!=null)?a-b:null, pct=(d!=null&&b)?d/Math.abs(b)*100:null, fav=d!=null?isFav(v,d):null;
+    return {v,b,a,d,pct,fav,mag:d==null?-1:Math.abs(d),noData:a==null||b==null}; }).sort((x,y)=>y.mag-x.mag);
+  const mat=model.matThresh||0;
+  // explained-% coverage — over monetary lines only, so ₹ and unit counts aren't mixed
+  const moneyRows=rows.filter(r=>r.v.unit==='₹'&&r.d!=null); const covRows=moneyRows.length?moneyRows:rows.filter(r=>r.d!=null);
+  let totAbs=0, explAbs=0; covRows.forEach(r=>{ if(Math.abs(r.d)>1e-9){ totAbs+=Math.abs(r.d); if(vnote(r.v.key).reason) explAbs+=Math.abs(r.d); } });
+  const explPct = totAbs>0?Math.round(explAbs/totAbs*100):100;
+  const tbl=rows.map(r=>{ const sel=r.v.key===_vState.line; const fu=r.fav==null?null:r.fav; const nt=vnote(r.v.key); const rag=r.noData?'na':ragOf(r);
+    const immat = mat>0 && r.b && Math.abs(r.pct||0)<mat;
+    return `<tr class="vrow ${sel?'sel':''} ${immat?'immaterial':''} ${r.noData?'nodata':''}" data-k="${r.v.key}" onclick="pickVLine('${r.v.key}')" ondblclick="event.stopPropagation();openAccount('${jesc(r.v.account||r.v.name)}')">
+      <td title="Double-click for the account view"><span class="rag ${rag}" title="${r.noData?'No actual recorded':RAG_TITLE[rag]}"></span><span class="vk ${r.v.kind}"></span><b>${r.v.name}</b>${r.v.metric?` <span class="metchip">${esc(r.v.metric)}</span>`:''} <button class="agglabel" title="Rolls up as ${AGG_LABEL[aggMethod(r.v)]} — click to change" onclick="event.stopPropagation();cycleAgg('${r.v.key}')">${AGG_LABEL[aggMethod(r.v)].toLowerCase()}</button></td>
+      <td class="num">${r.b==null?'<span class="mut">—</span>':fmtVar(r.b,r.v.unit)}</td><td class="num">${r.a==null?'<span class="mut">—</span>':fmtVar(r.a,r.v.unit)}</td>
+      <td class="num ${r.d>0?'pos':r.d<0?'negv':''}">${r.d==null?'<span class="mut" title="No actual recorded for this line">no actual</span>':r.d===0?'—':fmtDelta(r.d,r.v.unit)}</td>
+      <td class="num mut">${r.pct!=null&&r.b?(r.pct>=0?'+':'')+r.pct.toFixed(1)+'%':'—'}</td>
+      <td class="fucell"><span class="fu ${fu==null?'na':fu?'fav':'unf'}">${fu==null?'—':fu?'Fav':'Unfav'}</span><select class="minisel" onclick="event.stopPropagation()" onchange="setFU('${r.v.key}',this.value)">${FU_OPTS.map(([val,lab])=>`<option value="${val}" ${fuMode(r.v)===val?'selected':''}>${lab}</option>`).join('')}</select></td>
+      <td><select class="minisel wide ${nt.reason?'set':''}" onclick="event.stopPropagation()" onchange="setReason('${r.v.key}',this.value)"><option value="">— reason —</option>${allReasons().map(rr=>`<option ${nt.reason===rr?'selected':''}>${esc(rr)}</option>`).join('')}<option value="__add__">＋ Add…</option></select></td>
+      <td class="rowacts"><button class="cbtn ${nt.remark?'has':''}" title="${nt.remark?'Commentary: '+esc(nt.remark):'Commentary & line settings'}" onclick="event.stopPropagation();openCommentary('${r.v.key}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button><button class="cbtn del" title="Remove line" onclick="event.stopPropagation();deleteLine('${r.v.key}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></td>
+    </tr>`; }).join('');
+  document.getElementById('vControls').innerHTML=`
+    <div class="selrow2">
+      <div class="field"><label>Compare</label><select onchange="setVer('A',this.value)">${opts(_vState.A,false)}</select></div>
+      <span class="vsvs">vs</span>
+      <div class="field"><label>against</label><select onchange="setVer('B',this.value)">${opts(_vState.B,true)}</select></div>
+      ${_vState.B==='prior'?`<div class="field"><label>Prior</label><select onchange="setVerPrior(this.value)">${[[1,'Month (MoM)'],[3,'Quarter (QoQ)'],[12,'Year (YoY)']].map(([n,l])=>`<option value="${n}" ${(_vState.priorN||1)==n?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
+      <div class="field"><label>Period</label><select onchange="setVWin(this.value)">${perOpts}</select></div>
+      <div class="field"><label>Materiality</label><select onchange="setMat(this.value)">${[['0','All'],['1','≥1%'],['5','≥5%'],['10','≥10%']].map(([v,l])=>`<option value="${v}" ${(model.matThresh||0)==+v?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div style="flex:1"></div>
+      <span class="explbadge" title="Share of variance with a reason tagged"><span class="explbar"><span style="width:${explPct}%"></span></span>${explPct}% explained</span>
+      ${model.sources?`<button class="btn sm" onclick="importSources2()" title="Re-read both files">↻ Refresh</button>`:''}
+      <button class="btn sm" onclick="openSources()">${model.sources?'Sources':'＋ Import 2 files'}</button>
+      ${conn.actualsSsid?`<button class="btn sm" onclick="refreshActuals()" title="Re-read actuals from your actuals sheet">↻ Actuals</button>`:''}
+      <button class="btn sm" onclick="openVersions()">Versions${(model.versions||[]).length?` · ${model.versions.length}`:''}</button>
+      <button class="btn sm" onclick="saveVersionModal()">＋ Save version</button>
+    </div>
+    ${priorNote?`<p class="mut fz11" style="margin:10px 0 0">${priorNote}</p>`:!hasActuals()?`<p class="mut fz11" style="margin:10px 0 0">No actuals yet — comparing plan versions. Add an <b>actuals sheet</b> in Connect, map each line's actuals cell in Model setup, then hit <b>Refresh actuals</b> — or save named versions to compare plans.</p>`:''}`;
+  document.getElementById('vTable').innerHTML=`
+    <div class="results-head" style="margin-bottom:8px"><div><p class="eyebrow">All lines · ${winLabel}</p><h2 style="font-size:16px">${verShort(_vState.A)} vs ${verShort(_vState.B)}</h2></div></div>
+    <div class="scrollx"><table class="vtable">
+      <thead><tr><th>Line</th><th class="num">${verShort(_vState.B)}</th><th class="num">${verShort(_vState.A)}</th><th class="num">Variance</th><th class="num">%</th><th>Verdict</th><th>Reason</th><th></th></tr></thead>
+      <tbody>${tbl}</tbody></table></div>`;
+
+  renderBridge(A,B,win,winLabel);
+  if(_drawerKey) renderDrawer();
+}
+/* variance-per-period sparkline for the selected line (green=fav, red=unfav) */
+function varSpark(key,A,B,win){
+  const v=vget(key), n=P(); const d=[];
+  for(let p=0;p<n;p++){ const bv=(B[key]||[])[p], av=(A[key]||[])[p]; d.push((bv==null||av==null)?null:av-bv); }
+  const vals=d.filter(x=>x!=null); if(!vals.length) return '';
+  const hi=Math.max(0,...vals), lo=Math.min(0,...vals), rng=(hi-lo)||1, H=44, W=100/n, zeroY=hi/rng*H;
+  let bars=''; d.forEach((x,p)=>{ if(x==null) return; const fav=isFav(v,x), h=Math.abs(x)/rng*H, y=x>=0?zeroY-h:zeroY;
+    const inWin=p>=win[0]&&p<=win[1];
+    bars+=`<rect x="${(p*W+W*0.16).toFixed(2)}" y="${y.toFixed(2)}" width="${(W*0.68).toFixed(2)}" height="${Math.max(0.6,h).toFixed(2)}" fill="${Math.abs(x)<1e-9?'#c9cede':fav?'#3aa981':'#e06a6a'}" opacity="${inWin?1:0.38}"/>`; });
+  const every=Math.ceil(n/6);
+  return `<div class="sparkbox"><div class="sparktitle">Variance over time <span class="mut">· ${verShort(_vState.A)} − ${verShort(_vState.B)}</span></div>
+    <svg viewBox="0 0 100 ${H}" preserveAspectRatio="none" class="vspark"><line x1="0" y1="${zeroY.toFixed(2)}" x2="100" y2="${zeroY.toFixed(2)}" stroke="#d5d9e4" stroke-width="0.5"/>${bars}</svg>
+    <div class="sparkx">${model.periods.map((m,i)=>`<span style="${i%every?'visibility:hidden':''}">${m.split(' ')[0]}</span>`).join('')}</div></div>`;
+}
+function renderBridge(A,B,win,winLabel){
+  const el=document.getElementById('vBridge'); if(!el) return;
+  const v=vget(_vState.line); if(!v){ el.innerHTML='<p class="mut">Pick a line on the left.</p>'; return; }
+  if(!versionHasData(_vState.A,_vState.line,win)||!versionHasData(_vState.B,_vState.line,win)){
+    const missing = !versionHasData(_vState.A,_vState.line,win)?verShort(_vState.A):verShort(_vState.B);
+    el.innerHTML=`<div class="results-head"><div><p class="eyebrow">Driver bridge · ${winLabel}</p><h2 style="font-size:16px">${v.name}</h2></div></div><p class="mut fz13" style="margin:10px 0 0">No <b>${missing}</b> figures recorded for ${v.name} in this period, so there's nothing to bridge. Pick a line that has actuals, or map this line's actuals cell.</p>`;
+    return;
+  }
+  const note=vnote(_vState.line);
+  const br=bridge(_vState.line,A,B,win);
+  const totVar=br.end-br.start, fav=isFav(v,totVar);
+  const parts=br.steps.filter(s=>Math.abs(s.delta)>1e-9).slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+  if(Math.abs(br.residual)>Math.max(1,Math.abs(br.end)*1e-4)) parts.push({key:'__resid',name:'Other / unexplained',delta:br.residual});
+  const isFlat=v.kind!=='formula';
+
+  // waterfall geometry
+  const vals=[br.start].concat(parts.map(p=>p.delta)); let run=br.start; const bars=[];
+  parts.forEach(p=>{ bars.push({name:p.name,key:p.key,from:run,to:run+p.delta,delta:p.delta}); run+=p.delta; });
+  const allY=[br.start,br.end].concat(bars.flatMap(b=>[b.from,b.to])); let lo=Math.min(0,...allY),hi=Math.max(...allY,0); const pad=(hi-lo)*0.08||1; lo-=pad; hi+=pad;
+  const H=210,BW=100,gap=16, n=parts.length+2, Wc=Math.max(560,(BW+gap)*n+40);
+  const X=i=>28+i*(BW+gap), Y=val=>H-(val-lo)/((hi-lo)||1)*H;
+  const bar=(i,from,to,cls,label,val)=>{ const y0=Y(Math.max(from,to)),y1=Y(Math.min(from,to)); return `<g><rect x="${X(i)}" y="${y0}" width="${BW}" height="${Math.max(2,y1-y0)}" rx="3" class="wf ${cls}"/><text class="wfv" x="${X(i)+BW/2}" y="${y0-6}" text-anchor="middle">${label}</text></g>`; };
+  let svg=`<svg viewBox="0 0 ${Wc} ${H+46}" style="width:100%;min-width:${Wc}px">`;
+  svg+=bar(0,lo,br.start,'base','',0)+`<text class="wfx" x="${X(0)+BW/2}" y="${H+16}" text-anchor="middle">${verShort(_vState.B)}</text><text class="wfb" x="${X(0)+BW/2}" y="${H+32}" text-anchor="middle">${fmtVar(br.start,v.unit)}</text>`;
+  // connector + step bars
+  bars.forEach((b,idx)=>{ const i=idx+1; const up=b.delta>=0; svg+=bar(i,b.from,b.to,up?'up':'down',fmtDelta(b.delta,v.unit),b.delta);
+    svg+=`<line class="wfc" x1="${X(i-1)+BW}" y1="${Y(b.from)}" x2="${X(i)}" y2="${Y(b.from)}"/>`;
+    const short=b.name.length>16?b.name.slice(0,15)+'…':b.name;
+    svg+=`<text class="wfx" x="${X(i)+BW/2}" y="${H+16}" text-anchor="middle">${short}</text>`;
+    if(b.key!=='__resid'&&vget(b.key)&&vget(b.key).kind==='formula') svg+=`<text class="wfdrill" x="${X(i)+BW/2}" y="${H+31}" text-anchor="middle" onclick="pickVLine('${b.key}')">drill ›</text>`; });
+  const li=parts.length+1; svg+=bar(li,lo,br.end,'end','',0)+`<line class="wfc" x1="${X(li-1)+BW}" y1="${Y(bars.length?bars[bars.length-1].to:br.start)}" x2="${X(li)}" y2="${Y(bars.length?bars[bars.length-1].to:br.start)}"/><text class="wfx" x="${X(li)+BW/2}" y="${H+16}" text-anchor="middle">${verShort(_vState.A)}</text><text class="wfb" x="${X(li)+BW/2}" y="${H+32}" text-anchor="middle">${fmtVar(br.end,v.unit)}</text>`;
+  svg+=`</svg>`;
+
+  el.innerHTML=`
+    <div class="results-head"><div><p class="eyebrow">Driver bridge · ${winLabel}</p><h2 style="font-size:16px">${v.name}: ${verShort(_vState.B)} → ${verShort(_vState.A)}</h2></div></div>
+    <div class="kpi-row" style="margin:10px 0 14px">
+      <div><span>${verShort(_vState.B)}</span><strong>${fmtVar(br.start,v.unit)}</strong></div>
+      <div><span>${verShort(_vState.A)}</span><strong>${fmtVar(br.end,v.unit)}</strong></div>
+      <div><span>Variance</span><strong class="${totVar>0?'pos':totVar<0?'negv':''}">${fmtDelta(totVar,v.unit)}</strong>${fav!=null?`<small class="${fav?'pos':'negv'}">${fav?'Fav':'Unfav'}</small>`:''}</div>
+    </div>
+    ${varSpark(_vState.line,A,B,win)}
+    ${isFlat?`<p class="mut fz12" style="margin:8px 0 10px">${v.name} ${v.kind==='input'?'is an input':'is read straight from your sheet'}, so its variance is the change in the line itself — no drivers to decompose. ${v.kind==='input'?'':'Add a formula to break it into drivers, or '}pick a formula line below to see a driver bridge.</p>`:''}
+    ${(note.reason||note.remark)?`<div class="bridgenote"><span class="rtag">${esc(note.reason||'tagged')}</span>${note.remark?`<span class="bnrem">${esc(note.remark)}</span>`:''}<button class="cdrill" onclick="openCommentary('${v.key}')">edit ›</button></div>`:''}
+    <div class="scrollx"><div class="wfwrap">${svg}</div></div>
+    ${parts.length?`<div class="contrib">${parts.map(p=>{ const drill=p.key!=='__resid'&&vget(p.key)&&vget(p.key).kind==='formula'; return `<div class="crow"><span class="cdot ${p.delta>=0?'up':'down'}"></span><span class="cn">${p.name}${drill?` <button class="cdrill" onclick="pickVLine('${p.key}')">drill in ›</button>`:''}</span><span class="cv ${p.delta>=0?'pos':'negv'}">${fmtDelta(p.delta,v.unit)}</span><span class="cp mut">${totVar!==0?(p.delta/totVar*100).toFixed(0)+'% of gap':''}</span></div>`; }).join('')}</div>`:''}
+  `;
+}
+
+/* cycle a line's aggregation method from the table */
+function cycleAgg(k){ const v=vget(k); const order=['sum','avg','last']; const cur=aggMethod(v); const nx=order[(order.indexOf(cur)+1)%order.length]; v.agg=nx; saveModel(); renderVariance(); }
+function setLineAgg(k,val){ const v=vget(k); if(val) v.agg=val; else delete v.agg; saveModel(); renderVariance(); }
+function setLineUnit(k,u){ const v=vget(k); v.unit=u; saveModel(); renderVariance(); }
+function deleteLine(k){ const v=vget(k); if(!v) return; if(!confirm(`Remove “${v.name}” from the analysis?`)) return;
+  model.vars=model.vars.filter(x=>x.key!==k);
+  if(model.displayVars) model.displayVars=model.displayVars.filter(x=>x!==k);
+  if(model.ov) delete model.ov[k]; if(model.vnotes) delete model.vnotes[k];
+  if(_vState.line===k) _vState.line=null; if(_cState.line===k) _cState.line=null; if(_drawerKey===k) closeCommentary();
+  recompileAll(); saveModel(); if(uiTab==='variance') renderVariance(); else if(uiTab==='compare') renderCompare(); else render(); toast(`Removed ${v.name}`); }
+
+/* ---- commentary slide-out drawer ---- */
+let _drawerKey=null;
+function openCommentary(k){ _drawerKey=k; _vState.line=k; renderVariance(); document.getElementById('vScrim').classList.add('on'); document.getElementById('vDrawer').classList.add('on'); }
+function closeCommentary(){ _drawerKey=null; const s=document.getElementById('vScrim'),d=document.getElementById('vDrawer'); if(s)s.classList.remove('on'); if(d)d.classList.remove('on'); }
+function renderDrawer(){
+  const el=document.getElementById('vDrawerIn'); if(!el||!_drawerKey) return;
+  const v=vget(_drawerKey); if(!v) return; const nt=vnote(_drawerKey);
+  const A=versionData(_vState.A), B=versionData(_vState.B,A); let win=_vState.win.slice();
+  if(_vState.B==='prior'){ const N=_vState.priorN||1; win=[Math.max(win[0],N),win[1]]; if(win[1]<win[0])win=[Math.min(N,P()-1),P()-1]; }
+  const b=vAgg(B,_drawerKey,win), a=vAgg(A,_drawerKey,win), d=a-b, fav=isFav(v,d);
+  el.innerHTML=`
+    <div class="dwhead"><div><p class="eyebrow">Commentary</p><h3>${v.name}</h3></div><button class="x" onclick="closeCommentary()">×</button></div>
+    <div class="dwkpi"><div><span>${verShort(_vState.B)}</span><b>${fmtVar(b,v.unit)}</b></div><div><span>${verShort(_vState.A)}</span><b>${fmtVar(a,v.unit)}</b></div><div><span>Variance</span><b class="${d>0?'pos':d<0?'negv':''}">${d===0?'—':fmtDelta(d,v.unit)}</b>${fav!=null?`<i class="fu ${fav?'fav':'unf'}">${fav?'Fav':'Unfav'}</i>`:''}</div></div>
+    <div class="field" style="margin-top:16px"><label>Reason</label>
+      <select class="inp" onchange="setReason('${_drawerKey}',this.value)"><option value="">— tag a reason —</option>${allReasons().map(r=>`<option value="${esc(r)}" ${nt.reason===r?'selected':''}>${esc(r)}</option>`).join('')}<option value="__add__">＋ Add reason…</option></select></div>
+    <div class="field" style="margin-top:12px"><label>Commentary / remarks</label>
+      <textarea class="inp" id="dwRemark" rows="7" placeholder="Explain the variance — what happened, one-off vs structural, action to take…" onchange="setRemark('${_drawerKey}',this.value)">${esc(nt.remark||'')}</textarea></div>
+    <p class="mut fz11" style="margin-top:8px">This note travels with the line and appears on the bridge and in the table.</p>
+    <p class="eyebrow" style="margin:18px 0 8px">Line settings</p>
+    <div class="frow two">
+      <div class="field"><label>Unit</label><select class="inp" onchange="setLineUnit('${_drawerKey}',this.value)">${['₹','#','%'].map(u=>`<option ${v.unit===u?'selected':''}>${u}</option>`).join('')}</select></div>
+      <div class="field"><label>Roll up over a period</label><select class="inp" onchange="setLineAgg('${_drawerKey}',this.value)">
+        <option value="" ${!v.agg?'selected':''}>Auto (${AGG_LABEL[aggMethod(Object.assign({},v,{agg:undefined}))]})</option>
+        <option value="sum" ${v.agg==='sum'?'selected':''}>Sum</option><option value="avg" ${v.agg==='avg'?'selected':''}>Average</option><option value="last" ${v.agg==='last'?'selected':''}>Period-end</option></select></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">
+      <button class="btn" style="color:#c23140;border-color:#f0cdd2" onclick="deleteLine('${_drawerKey}')">Remove line</button>
+      <button class="btn primary" onclick="setRemark('${_drawerKey}',document.getElementById('dwRemark').value);closeCommentary();renderVariance()">Done</button></div>`;
+}
+
+/* ============================ COMPARE SCENARIOS (projection vs projection) ============================ */
+let _cState={line:null,base:'plan',cmp:'scenario',win:null};
+function projVersions(){ return ['plan','scenario'].concat((model.versions||[]).map(v=>'v:'+v.id)); }
+function viewCompare(){
+  return `<div class="hero"><div class="hero-row"><div>
+    <p class="eyebrow">Compare scenarios</p><h1>How much do your models differ?</h1>
+    <p>Line up every projection you've built — Plan, your working scenario, and each saved version — and see how a chosen line (revenue, EBITDA…) moves across them. No actuals here; this is plan-vs-plan, for choosing between futures.</p>
+  </div></div></div>
+  <div class="panel panel-pad" id="cControls" style="margin-top:16px"></div>
+  <div class="panel panel-pad" id="cBars" style="margin-top:14px"></div>
+  <div class="panel panel-pad" id="cMatrix" style="margin-top:14px"></div>`;
+}
+function mountCompare(){
+  if(!_cState.win)_cState.win=[0,P()-1]; if(_cState.win[1]>P()-1)_cState.win=[0,P()-1];
+  const fed=new Set(); model.vars.forEach(v=>{ if(v.kind==='formula') compile(v.expr||'').deps.forEach(d=>fed.add(d.toLowerCase())); });
+  const terminal=model.vars.filter(v=>v.kind!=='input'&&!fed.has(v.key.toLowerCase()));
+  const prefer=terminal[terminal.length-1]||model.vars.find(v=>v.kind==='formula')||model.vars[0];
+  if(!_cState.line||!vget(_cState.line)) _cState.line=prefer?prefer.key:null;
+  const pv=projVersions(); if(!pv.includes(_cState.base))_cState.base='plan'; if(!pv.includes(_cState.cmp))_cState.cmp=pv.find(k=>k!==_cState.base)||'scenario';
+  renderCompare();
+}
+function setCLine(k){ _cState.line=k; renderCompare(); }
+function setCBase(k){ _cState.base=k; if(_cState.cmp===k)_cState.cmp=projVersions().find(x=>x!==k)||'scenario'; renderCompare(); }
+function setCCmp(k){ _cState.cmp=k; renderCompare(); }
+function setCWin(v){ if(v==='all')_cState.win=[0,P()-1]; else _cState.win=[+v,+v]; renderCompare(); }
+function renderCompare(){
+  const vers=projVersions(), win=_cState.win, line=vget(_cState.line); if(!line){ return; }
+  const data={}; vers.forEach(k=>data[k]=versionData(k));
+  const baseVal=vAgg(data[_cState.base],_cState.line,win);
+  const winLabel = win[0]===win[1]?model.periods[win[0]]:`${model.periods[win[0]].split(' ')[0]}–${model.periods[win[1]].split(' ')[0]}`;
+  const lineOpts=model.vars.map(v=>`<option value="${v.key}" ${v.key===_cState.line?'selected':''}>${v.name}</option>`).join('');
+  const baseOpts=vers.map(k=>`<option value="${k}" ${k===_cState.base?'selected':''}>${verLabel(k)}</option>`).join('');
+  const cmpOpts=vers.map(k=>`<option value="${k}" ${k===_cState.cmp?'selected':''}>${verLabel(k)}</option>`).join('');
+  const perOpts=`<option value="all" ${win[0]===0&&win[1]===P()-1?'selected':''}>Full timeline</option>`+model.periods.map((m,i)=>`<option value="${i}" ${win[0]===win[1]&&win[0]===i?'selected':''}>${m}</option>`).join('');
+  document.getElementById('cControls').innerHTML=`<div class="selrow2">
+    <div class="field"><label>Line to compare</label><select onchange="setCLine(this.value)">${lineOpts}</select></div>
+    <div class="field"><label>Baseline</label><select onchange="setCBase(this.value)">${baseOpts}</select></div>
+    <div class="field"><label>Period</label><select onchange="setCWin(this.value)">${perOpts}</select></div>
+    <div style="flex:1"></div>
+    <button class="btn sm" onclick="openVersions()">Versions${(model.versions||[]).length?` · ${model.versions.length}`:''}</button>
+    <button class="btn sm" onclick="saveVersionModal()">＋ Save version</button>
+  </div>${vers.length<3?`<p class="mut fz11" style="margin:10px 0 0">Only Plan and your working scenario so far — save a few named versions (Budget, Upside, Downside) to line up more here.</p>`:''}`;
+  // focus line across versions
+  const vals=vers.map(k=>({k,val:vAgg(data[k],_cState.line,win)}));
+  const maxAbs=Math.max(1,...vals.map(x=>Math.abs(x.val)));
+  const br=bridge(_cState.line,data[_cState.cmp],data[_cState.base],win);
+  const parts=br.steps.filter(s=>Math.abs(s.delta)>1e-9).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+  if(Math.abs(br.residual)>Math.max(1,Math.abs(br.end)*1e-4)) parts.push({key:'__resid',name:'Other',delta:br.residual});
+  const totd=br.end-br.start;
+  document.getElementById('cBars').innerHTML=`
+    <div class="results-head" style="margin-bottom:12px"><div><p class="eyebrow">${line.name} across versions · ${winLabel}</p><h2 style="font-size:16px">${line.name}, every projection side by side</h2></div></div>
+    <div class="cbars">${vals.map(x=>{ const d=x.val-baseVal,isBase=x.k===_cState.base,w=Math.abs(x.val)/maxAbs*100;
+      return `<div class="cbarrow ${isBase?'isbase':''}"><span class="cbl">${verLabel(x.k)}${isBase?' <i>baseline</i>':''}</span>
+        <span class="cbtrack"><span class="cbfill ${isBase?'b':''}" style="width:${w}%"></span></span>
+        <span class="cbv">${fmtVar(x.val,line.unit)}</span>
+        <span class="cbd ${d>0?'pos':d<0?'negv':''}">${isBase?'—':fmtDelta(d,line.unit)+(baseVal!==0?' ('+(d>=0?'+':'')+(d/Math.abs(baseVal)*100).toFixed(0)+'%)':'')}</span></div>`; }).join('')}</div>
+    ${line.kind==='formula'&&vers.length>1?`<div class="cdiff">
+      <div class="cdiffhead"><span class="eyebrow" style="margin:0">What drives the difference</span><div class="field" style="margin:0"><select class="minisel wide" onchange="setCCmp(this.value)">${cmpOpts}</select></div><span class="mut fz11">vs ${verShort(_cState.base)}</span></div>
+      ${parts.length?`<div class="contrib" style="border-top:0;padding-top:6px">${parts.map(p=>`<div class="crow"><span class="cdot ${p.delta>=0?'up':'down'}"></span><span class="cn">${p.name}</span><span class="cv ${p.delta>=0?'pos':'negv'}">${fmtDelta(p.delta,line.unit)}</span><span class="cp mut">${totd!==0?(p.delta/totd*100).toFixed(0)+'%':''}</span></div>`).join('')}</div>`:`<p class="mut fz12" style="margin:4px 0 0">${verShort(_cState.cmp)} and ${verShort(_cState.base)} are identical for this line.</p>`}
+    </div>`:''}`;
+  // matrix
+  const matHead=`<th>Line</th>`+vers.map(k=>`<th class="num ${k===_cState.base?'basecol':''}">${verShort(k)}</th>`).join('');
+  const matBody=model.vars.map(v=>{ const bv=vAgg(data[_cState.base],v.key,win);
+    const cells=vers.map(k=>{ const val=vAgg(data[k],v.key,win),isBase=k===_cState.base,d=val-bv;
+      return `<td class="num ${isBase?'basecol':''} ${!isBase&&Math.abs(d)>1e-9?(d>0?'pos':'negv'):''}">${fmtVar(val,v.unit)}</td>`; }).join('');
+    return `<tr class="vrow ${v.key===_cState.line?'sel':''}" onclick="setCLine('${v.key}')"><td><span class="vk ${v.kind}"></span><b>${v.name}</b> <span class="agglabel" style="cursor:default">${AGG_LABEL[aggMethod(v)].toLowerCase()}</span></td>${cells}</tr>`; }).join('');
+  document.getElementById('cMatrix').innerHTML=`
+    <div class="results-head" style="margin-bottom:8px"><div><p class="eyebrow">All lines × versions · ${winLabel}</p><h2 style="font-size:16px">Every line across every projection</h2></div></div>
+    <div class="scrollx"><table class="vtable"><thead><tr>${matHead}</tr></thead><tbody>${matBody}</tbody></table></div>
+    <p class="mut fz11" style="margin-top:8px">Colour shows movement vs the ${verShort(_cState.base)} column. Click any line to feature it above.</p>`;
+}
+
+/* ============================ WRITE-BACK (edited inputs only) ============================ */
+function scenRow(v){ return Array.from({length:P()},(_,p)=>+(inputVal(v,p,true)).toFixed(4)); }
+function openWriteback(){
+  const edited=inputs().filter(v=>v.writable!==false && hasOv(v.key));   // only inputs you actually changed
+  const mapped=edited.filter(v=>v.range);
+  if(!edited.length){
+    showModal(`<div class="mhead"><h3>Review write-back</h3><button class="x" onclick="closeModal()">×</button></div>
+      <div class="mbody"><p class="mut" style="margin:0">No scenario changes yet. Drag a point on the chart to change an assumption, then come back here to write it to your sheet.</p>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="closeModal()">Got it</button></div></div>`);
+    return;
+  }
+  const tbl=edited.map(v=>{ const row=scenRow(v); const nEdit=Object.keys(model.ov[v.key]||{}).length;
+    const lo=Math.min(...row), hi=Math.max(...row);
+    const rng = lo===hi ? fmtVar(lo,v.unit) : `${fmtVar(lo,v.unit)} – ${fmtVar(hi,v.unit)}`;
+    return `<tr><td><strong>${v.name}</strong></td><td class="cellref ${v.range?'':'unmapped'}">${v.range||'— map a cell in Model setup —'}</td><td class="num">${rng}<br><span class="mut fz11">${nEdit} period${nEdit!==1?'s':''} changed</span></td></tr>`;}).join('');
+  showModal(`<div class="mhead"><h3>Review write-back</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 8px">Only the <b>input assumptions you changed</b> are written — never the calculated outputs. Your sheet's own formulas turn these into revenue. Each assumption writes its full row across ${P()} periods.</p>
+      <table class="wtable"><thead><tr><th>Assumption</th><th>Target cells</th><th class="num">Scenario (first → last)</th></tr></thead><tbody>${tbl}</tbody></table>
+      ${mapped.length<edited.length?`<div class="write-feedback" style="background:#fff8ec;color:#8a5a12">${edited.length-mapped.length} changed assumption(s) aren’t mapped to a cell yet — map them in Model setup to include them.</div>`:''}
+      ${!conn.connected?`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Not connected to a sheet — this is a dry run. Connect to write for real.</div>`:''}
+      <div id="wbFeedback"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="confirmWriteback()" ${mapped.length===0?'disabled style="opacity:.5"':''}>Write ${mapped.length} assumption${mapped.length!==1?'s':''}</button></div>
+    </div>`);
+}
+async function confirmWriteback(){
+  const fb=document.getElementById('wbFeedback');
+  const writes=inputs().filter(v=>v.writable!==false && hasOv(v.key) && v.range).map(v=>({range:v.range, values:[ scenRow(v) ]}));
+  if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — ${writes.length} assumption(s) ready. Connect a sheet to write for real.</div>`; setTimeout(()=>{closeModal();toast('Dry run complete');},1200); return; }
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Writing assumptions to your sheet…</div>`;
+  try{
+    const data=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'write',ssid:conn.ssid||'',writes})}).then(r=>r.json());
+    if(!data.ok) throw new Error(data.error||'write failed');
+    fb.innerHTML=`<div class="write-feedback success">✓ Wrote ${writes.length} assumption row(s). Your sheet's formulas now recompute the outputs.</div>`;
+    setTimeout(()=>{closeModal();toast('Assumptions written');},1200);
+  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Write failed: ${err.message||err}</div>`; }
+}
+
+/* ============================ CONNECT ============================ */
+function openConnect(){
+  const mappedInputs=inputs().filter(v=>v.range).length, mappedOut=outputs().filter(v=>v.range).length;
+  const s0=(model.sources&&model.sources.forecast)||{};   // reuse last import layout as defaults
+  showModal(`<div class="mhead"><h3>Connect your Google Sheet</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 12px">Free Google Apps Script backend — no paid tools. Ranges come from the cells you mapped on each variable in Model setup (${mappedInputs} input, ${mappedOut} output mapped).</p>
+      <div class="frow"><div class="field"><label>Web app URL (/exec)</label><input class="inp" id="cnUrl" value="${esc(conn.url)}" placeholder="https://script.google.com/macros/s/…/exec" style="font-family:var(--mono);font-size:12px"></div></div>
+      <div class="frow"><div class="field"><label>Model sheet URL or ID <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">— the sheet this whole model reads &amp; writes</span></label><input class="inp" id="cnSheet" value="${esc(conn.ssid?('https://docs.google.com/spreadsheets/d/'+conn.ssid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…  (leave blank to use the script's own sheet)" style="font-family:var(--mono);font-size:11px"></div></div>
+      <div class="scanbox">
+        <p class="eyebrow" style="margin:0 0 4px">Load this sheet's lines into the model</p>
+        <p class="mut fz11" style="margin:0 0 8px">Reads the sheet's P&amp;L layout and <b>replaces</b> the current line list with what's in this sheet. Do this whenever you point at a new sheet.</p>
+        <div class="frow" style="grid-template-columns:1.4fr 1fr .8fr 1fr .8fr;gap:8px;margin-bottom:8px">
+          <div class="field"><label>Tab</label><input class="inp" id="cnTab" value="${esc(s0.tab||'')}" placeholder="(first)"></div>
+          <div class="field"><label>Label col</label><input class="inp" id="cnLabel" value="${esc(s0.labelCol||'A')}" style="text-transform:uppercase"></div>
+          <div class="field"><label>Hdr row</label><input class="inp" id="cnHeader" type="number" value="${s0.headerRow||1}"></div>
+          <div class="field"><label>1st month col</label><input class="inp" id="cnFirst" value="${esc(s0.firstCol||'B')}" style="text-transform:uppercase"></div>
+          <div class="field"><label># months</label><input class="inp" id="cnMonths" type="number" value="${s0.months||12}"></div>
+        </div>
+        <button class="btn indigo sm" onclick="scanModelSheet()">Scan &amp; load lines from this sheet</button>
+        <div id="cnScanFeedback" style="margin-top:8px"></div>
+      </div>
+      <div class="frow two"><div class="field"><label>Secret token</label><input class="inp" id="cnToken" value="${esc(conn.token)}"></div>
+        <div class="field"><label>Unit scale</label><input class="inp" id="cnScale" type="number" step="any" value="${conn.scale}"></div></div>
+      <div class="hintbox">Set <b>Unit scale</b> to <code>0.00001</code> if your sheet is in rupees and you want lakhs, else leave <code>1</code>. Reads every mapped range; write-back only touches mapped <b>input</b> cells.</div>
+      <p class="eyebrow" style="margin:16px 0 6px">Actuals source <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional — a different Google Sheet with your real results)</span></p>
+      <div class="frow"><div class="field"><label>Actuals sheet URL or ID</label><input class="inp" id="cnActuals" value="${esc(conn.actualsSsid?('https://docs.google.com/spreadsheets/d/'+conn.actualsSsid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…  (leave blank to skip)" style="font-family:var(--mono);font-size:11px"></div></div>
+      <div class="hintbox">Your projections stay in the sheet above; your <b>actuals</b> can live in this separate file. Map each line's actuals cell in Model setup, then hit <b>Refresh actuals</b> in the Variance tab. Needs the redeployed Code.gs, and the same Google account must own both sheets.</div>
+      <div id="cnFeedback" style="margin-top:12px"></div>
+      <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px"><div>${conn.connected?'<button class="btn" onclick="disconnectModel()">Disconnect</button>':''}</div>
+        <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Test &amp; connect</button></div></div>
+    </div>`);
+}
+function toNum(x,s){ if(typeof x==='number')return x*s; const n=parseFloat(String(x).replace(/[^0-9.\-]/g,'')); return (isNaN(n)?0:n)*s; }
+/* Scan the connected Model sheet and rebuild the line list from it — one sheet, live-connected.
+   This is what makes "point at a sheet → see that sheet's lines" work. */
+async function scanModelSheet(){
+  const g=id=>document.getElementById(id), fb=g('cnScanFeedback');
+  const url=g('cnUrl').value.trim(), token=g('cnToken').value.trim(), scale=parseFloat(g('cnScale').value)||1;
+  const ssid=extractSsid(g('cnSheet').value.trim());
+  if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter the Web app URL and token first.</div>`; return; }
+  // make sure the connection is set so readSource + later reads/writes hit this sheet
+  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; conn.connected=true;
+  const src={ ssid, tab:g('cnTab').value.trim(), labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
+    headerRow:Math.max(1,parseInt(g('cnHeader').value)||1), firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
+    months:Math.max(1,parseInt(g('cnMonths').value)||12) };
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Scanning the sheet…</div>`;
+  try{
+    const F=await readSource(src);
+    if(!F.lines.length) throw new Error('No line items found — check the Label column, Header row, and First-month column.');
+    const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
+    const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
+    const usedK={}; const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+    const lastCol=numToCol(colToNum(src.firstCol)+periods.length-1);
+    const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
+    const newVars=F.lines.map((l,idx)=>{ const name=l.name, metric=l.metric||'';
+      const key=uk((metric?metric+'_':'')+name);
+      const series=periods.map((_,pi)=> (l.series[pi]===undefined?null:l.series[pi]));
+      const v={key,name,metric,account:name,kind:'output',unit:inferUnit(metric+' '+name),forecast:series,read:series,srcLine:true};
+      const prev=oldByAcct[nrm(metric)+'|'+nrm(name)]||{};
+      ['good','favOverride','agg','group','actuals','actualRange'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
+      return v; });
+    model.vars=newVars; model.periods=periods;
+    model.displayVars=[newVars[newVars.length-1].key];
+    if(!vget(_vState.line)) _vState.line=null; if(_cState&&!vget(_cState.line)) _cState.line=null;
+    _vState.userVer=false; _vState.winUser=false;
+    // remember the layout so Refresh / re-scan reuse it
+    model.sources=Object.assign({}, model.sources, {forecast:src});
+    conn.sheets=conn.sheets||[]; saveConn();
+    recompileAll(); saveModel();
+    fb.innerHTML=`<div class="write-feedback success">✓ Loaded ${newVars.length} line(s) from “${F.name||'your sheet'}”. Closing…</div>`;
+    setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(`Loaded ${newVars.length} lines from the sheet`); },1100);
+  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Scan failed: ${err.message||err}</div>`; }
+}
+async function doConnect(){
+  const url=document.getElementById('cnUrl').value.trim(), token=document.getElementById('cnToken').value.trim(), scale=parseFloat(document.getElementById('cnScale').value)||1;
+  const ssid=extractSsid(document.getElementById('cnSheet').value.trim());       // the sheet the whole model reads & writes
+  const sq = ssid?`&ssid=${encodeURIComponent(ssid)}`:'';                          // blank → the script's bound sheet
+  const actualsSsid=extractSsid(document.getElementById('cnActuals').value.trim());
+  const fb=document.getElementById('cnFeedback');
+  if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter URL and token.</div>`; return; }
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Connecting…</div>`;
+  try{
+    // 1) list the sheet's tabs (needs the updated Code.gs; degrades gracefully)
+    let sheets=[], sheetName="";
+    try{ const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}${sq}`,{redirect:'follow'}).then(r=>r.json()); if(l&&l.ok){ sheets=l.sheets||[]; sheetName=l.spreadsheet||""; } }catch(e){}
+    // 2) read any already-mapped ranges (fine if there are none yet)
+    const mapped=model.vars.filter(v=>v.range);
+    let maxN=0;
+    if(mapped.length){
+      const ranges=[...new Set(mapped.map(v=>v.range))];
+      const data=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=${encodeURIComponent(ranges.join('|'))}`,{redirect:'follow'}).then(r=>r.json());
+      if(!data.ok) throw new Error(data.error||'read failed');
+      sheetName=sheetName||data.spreadsheet||"";
+      mapped.forEach(v=>{ const raw=(data.values[v.range]&&data.values[v.range][0])||[]; let N=raw.length; while(N>0&&(raw[N-1]===''||raw[N-1]==null))N--; const arr=raw.slice(0,N).map(x=>toNum(x,scale)); if(v.kind==='output'){ v.read=arr; } else if(v.kind==='input'){ if(arr.length){ v.base=arr[0]; v.steps=[]; for(let i=1;i<arr.length;i++) if(Math.abs(arr[i]-arr[i-1])>1e-9) v.steps.push({from:i,value:arr[i]}); } } maxN=Math.max(maxN,N); });
+      if(maxN>0 && maxN!==P()){ model.periods=genMonths(maxN,startMonthIdx(),startYear()); }
+    } else {
+      // verify token/access even with nothing mapped yet
+      if(!sheets.length){ const t=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=`,{redirect:'follow'}).then(r=>r.json()); if(!t.ok) throw new Error(t.error||'connection failed'); sheetName=sheetName||t.spreadsheet||""; }
+    }
+    // actuals source: list its tabs so mapping gets a dropdown
+    let actualsSheets=[], actualsName="";
+    if(actualsSsid){ try{ const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}&ssid=${encodeURIComponent(actualsSsid)}`,{redirect:'follow'}).then(r=>r.json()); if(l&&l.ok){ actualsSheets=l.sheets||[]; actualsName=l.spreadsheet||""; } }catch(e){} }
+    conn={connected:true,url,token,scale,ssid,sheets,actualsSsid,actualsSheets}; saveConn(); setStatus(sheetName||'Connected',true);
+    const tabsMsg = sheets.length?` Found ${sheets.length} tab(s) — now pick them from the dropdown when mapping variables.`:` (Tip: redeploy the updated Code.gs to get a tab dropdown.)`;
+    const actMsg = actualsSsid?` Actuals source ${actualsName?`“${actualsName}”`:'linked'} — map each line's actuals cell in Model setup, then Refresh actuals in Variance.`:'';
+    fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”.${mapped.length?` Read ${mapped.length} mapped variable(s).`:' Nothing mapped yet — add variables and map their cells.'}${tabsMsg}${actMsg}</div>`;
+    setTimeout(()=>{closeModal();render();},1600);
+  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Couldn’t connect: ${err.message||err}. Check URL/token and that access is “Anyone”.</div>`; }
+}
+async function refreshActuals(){
+  if(!conn.connected||!conn.actualsSsid){ toast('Add an actuals source first: Connect sheet → Actuals source.'); return; }
+  const mapped=model.vars.filter(v=>v.actualRange);
+  if(!mapped.length){ toast('Map at least one line’s actuals cell in Model setup.'); return; }
+  toast('Reading actuals…');
+  try{
+    const ranges=[...new Set(mapped.map(v=>v.actualRange))];
+    const data=await fetch(`${conn.url}?action=read&token=${encodeURIComponent(conn.token)}&ssid=${encodeURIComponent(conn.actualsSsid)}&ranges=${encodeURIComponent(ranges.join('|'))}`,{redirect:'follow'}).then(r=>r.json());
+    if(!data.ok) throw new Error(data.error||'read failed');
+    mapped.forEach(v=>{ const raw=(data.values[v.actualRange]&&data.values[v.actualRange][0])||[]; let N=raw.length; while(N>0&&(raw[N-1]===''||raw[N-1]==null))N--; v.actuals=raw.slice(0,N).map(x=>toNum(x,conn.scale)); });
+    saveModel(); toast(`Actuals refreshed for ${mapped.length} line(s).`); if(uiTab==='variance'){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); renderVariance(); }
+  }catch(err){ toast('Actuals read failed: '+(err.message||err)); }
+}
+function disconnectModel(){ conn={connected:false,url:"",token:"",scale:1,sheets:[],actualsSsid:"",actualsSheets:[]}; saveConn(); setStatus('No sheet connected',false); closeModal(); render(); toast('Disconnected'); }
+
+/* ============================ TWO-FILE IMPORT (forecast file + actuals file) ============================ */
+function slugKey(name){ let k=String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); if(!k)k='line'; if(!/^[a-z_]/.test(k))k='x_'+k; return k; }
+function inferUnit(name){ const s=String(name).toLowerCase();
+  if(/%/.test(s) || /\brate\b|\bratio\b|margin\s*%|gm\s*%|growth\s*%/.test(s)) return '%';   // only explicit %/rate — a ₹ "gross margin" line stays ₹
+  if(/\bunits?\b|\bqty\b|\bcount\b|\bnos?\b|volume|headcount|\bfte\b|employees|customers|distributors|orders/.test(s)) return '#';
+  return '₹'; }
+/* clean a header cell into a period label — dates become "Nov '26", plain text passes through */
+function fmtPeriodLabel(h){ if(h==null) return ''; const s=String(h).trim();
+  if(/^\d{4}-\d{2}-\d{2}([T ]|$)/.test(s)){ const d=new Date(s); if(!isNaN(d)) return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]+" '"+String(d.getFullYear()).slice(2); }
+  return s; }
+function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/\s+/g,' ').trim(); }
+function srcFeedback(msg,kind){ const el=document.getElementById('srcFeedback'); if(!el)return; const c=kind==='err'?'background:#fff0f1;color:#a33d4d':kind==='ok'?'':'background:#eef0fa;color:#3a4680'; el.innerHTML=`<div class="write-feedback ${kind==='ok'?'success':''}" style="${c}">${msg}</div>`; }
+function openSources(){
+  const s=model.sources||{}, f=s.forecast||{}, a=s.actual||{};
+  const grp=(pfx,src,label,hint)=>`<div class="srcgrp"><p class="eyebrow" style="margin:0 0 8px">${label}</p>
+    <div class="field"><label>Sheet URL or ID</label><input class="inp" id="${pfx}Sheet" value="${esc(src.ssid?('https://docs.google.com/spreadsheets/d/'+src.ssid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…" style="font-family:var(--mono);font-size:11px"></div>
+    <div class="frow two" style="margin-top:8px"><div class="field"><label>Tab name</label><input class="inp" id="${pfx}Tab" value="${esc(src.tab||'')}" placeholder="(first tab)"></div>
+      <div class="field"><label>Label column</label><input class="inp" id="${pfx}Label" value="${esc(src.labelCol||'A')}" style="text-transform:uppercase"></div></div>
+    <div class="frow three" style="margin-top:8px"><div class="field"><label>Header row</label><input class="inp" id="${pfx}Header" type="number" value="${src.headerRow||1}"></div>
+      <div class="field"><label>First month col</label><input class="inp" id="${pfx}First" value="${esc(src.firstCol||'B')}" style="text-transform:uppercase"></div>
+      <div class="field"><label># months</label><input class="inp" id="${pfx}Months" type="number" value="${src.months||12}"></div></div>
+    <p class="mut fz11" style="margin:6px 0 0">${hint}</p></div>`;
+  showModal(`<div class="mhead"><h3>Import forecast + actuals</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 12px">Two separate Google Sheets — one with your <b>forecast</b>, one with your <b>actuals</b>. Each laid out as a P&amp;L: line items down a column, months across the top. The tool reads both and matches lines by their label automatically.</p>
+      <div class="frow two"><div class="field"><label>Apps Script URL (/exec)</label><input class="inp" id="srcUrl" value="${esc(conn.url)}" placeholder="https://script.google.com/…/exec" style="font-family:var(--mono);font-size:11px"></div>
+        <div class="field"><label>Token</label><input class="inp" id="srcToken" value="${esc(conn.token)}"></div></div>
+      <div class="frow two" style="margin-top:8px"><div class="field"><label>Unit scale</label><input class="inp" id="srcScale" type="number" step="any" value="${conn.scale||1}"></div><div class="field"></div></div>
+      <div class="srcrow">${grp('f',f,'① Forecast file','e.g. labels in A, months from B across. Sets your timeline.')}${grp('a',a,'② Actuals file','Same layout. Blank months mean not actual yet — that is your history cutoff.')}</div>
+      <div id="srcFeedback" style="margin-top:12px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="importSources()">Read both &amp; match lines</button></div>
+    </div>`);
+}
+/* a cell is a real number only if it isn't blank, a dash, or text (month headers like "Jan-26") */
+function isRealNum(cell){ if(typeof cell==='number') return true; if(cell==null) return false; const s=String(cell).trim();
+  if(!s||s==='-'||s==='—'||s==='–') return false; if(/[a-zA-Z]/.test(s)) return false;
+  return /\d/.test(s.replace(/[₹,()%\s]/g,'')); }
+/* pull the metric name out of a section title: "4. ACCOUNT-LEVEL MARGINS — Gross Margin (₹ Cr)" -> "Gross Margin" */
+function sectionMetric(title){ let t=String(title).replace(/\(\s*₹?\s*(cr|crore|lakh|l|k|mn|m)?\s*\)/i,'').trim();
+  const parts=t.split(/[—–]/); if(parts.length>1) t=parts[parts.length-1].trim(); else t=t.replace(/^\s*\d+[.)]\s*/,'').trim();
+  return t; }
+async function readSource(src){
+  const rowsCap=300, q=encodeURIComponent;
+  const lastCol=numToCol(colToNum(src.firstCol)+Math.max(1,src.months)-1);
+  const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
+  const rL=`${qt}${src.labelCol}${src.headerRow+1}:${src.labelCol}${src.headerRow+rowsCap}`;
+  const rH=`${qt}${src.firstCol}${src.headerRow}:${lastCol}${src.headerRow}`;
+  const rD=`${qt}${src.firstCol}${src.headerRow+1}:${lastCol}${src.headerRow+rowsCap}`;
+  const url=`${conn.url}?action=read&token=${q(conn.token)}${src.ssid?`&ssid=${q(src.ssid)}`:''}&ranges=${q([rL,rH,rD].join('|'))}`;
+  const data=await fetch(url,{redirect:'follow'}).then(r=>r.json());
+  if(!data.ok) throw new Error(data.error||'read failed');
+  const labels=(data.values[rL]||[]).map(r=>String(r[0]==null?'':r[0]).trim());
+  const headers=((data.values[rH]||[])[0]||[]).map(h=>String(h==null?'':h).trim());
+  const grid=data.values[rD]||[];
+  const lines=[]; let section='';
+  for(let i=0;i<labels.length;i++){ const nm=labels[i]; const row=grid[i]||[];
+    const nReal=headers.reduce((n,_,c)=>n+(isRealNum(row[c])?1:0),0);
+    if(nReal===0){
+      // a title/section/sub-header row — no numbers to compare. Update the section if it reads like one.
+      if(nm){ const dataBlank=headers.every((_,c)=>{const cl=row[c];return cl===''||cl==null;});
+        if(dataBlank || /[—–]/.test(nm) || /revenue|margin|ebitda|cost|expense|profit|opex|cash|balance|total|deals|customers|other/i.test(nm)) section=sectionMetric(nm); }
+      continue;   // never make a line out of a non-numeric row
+    }
+    if(!nm) continue;
+    const series=headers.map((_,c)=>{ const cell=row[c]; return isRealNum(cell)?toNum(cell,conn.scale):null; });
+    lines.push({name:nm, series, metric:section});
+  }
+  return {name:data.spreadsheet||'', headers, lines};
+}
+async function importSources(){
+  const g=id=>document.getElementById(id);
+  conn.url=g('srcUrl').value.trim(); conn.token=g('srcToken').value.trim(); conn.scale=parseFloat(g('srcScale').value)||1;
+  if(!conn.url||!conn.token){ srcFeedback('Enter the Apps Script URL and token (from your deployed Code.gs).','err'); return; }
+  const mk=pfx=>({ssid:extractSsid(g(pfx+'Sheet').value.trim()), tab:g(pfx+'Tab').value.trim(), labelCol:(g(pfx+'Label').value.trim()||'A').toUpperCase(), headerRow:Math.max(1,parseInt(g(pfx+'Header').value)||1), firstCol:(g(pfx+'First').value.trim()||'B').toUpperCase(), months:Math.max(1,parseInt(g(pfx+'Months').value)||12)});
+  const fSrc=mk('f'), aSrc=mk('a');
+  if(!fSrc.ssid){ srcFeedback('Add the forecast sheet URL.','err'); return; }
+  srcFeedback('Reading both files and matching lines…','info');
+  try{ const r=await doImport(fSrc,aSrc); closeModal(); toast(`Imported ${r.total} lines · ${r.matched} matched with actuals`); uiTab='variance'; switchTab('variance'); }
+  catch(err){ srcFeedback('Import failed: '+(err.message||err)+'. Check the URL, token, tab name and that access is “Anyone”.','err'); }
+}
+async function importSources2(){ if(!model.sources){ openSources(); return; } toast('Re-reading both files…');
+  try{ const r=await doImport(model.sources.forecast,model.sources.actual); toast(`Refreshed ${r.total} lines · ${r.matched} with actuals`); if(uiTab==='variance'){ autoDefaultVer(); renderVariance(); } }
+  catch(err){ toast('Refresh failed: '+(err.message||err)); } }
+/* read both files, auto-match by label, rebuild the model as read-lines */
+async function doImport(fSrc,aSrc){
+  const F=await readSource(fSrc);
+  const A=aSrc&&aSrc.ssid?await readSource(aSrc):{headers:[],lines:[]};
+  const fHead=F.headers.map(fmtPeriodLabel), aHead=A.headers.map(fmtPeriodLabel);
+  const periods=fHead.map((h,i)=>h||('P'+(i+1)));
+  const aHeadIdx={}; aHead.forEach((h,i)=>{ aHeadIdx[nrm(h)]=i; });
+  const alignA=series=>periods.map((h,pi)=>{ const ai=aHeadIdx[nrm(h)]; const v=(ai!=null?series[ai]:series[pi]); return v===undefined?null:v; });
+  // identity = metric (section) + account name — so "Meridian Retail" in Revenue and in Gross Margin are two lines
+  const idOf=l=>nrm(l.metric||'')+'|'+nrm(l.name);
+  const aById={}, aMetaById={}; A.lines.forEach(l=>{ aById[idOf(l)]=alignA(l.series); });
+  const fById={}, metaById={}; F.lines.forEach(l=>{ fById[idOf(l)]=l.series; metaById[idOf(l)]={name:l.name,metric:l.metric}; });
+  A.lines.forEach(l=>{ if(!metaById[idOf(l)]) metaById[idOf(l)]={name:l.name,metric:l.metric}; });
+  const order=[]; const seen=new Set();
+  F.lines.forEach(l=>{ const id=idOf(l); if(!seen.has(id)){ order.push(id); seen.add(id); } });
+  A.lines.forEach(l=>{ const id=idOf(l); if(!seen.has(id)){ order.push(id); seen.add(id); } });
+  const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
+  const usedK={}; const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+  let matched=0;
+  const newVars=order.map(id=>{ const meta=metaById[id]||{name:id,metric:''}; const name=meta.name, metric=meta.metric||'';
+    const key=uk((metric?metric+'_':'')+name);
+    const fs=fById[id], as=aById[id];
+    const fser=fs?periods.map((_,pi)=>fs[pi]===undefined?null:fs[pi]):null;
+    const aser=as||null;
+    if(fs&&as&&as.some(x=>x!=null)) matched++;
+    const prev=oldByAcct[id]||{};
+    const v={key,name,metric,account:name,kind:'output',unit:inferUnit(metric+' '+name),forecast:fser,actuals:aser,read:fser,srcLine:true};
+    ['good','favOverride','agg','group'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
+    return v; });
+  if(!newVars.length) throw new Error('No line items found — check the label column and header row');
+  model.vars=newVars; model.periods=periods; model.closed=lastActualIdx()+1;
+  model.sources={forecast:fSrc,actual:aSrc};
+  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[newVars[newVars.length-1].key];
+  if(!vget(_vState.line)) _vState.line=null; if(!vget(_cState.line)) _cState.line=null;
+  _vState.userVer=false; _vState.winUser=false;   // fresh import → re-default to Actuals vs Forecast
+  try{delete sessionStorage.__vinit;}catch(e){}
+  recompileAll(); saveModel(); saveConn();
+  return {total:newVars.length, matched};
+}
+function setStatus(name,live){ const el=document.getElementById('modelStatus'); if(!el)return; el.innerHTML=`<span class="status-dot"></span>${name}<span>•</span>${live?'Live':'Local model'}`; }
+
+/* ---- persistence ---- */
+function saveModel(){ try{ localStorage.setItem('nn_model',JSON.stringify(model)); }catch(e){} }
+function saveConn(){ try{ localStorage.setItem('nn_conn2',JSON.stringify(conn)); }catch(e){} }
+function loadLocal(){
+  try{ const m=localStorage.getItem('nn_model'); if(m){ const p=JSON.parse(m); if(p&&p.vars&&p.vars.length) model=p; } }catch(e){}
+  if(!Array.isArray(model.displayVars)) model.displayVars = model.displayVar ? [model.displayVar] : [(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key||'revenue'];
+  if(!model.chartVar || !model.vars.find(v=>v.key===model.chartVar)) model.chartVar = (model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key||'revenue';
+  if(model.levers===undefined) model.levers=null;
+  if(!model.solveMode) model.solveMode='proportional';
+  if(!model.vnotes||typeof model.vnotes!=='object') model.vnotes={};
+  if(!Array.isArray(model.reasonCodes)) model.reasonCodes=[];
+  if(model.matThresh==null) model.matThresh=0;
+  if(!Array.isArray(model.versions)) model.versions=[];
+  if(model.sources===undefined) model.sources=null;
+  if(!Array.isArray(model.pins)) model.pins=[];
+  if(model.solveDriver===undefined) model.solveDriver=null;
+  if(!model.ov || Array.isArray(model.ov) || typeof model.ov!=='object') model.ov={};
+  if(!Array.isArray(model.displayVars) || !model.displayVars.length) model.displayVars=[(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key].filter(Boolean);
+  if(!model.nodePos) model.nodePos={};
+  try{ const c=localStorage.getItem('nn_conn2'); if(c){ const p=JSON.parse(c); if(p&&p.connected){ conn=p; setStatus('Reconnect from Connect sheet',false);} } }catch(e){}
+  recompileAll();
+}
+
+/* ---- modal / toast ---- */
+function showModal(html){ document.getElementById('modal').innerHTML=html; document.getElementById('scrim').classList.add('on'); }
+function closeModal(){ document.getElementById('scrim').classList.remove('on'); }
+document.getElementById('scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeModal(); });
+function esc(s){ return String(s==null?'':s).replace(/"/g,'&quot;'); }
+function jesc(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+
+/* ---- account drill-down: every metric for one account as a FORECAST vs ACTUAL view.
+   The distance between the two lines is the variance — exactly the "understand more"
+   picture. Independent of the table's dropdowns; shows an empty state if no actuals. ---- */
+function openAccount(acct){
+  const lines=model.vars.filter(v=>nrm(v.account||v.name)===nrm(acct));
+  if(!lines.length){ toast('No lines for this account'); return; }
+  const F=versionData('forecast'), A=versionData('actual'), la=lastActualIdx();
+  const win=[0, la>=0?la:P()-1];
+  const cutLabel = la>=0 ? model.periods[la] : null;
+  const acctHasActual = lines.some(v=> v.actuals && v.actuals.some(x=>x!=null&&x!==''));
+  const winLab = win[0]===win[1]?model.periods[win[0]]:model.periods[win[0]].split(' ')[0]+'–'+model.periods[win[1]].split(' ')[0];
+  const hasA=v=>{ if(!v.actuals) return false; for(let p=win[0];p<=win[1];p++) if(v.actuals[p]!=null&&v.actuals[p]!=='') return true; return false; };
+  // stable order: revenue-ish metrics first, then margins, then the rest
+  const rank=m=>{ const s=nrm(m); if(/revenue|sales|gmv|bookings/.test(s))return 0; if(/margin|gross|contribution/.test(s))return 1; if(/ebitda|profit|net/.test(s))return 2; return 3; };
+  lines.sort((a,b)=>rank(a.metric)-rank(b.metric));
+  const cards=lines.map(v=>{
+    const fT=vAgg(F,v.key,win);
+    const aT=hasA(v)?vAgg(A,v.key,win):null;
+    const d=(aT!=null)?aT-fT:null, fav=d!=null?isFav(v,d):null, pct=(d!=null&&fT)?d/Math.abs(fT)*100:null;
+    const agg=AGG_LABEL[aggMethod(v)].toLowerCase();
+    return `<div class="acctcard">
+      <div class="acctcard-head">
+        <div><span class="metname">${esc(v.metric||v.name)}</span> <span class="mut fz11">· ${agg} over ${winLab}</span></div>
+        <span class="fu ${fav==null?'na':fav?'fav':'unf'}">${fav==null?'no actual':fav?'Favourable':'Unfavourable'}</span>
+      </div>
+      <div class="acctkpis">
+        <div class="akpi"><label>Forecast</label><b>${fmtVar(fT,v.unit)}</b></div>
+        <div class="akpi"><label>Actual</label><b>${aT==null?'<span class=&quot;mut&quot;>—</span>':fmtVar(aT,v.unit)}</b></div>
+        <div class="akpi"><label>Variance</label><b class="${d>0?'pos':d<0?'negv':''}">${d==null?'<span class=&quot;mut&quot;>—</span>':d===0?'—':fmtDelta(d,v.unit)}${pct!=null&&d!==0?` <span class="mut fz11">${pct>=0?'+':''}${pct.toFixed(1)}%</span>`:''}</b></div>
+      </div>
+      ${acctChart(v,F,A,la)}
+    </div>`;
+  }).join('');
+  const banner = acctHasActual ? '' : `<div class="acctempty">No actuals loaded for this account yet — showing the forecast trend only. Import your <b>actuals</b> file (Sources) or map an actuals cell in Model setup, and the gap between the forecast and actual lines becomes the variance.</div>`;
+  showModal(`<div class="acctview">
+    <div class="mhead"><div><h3>${esc(acct)}</h3><p class="mut fz11" style="margin:2px 0 0">Account view · forecast vs actual${cutLabel?` · actuals through ${cutLabel}`:''}</p></div><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <div class="acctlegend"><span><i class="ln fc"></i>Forecast</span><span><i class="ln ac"></i>Actual</span><span><i class="sw"></i>Variance</span>${cutLabel?'<span><i class="cut"></i>History cutoff</span>':''}</div>
+      ${banner}${cards}
+    </div></div>`);
+}
+/* SVG chart for one line: forecast F (indigo) vs actual A (green); variance = the shaded gap.
+   Both series over the FULL timeline so the trend is visible; KPIs above use the overlap window. */
+function acctChart(v,F,A,la){
+  const n=P(), per=model.periods;
+  const bArr=(F[v.key]||[]).map(x=>x==null||x===''?null:Number(x));   // forecast
+  const aArr=(A[v.key]||[]).map(x=>x==null||x===''?null:Number(x));   // actual
+  const vals=[]; bArr.forEach(x=>{ if(x!=null&&!isNaN(x)) vals.push(x); }); aArr.forEach(x=>{ if(x!=null&&!isNaN(x)) vals.push(x); });
+  if(!vals.length) return '<p class="mut fz12" style="margin:2px 0 0">No data to chart.</p>';
+  let hi=Math.max(...vals), lo=Math.min(0,...vals); let rng=(hi-lo)||Math.abs(hi)||1; hi+=rng*0.10; lo-=rng*0.06; const R=(hi-lo)||1;
+  const W=680,H=200, padL=6,padR=10,padT=12,padB=24, iw=W-padL-padR, ih=H-padT-padB;
+  const X=i=> padL + (n<=1?iw/2 : i/(n-1)*iw);
+  const Y=val=> padT + (hi-val)/R*ih;
+  const pathOf=arr=>{ let d='',pen=false; arr.forEach((val,i)=>{ if(val==null||isNaN(val)){pen=false;return;} d+=(pen?'L':'M')+X(i).toFixed(1)+' '+Y(val).toFixed(1)+' '; pen=true; }); return d.trim(); };
+  // variance area over contiguous runs where BOTH series exist
+  let areas='', run=[];
+  const flush=()=>{ if(run.length>1){ const top=run.map(i=>X(i).toFixed(1)+' '+Y(bArr[i]).toFixed(1)).join(' L');
+      const bot=run.slice().reverse().map(i=>X(i).toFixed(1)+' '+Y(aArr[i]).toFixed(1)).join(' L');
+      areas+=`<path d="M${top} L${bot} Z" fill="var(--red)" opacity="0.10"/>`; } run=[]; };
+  for(let i=0;i<n;i++){ if(bArr[i]!=null&&!isNaN(bArr[i])&&aArr[i]!=null&&!isNaN(aArr[i])) run.push(i); else flush(); } flush();
+  // dots on the comparison line
+  let dots=''; aArr.forEach((val,i)=>{ if(val!=null&&!isNaN(val)) dots+=`<circle cx="${X(i).toFixed(1)}" cy="${Y(val).toFixed(1)}" r="2.4" fill="var(--green)"/>`; });
+  // zero baseline if range straddles zero
+  const zeroLine = (lo<0&&hi>0)?`<line x1="${padL}" y1="${Y(0).toFixed(1)}" x2="${W-padR}" y2="${Y(0).toFixed(1)}" stroke="#e7eaf0" stroke-width="1"/>`:'';
+  // history cutoff (only when actuals are one of the two versions)
+  let cut='';
+  if(la>=0&&la<n){ const cx=X(la).toFixed(1); cut=`<line x1="${cx}" y1="${padT-4}" x2="${cx}" y2="${padT+ih}" stroke="#b8c0d6" stroke-width="1" stroke-dasharray="3 3"/>`; }
+  // month axis (thin it out)
+  const step=Math.max(1,Math.ceil(n/8)); let axis='';
+  for(let i=0;i<n;i+=step){ axis+=`<text x="${X(i).toFixed(1)}" y="${H-7}" font-size="9" fill="#8b93a8" text-anchor="${i===0?'start':i>=n-step?'end':'middle'}">${(per[i]||'').split(' ')[0]}</text>`; }
+  const yTop=`<text x="${padL}" y="${(padT+4).toFixed(1)}" font-size="9" fill="#aab0be">${fmtVar(hi,v.unit)}</text>`;
+  const yBot=`<text x="${padL}" y="${(padT+ih-1).toFixed(1)}" font-size="9" fill="#aab0be">${fmtVar(lo,v.unit)}</text>`;
+  return `<svg class="acctsvg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
+    ${zeroLine}${areas}${cut}
+    <path d="${pathOf(bArr)}" fill="none" stroke="var(--indigo)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${pathOf(aArr)}" fill="none" stroke="var(--green)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}${axis}${yTop}${yBot}</svg>`;
+}
+let toastT; function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),1900); }
+
+/* ---- boot ---- */
+loadLocal();
+render();
+</script>
+</body>
+</html>
+
+
