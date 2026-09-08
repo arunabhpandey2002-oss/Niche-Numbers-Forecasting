@@ -65,6 +65,19 @@
   .kind-input{background:var(--indigo-soft);color:var(--indigo-ink)}
   .kind-formula{background:#eef7f2;color:var(--green-ink)}
   .kind-output{background:#fff1e8;color:var(--amber)}
+
+  .mapchip{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:6px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;border:1px solid transparent}
+  .mapchip.auto{background:#eef7f2;color:#1f6b45;border-color:#c9e6d8}
+  .mapchip.suggested{background:#fff8ec;color:#8a5a12;border-color:#f4e2c0}
+  .mapchip.manual{background:var(--indigo-soft);color:var(--indigo-ink);border-color:var(--indigo-border)}
+  .mapchip.unmapped{background:#f2f4f8;color:#8b93a6;border-color:#e5e8ef}
+  .mapbanner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border-radius:10px;background:#fff8ec;border:1px solid #f4e2c0;color:#8a5a12;font-size:12.5px}
+  .mapbanner b{font-weight:700}
+  .mapfilter{display:inline-flex;gap:4px;flex-wrap:wrap}
+  .mapfilter button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer;color:#6c7489}
+  .mapfilter button.on{background:var(--indigo-soft);border-color:var(--indigo-border);color:var(--indigo-ink);font-weight:600}
+  .linechip .gear{margin-left:4px;opacity:.55;font-size:11px;cursor:pointer}
+  .linechip.on .gear{opacity:.85}
   .keychip{font-family:var(--mono);font-size:10px;color:#8b93a6;background:#f2f4f8;border-radius:5px;padding:1px 6px}
   .expr{font-family:var(--mono);font-size:11px;color:#3a4763}
   .cellref{font-family:var(--mono);font-size:11px;color:#7d8598}
@@ -579,6 +592,237 @@ function numToCol(n){ let s=""; while(n>0){ const r=(n-1)%26; s=String.fromCharC
 function buildRange(sheet,col,row,span){ if(!sheet||!col||!row) return ""; const c1=colToNum(col); if(!c1) return ""; const c2=c1+Math.max(1,span)-1; const sh=/[^A-Za-z0-9_]/.test(sheet)?`'${sheet}'`:sheet; return `${sh}!${numToCol(c1)}${row}:${numToCol(c2)}${row}`; }
 function parseRange(rng){ const m=String(rng||"").match(/^(?:'([^']+)'|([^'!]+))?!?\s*([A-Za-z]+)(\d+)/); if(!m) return {sheet:"",col:"",row:""}; return {sheet:(m[1]||m[2]||"").trim(),col:(m[3]||"").toUpperCase(),row:m[4]||""}; }
 
+/* ============================ P3: sheet formula → model graph ============================ */
+function a1ColRow(ref){
+  const m=String(ref||'').replace(/\$/g,'').match(/^([A-Za-z]+)(\d+)$/);
+  if(!m) return null;
+  return {col:m[1].toUpperCase(), row:+m[2], colNum:colToNum(m[1])};
+}
+/** Tokenize simple Excel-ish formulas: + - * / ( ) , cell refs, Sheet!A1, $A$1, numbers. */
+function tokenizeSheetFormula(src){
+  let s=String(src||'').trim();
+  if(s.startsWith('=')) s=s.slice(1);
+  const toks=[]; let i=0;
+  while(i<s.length){
+    const ch=s[i];
+    if(/\s/.test(ch)){ i++; continue; }
+    if('+-*/(),'.includes(ch)){ toks.push({t:'op', v:ch}); i++; continue; }
+    if(/[0-9.]/.test(ch)){
+      let j=i+1; while(j<s.length && /[0-9.]/.test(s[j])) j++;
+      toks.push({t:'num', v:s.slice(i,j)}); i=j; continue;
+    }
+    /* Sheet!A1 or 'Sheet Name'!$A$1 or bare $A$1 / A1 */
+    if(ch==="'"){
+      let j=i+1; while(j<s.length && s[j]!=="'") j++;
+      if(j>=s.length){ toks.push({t:'bad', v:s.slice(i)}); break; }
+      const sheet=s.slice(i+1,j); j++;
+      if(s[j]==='!'){
+        j++;
+        const m=s.slice(j).match(/^\$?[A-Za-z]+\$?\d+/);
+        if(!m){ toks.push({t:'bad', v:s.slice(i)}); break; }
+        toks.push({t:'ref', sheet, a1:m[0].replace(/\$/g,'')}); i=j+m[0].length; continue;
+      }
+      toks.push({t:'bad', v:s.slice(i)}); break;
+    }
+    /* unquoted Sheet!A1 or A1 / name-like */
+    const rest=s.slice(i);
+    const sheetRef=rest.match(/^([A-Za-z_][A-Za-z0-9_]*)!(\$?[A-Za-z]+\$?\d+)/);
+    if(sheetRef){
+      toks.push({t:'ref', sheet:sheetRef[1], a1:sheetRef[2].replace(/\$/g,'')});
+      i+=sheetRef[0].length; continue;
+    }
+    const cell=rest.match(/^\$?[A-Za-z]+\$?\d+/);
+    if(cell){
+      toks.push({t:'ref', sheet:'', a1:cell[0].replace(/\$/g,'')});
+      i+=cell[0].length; continue;
+    }
+    const ident=rest.match(/^[A-Za-z_][A-Za-z0-9_.]*/);
+    if(ident){ toks.push({t:'ident', v:ident[0]}); i+=ident[0].length; continue; }
+    toks.push({t:'bad', v:ch}); i++;
+  }
+  return toks;
+}
+/**
+ * Convert an Excel formula string into a model expr using variable keys.
+ * cellMap: { 'A1'|'Sheet!A1' (upper) -> varKey }
+ * Returns {ok, expr, deps, unresolved} or {ok:false, reason}.
+ * Only allows + - * / ( ) numbers and mapped refs — functions → fail (caller keeps output).
+ */
+function sheetFormulaToExpr(formula, cellMap, defaultSheet){
+  const toks=tokenizeSheetFormula(formula);
+  if(!toks.length) return {ok:false, reason:'empty'};
+  if(toks.some(t=>t.t==='bad')) return {ok:false, reason:'unsupported token'};
+  if(toks.some(t=>t.t==='ident')) return {ok:false, reason:'function or name'};
+  const parts=[]; const deps=[]; const unresolved=[];
+  const ds=String(defaultSheet||'').trim();
+  for(const t of toks){
+    if(t.t==='op'){ parts.push(t.v==='/'?' / ':t.v==='*'?' * ':t.v==='+'?' + ':t.v==='-'?' - ':t.v); continue; }
+    if(t.t==='num'){ parts.push(t.v); continue; }
+    if(t.t==='ref'){
+      const cr=a1ColRow(t.a1); if(!cr){ unresolved.push(t.a1); parts.push('?'); continue; }
+      const sh=(t.sheet||ds||'').trim();
+      const keys=[
+        (sh?sh+'!':'')+cr.col+cr.row,
+        cr.col+cr.row,
+        (sh?sh.toUpperCase()+'!':'')+cr.col+cr.row
+      ].map(k=>k.toUpperCase());
+      let key=null;
+      for(const k of keys){ if(cellMap[k]){ key=cellMap[k]; break; } }
+      /* also try without sheet on map keys that include sheet */
+      if(!key){
+        for(const mk of Object.keys(cellMap)){
+          const bare=mk.includes('!')?mk.split('!').pop():mk;
+          if(bare===cr.col+cr.row){ key=cellMap[mk]; break; }
+        }
+      }
+      if(!key){ unresolved.push((sh?sh+'!':'')+cr.col+cr.row); parts.push('?'); continue; }
+      parts.push(key); deps.push(key); continue;
+    }
+  }
+  if(unresolved.length) return {ok:false, reason:'unresolved '+unresolved.join(','), unresolved};
+  const expr=parts.join('').replace(/\s+/g,' ').trim();
+  /* sanity: must compile */
+  try{ compile(expr); }catch(e){ return {ok:false, reason:String(e.message||e)}; }
+  return {ok:true, expr, deps:[...new Set(deps)]};
+}
+/** Build A1→key map for a scanned block: labelCol + first data col for each line row. */
+function buildCellMapFromScan(opts){
+  /* opts: {sheet, labelCol, firstCol, headerRow, lines:[{name,metric,row,key}] } row is 1-based sheet row */
+  const map={}; const sh=String(opts.sheet||'').trim();
+  const first=String(opts.firstCol||'B').toUpperCase();
+  (opts.lines||[]).forEach(l=>{
+    if(!l || !l.key || !l.row) return;
+    const a1=first+l.row;
+    const k1=a1.toUpperCase(), k2=(sh?sh+'!'+a1:a1).toUpperCase();
+    map[k1]=l.key; map[k2]=l.key;
+  });
+  return map;
+}
+function mapStatusOf(v){ return (v&&v.mapStatus)|| (v&&v.range?'manual':'unmapped'); }
+function needsMapReview(v){
+  const s=mapStatusOf(v);
+  return s==='suggested' || s==='unmapped' || (v&&v.kind==='formula' && v.mapStatus==='suggested');
+}
+
+/* ---- P3 exact algebraic breakback for pure * / monomial trees ---- */
+/** Walk compiled deps; return {ok, exponents:{leafKey:power}, constant} such that
+ *  output ≈ constant * Π leaf^power  at the given period (using current scenario values),
+ *  or ok:false if + / if / non-monomial. */
+function monomialFactorization(key, period, leafKeys){
+  const leafSet=new Set((leafKeys||[]).map(k=>String(k).toLowerCase()));
+  const memo={};
+  function fac(k, seen){
+    const kl=String(k).toLowerCase();
+    if(kl in memo) return memo[kl];
+    if(seen.has(kl)) return memo[kl]={ok:false};
+    seen=new Set(seen); seen.add(kl);
+    const v=vget(k)||model.vars.find(x=>x.key.toLowerCase()===kl);
+    if(!v) return memo[kl]={ok:false};
+    if(v.kind==='input'){
+      if(!leafSet.has(v.key.toLowerCase()) && !leafSet.has(kl)){
+        /* treat as constant at this period */
+        const val=inputVal(v,period,true);
+        return memo[kl]={ok:true, exp:{}, c:Number(val)};
+      }
+      const exp={}; exp[v.key]=1;
+      return memo[kl]={ok:true, exp, c:1};
+    }
+    if(v.kind==='output'){
+      const val=(v.read&&v.read[period])||0;
+      return memo[kl]={ok:true, exp:{}, c:Number(val)};
+    }
+    if(v.kind!=='formula') return memo[kl]={ok:false};
+    let expr=String(v.expr||'').trim();
+    if(!expr) return memo[kl]={ok:false};
+    let compiled; try{ compiled=v.compiled&&v.compiled.rpn?v.compiled:compile(expr); }catch(e){ return memo[kl]={ok:false}; }
+    /* evaluate RPN structurally for monomials only */
+    const st=[];
+    for(const x of compiled.rpn){
+      if('n' in x){ st.push({ok:true, exp:{}, c:x.n}); continue; }
+      if('vref' in x) return memo[kl]={ok:false}; /* lag/sum not monomial-closed-form */
+      if('v' in x){ st.push(fac(x.v, seen)); continue; }
+      if(x.fn) return memo[kl]={ok:false};
+      if(x.op){
+        const b=st.pop(), a=st.pop();
+        if(!a||!b||!a.ok||!b.ok) return memo[kl]={ok:false};
+        if(x.op==='*' ){
+          const exp={}; Object.keys(a.exp).forEach(k=>exp[k]=(exp[k]||0)+a.exp[k]);
+          Object.keys(b.exp).forEach(k=>exp[k]=(exp[k]||0)+b.exp[k]);
+          st.push({ok:true, exp, c:a.c*b.c}); continue;
+        }
+        if(x.op==='/'){
+          if(Math.abs(b.c)<1e-15) return memo[kl]={ok:false};
+          const exp={}; Object.keys(a.exp).forEach(k=>exp[k]=(exp[k]||0)+a.exp[k]);
+          Object.keys(b.exp).forEach(k=>exp[k]=(exp[k]||0)-b.exp[k]);
+          st.push({ok:true, exp, c:a.c/b.c}); continue;
+        }
+        /* + or - : only if one side has no free leaf exponents (pure constant) */
+        const aFree=Object.keys(a.exp).some(k=>Math.abs(a.exp[k])>1e-12);
+        const bFree=Object.keys(b.exp).some(k=>Math.abs(b.exp[k])>1e-12);
+        if(x.op==='+' || x.op==='-'){
+          if(aFree&&bFree) return memo[kl]={ok:false};
+          if(!aFree&&!bFree){ st.push({ok:true, exp:{}, c:x.op==='+'?a.c+b.c:a.c-b.c}); continue; }
+          return memo[kl]={ok:false};
+        }
+        return memo[kl]={ok:false};
+      }
+    }
+    if(st.length!==1||!st[0].ok) return memo[kl]={ok:false};
+    return memo[kl]=st[0];
+  }
+  const r=fac(key, new Set());
+  if(!r||!r.ok) return {ok:false};
+  /* drop zero exponents */
+  const exp={}; Object.keys(r.exp).forEach(k=>{ if(Math.abs(r.exp[k])>1e-12) exp[k]=r.exp[k]; });
+  return {ok:true, exponents:exp, constant:r.c};
+}
+function tryExactBacksolve(key, period, target, leaves, mode){
+  const leafKeys=leaves.map(v=>v.key);
+  const fac=monomialFactorization(key, period, leafKeys);
+  if(!fac.ok) return {ok:false};
+  const cur=leaves.map(v=>stableCur(v,period));
+  if(cur.some(x=>!(Math.abs(x)>1e-15))) return {ok:false}; /* zero leaf — can't scale */
+  leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); /* stable base before ratio */
+  /* Prefer ratio method: y_new / y_old = Π (x_i'/x_i)^{p_i} */
+  const y0=outAt(key,period);
+  if(!(Math.abs(y0)>1e-15)) return {ok:false};
+  const ratio=target/y0;
+  if(!Number.isFinite(ratio)) return {ok:false};
+  const powers=leaves.map(v=>fac.exponents[v.key]||0);
+  if(powers.every(p=>Math.abs(p)<1e-12)) return {ok:false};
+  if(mode==='single'){
+    const i=0; /* freeLeavesOf already narrowed to one */
+    const p=powers[i];
+    if(Math.abs(p)<1e-12) return {ok:false};
+    /* (x'/x)^p = ratio → x' = x * ratio^(1/p) */
+    let scale=Math.pow(ratio, 1/p);
+    if(!Number.isFinite(scale)) return {ok:false};
+    setOv(leaves[i].key, period, cur[i]*scale);
+    let y=outAt(key,period);
+    /* FP polish: one corrective scale on the free leaf */
+    if(Math.abs(y)>1e-15 && Math.abs(y-target)>Math.max(1e-9, Math.abs(target)*1e-12)){
+      const corr=Math.pow(target/y, 1/p);
+      if(Number.isFinite(corr)){ setOv(leaves[i].key, period, cur[i]*scale*corr); scale*=corr; y=outAt(key,period); }
+    }
+    const ok=Math.abs(y-target)<=Math.max(1e-4, Math.abs(target)*1e-6);
+    return {ok:true, exact:true, y, hit:ok};
+  }
+  /* proportional: common factor r on every free leaf → ratio = r^{Σ p_i} */
+  const psum=powers.reduce((s,p)=>s+p,0);
+  if(Math.abs(psum)<1e-12) return {ok:false};
+  let r=Math.pow(ratio, 1/psum);
+  if(!Number.isFinite(r)) return {ok:false};
+  leaves.forEach((v,i)=>setOv(v.key, period, cur[i]*r));
+  let y=outAt(key,period);
+  if(Math.abs(y)>1e-15 && Math.abs(y-target)>Math.max(1e-9, Math.abs(target)*1e-12)){
+    const corr=Math.pow(target/y, 1/psum);
+    if(Number.isFinite(corr)){ r*=corr; leaves.forEach((v,i)=>setOv(v.key, period, cur[i]*r)); y=outAt(key,period); }
+  }
+  const ok=Math.abs(y-target)<=Math.max(1e-4, Math.abs(target)*1e-6);
+  return {ok:true, exact:true, y, hit:ok, scale:r};
+}
+
+
 function P(){ return model.periods.length; }
 function vget(k){ return model.vars.find(v=>v.key===k); }
 function inputs(){ return model.vars.filter(v=>v.kind==="input"); }
@@ -719,28 +963,49 @@ function render(){ recompileAll(); const el=document.getElementById('main');
 /* ============================ MODEL SETUP (builder) ============================ */
 function viewSetup(){
   const startLbl=model.periods[0]||"", endLbl=model.periods[P()-1]||"";
+  const filt=(model.uiState&&model.uiState.mapFilter)||'all';
+  const reviewN=model.vars.filter(needsMapReview).length;
   const rows=model.vars.map((v,i)=>{
+    const st=mapStatusOf(v);
+    if(filt==='review' && !needsMapReview(v)) return '';
+    if(filt!=='all' && filt!=='review' && st!==filt) return '';
     const kindCls=v.kind==="input"?"kind-input":v.kind==="formula"?"kind-formula":"kind-output";
-    const def = v.kind==="formula" ? `<span class="expr">${v.expr}</span>${v.err?` <span class="negv fz10">⚠ ${v.err}</span>`:''}`
+    const def = v.kind==="formula" ? `<span class="expr">${esc(v.expr||'')}</span>${v.err?` <span class="negv fz10">⚠ ${esc(v.err)}</span>`:''}`
       : v.kind==="input" ? `<span class="mut fz11">base ${fmtVar(v.base,v.unit)}${(v.steps&&v.steps.length)?` · ${v.steps.length} step${v.steps.length>1?'s':''}`:''}</span>`
       : `<span class="mut fz11">read from sheet</span>`;
-    const cell = v.range ? `<span class="cellref">${v.range}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}` : `<span class="cellref unmapped">— not mapped —</span>`;
+    const cell = v.range ? `<span class="cellref">${esc(v.range)}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}` : `<span class="cellref unmapped">— not mapped —</span>`;
+    const confirm = st==='suggested'?` <button class="btn sm" style="height:22px;padding:0 8px;font-size:10px" onclick="confirmMapStatus('${v.key}')">Confirm</button>`:'';
     return `<tr>
-      <td><strong>${v.name}</strong> <span class="keychip">${v.key}</span></td>
+      <td><strong>${esc(v.name)}</strong> <span class="keychip">${esc(v.key)}</span></td>
       <td><span class="kind-pill ${kindCls}">${v.kind}</span></td>
       <td>${def}</td>
       <td>${cell}</td>
+      <td><span class="mapchip ${st}">${st}</span>${confirm}</td>
       <td><div class="rowacts">
         <button class="iconbtn" title="Edit" onclick="editVar(${i})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
         <button class="iconbtn" title="Delete" onclick="delVar(${i})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
       </div></td>
     </tr>`;
   }).join('');
+  const banner = reviewN?`<div class="mapbanner"><span><b>${reviewN}</b> line${reviewN===1?'':'s'} need review (suggested / unmapped)</span>
+    <div class="mapfilter">
+      <button class="${filt==='all'?'on':''}" onclick="setMapFilter('all')">All</button>
+      <button class="${filt==='review'?'on':''}" onclick="setMapFilter('review')">Needs review</button>
+      <button class="${filt==='auto'?'on':''}" onclick="setMapFilter('auto')">Auto</button>
+      <button class="${filt==='suggested'?'on':''}" onclick="setMapFilter('suggested')">Suggested</button>
+      <button class="${filt==='manual'?'on':''}" onclick="setMapFilter('manual')">Manual</button>
+      <button class="${filt==='unmapped'?'on':''}" onclick="setMapFilter('unmapped')">Unmapped</button>
+    </div></div>`:`<div class="mapfilter" style="margin-bottom:10px">
+      <button class="${filt==='all'?'on':''}" onclick="setMapFilter('all')">All</button>
+      <button class="${filt==='auto'?'on':''}" onclick="setMapFilter('auto')">Auto</button>
+      <button class="${filt==='manual'?'on':''}" onclick="setMapFilter('manual')">Manual</button>
+      <button class="${filt==='unmapped'?'on':''}" onclick="setMapFilter('unmapped')">Unmapped</button>
+    </div>`;
   return `
   <div class="hero hero-row">
     <div><p class="eyebrow">Model builder</p>
       <h1>Define your model. The tool drives the inputs.</h1>
-      <p>Write the formulas your model uses, break any variable into its drivers, and point each input at the cell it lives in. When you plan, the tool changes those inputs — never the outputs.</p></div>
+      <p>Write the formulas your model uses, break any variable into its drivers, and point each input at the cell it lives in. When you plan, the tool changes those inputs — never the outputs. Scan can auto-map sheet formulas into the driver graph.</p></div>
     <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected':'Connect sheet'}</button>
   </div>
 
@@ -757,9 +1022,10 @@ function viewSetup(){
   <div class="panel" style="margin-top:16px">
     <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Variables &amp; formulas</p><h2>What each number is, and where it lives</h2></div>
       <div style="display:flex;gap:8px">${model.vars.length?`<button class="btn sm" onclick="clearModel()" title="Remove every line and start blank">Clear all</button>`:''}<button class="btn sm indigo" onclick="addVar()">+ Add variable</button></div></div>
+    <div class="panel-pad" style="padding-bottom:0">${banner}</div>
     <div style="overflow-x:auto"><table class="vtbl">
-      <thead><tr><th>Variable</th><th>Type</th><th>Definition</th><th>Sheet cell(s)</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
+      <thead><tr><th>Variable</th><th>Type</th><th>Definition</th><th>Sheet cell(s)</th><th>Mapping</th><th></th></tr></thead>
+      <tbody>${rows||`<tr><td colspan="6" class="mut fz12">No lines in this filter.</td></tr>`}</tbody>
     </table></div>
   </div>
 
@@ -774,6 +1040,10 @@ function viewSetup(){
   </div>`;
 }
 function addVarKind(kind){ varModal(null); const k=document.getElementById('vKind'); if(k){ k.value=kind; varKindToggle(); } }
+function setMapFilter(f){ model.uiState=model.uiState||{}; model.uiState.mapFilter=f; saveModel(); render(); }
+function confirmMapStatus(key){ const v=vget(key); if(!v) return; v.mapStatus='manual'; saveModel(); render(); toast('Mapping confirmed for '+v.name); }
+function confirmSuggestedFormula(key){ const v=vget(key); if(!v||!v._suggestedExpr) return; v.kind='formula'; v.expr=v._suggestedExpr; delete v._suggestedExpr; v.mapStatus='manual'; recompileAll(); saveModel(); render(); }
+
 const CANW=2600, CANH=1500;
 let _pan={x:0,y:0};
 function autoArrange(){ autoLayout(); _pan={x:0,y:0}; renderCanvas(); saveModel(); }   // keeps pages, retidies positions
@@ -1060,7 +1330,7 @@ function saveVar(idx){
   const range=buildRange((document.getElementById('vSheet')||{}).value||'', (document.getElementById('vCol')||{}).value||'', (document.getElementById('vRow')||{}).value||'', P());
   const prev = idx!=null ? model.vars[idx] : {};
   const v={key,name,unit,kind,range};
-  ['phase','ramp','good','favOverride','actuals','actualRange','forecast','read','metric','account','group','srcLine'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
+  ['phase','ramp','good','favOverride','actuals','actualRange','forecast','read','metric','account','group','srcLine','mapStatus','solveMode','solveDriver','pins','sheetFormula'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
   const aggSel=(document.getElementById('vAgg')||{}).value; if(aggSel) v.agg=aggSel; else delete v.agg;
   if(document.getElementById('vaSheet')){ const ar=buildRange(document.getElementById('vaSheet').value||'', (document.getElementById('vaCol')||{}).value||'', (document.getElementById('vaRow')||{}).value||'', P()); if(ar) v.actualRange=ar; else delete v.actualRange; }
   if(kind==='input'){ v.base=parseFloat(document.getElementById('vBase').value)||0; v.steps=(idx!=null&&model.vars[idx].kind==='input')?model.vars[idx].steps:[]; v.delta=(idx!=null&&model.vars[idx].delta)||0; v.writable=document.getElementById('vWritable').checked; }
@@ -1068,6 +1338,8 @@ function saveVar(idx){
       const known=model.vars.filter((_,i)=>i!==(idx==null?-1:idx)).map(x=>x.key.toLowerCase()); const missing=c.deps.filter(d=>!known.includes(d.toLowerCase()));
       if(!v.expr){ err.textContent="Enter a formula (use the Insert buttons)."; return; }
       if(missing.length){ err.textContent="Unknown variable(s): "+missing.join(", ")+". Use the Insert buttons to add existing ones."; return; } }
+  if(range) v.mapStatus='manual';
+  else if(!v.mapStatus) v.mapStatus='unmapped';
   if(idx==null) model.vars.push(v); else model.vars[idx]=v;
   // canvas page + node position bookkeeping
   model.nodePos=model.nodePos||{};
@@ -1124,32 +1396,72 @@ function chartedLeaves(){ const s=new Set(); visibleKeys().forEach(k=>{ const v=
 const SOLVE_LABEL={proportional:'Spread proportionally',single:'Move one driver',balanced:'Balanced (least change)'};
 function renderSolveBar(){
   const el=document.getElementById('solveBtn'); if(!el) return;
-  const mode=model.solveMode||'proportional';
+  const focus=visibleKeys().find(k=>{ const v=vget(k); return v&&v.kind==='formula'; })||visibleKeys()[0];
+  const pol=lineSolvePolicy(focus);
+  const mode=pol.mode||'proportional';
   let lab=SOLVE_LABEL[mode];
-  if(mode==='single'&&model.solveDriver&&vget(model.solveDriver)) lab='Move '+vget(model.solveDriver).name;
-  const np=(model.pins||[]).length;
-  el.innerHTML=`<svg class="cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>When I drag: <b>${lab}</b>${np?` · ${np} pinned`:''}`;
+  if(mode==='single'&&pol.solveDriver&&vget(pol.solveDriver)) lab='Move '+vget(pol.solveDriver).name;
+  const np=(pol.pins||[]).length;
+  const scope=pol.scoped?` · for ${esc((vget(focus)||{}).name||focus)}`:'';
+  el.innerHTML=`<svg class="cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>When I drag: <b>${lab}</b>${np?` · ${np} pinned`:''}${scope}`;
 }
-function openSolveMenu(){
-  const mode=model.solveMode||'proportional';
-  const leaves=chartedLeaves();
-  const driverOpts=leaves.map(v=>`<option value="${v.key}" ${model.solveDriver===v.key?'selected':''}>${v.name}</option>`).join('');
-  const opt=(id,t,d)=>`<label class="lvopt ${mode===id?'on':''}"><input type="radio" name="smode" value="${id}" ${mode===id?'checked':''} onchange="setSolveMode('${id}')"><span><span class="t">${t}</span><span class="d">${d}</span>${id==='single'?`<select class="inp" style="margin-top:8px;height:32px" onchange="model.solveDriver=this.value;renderSolveBar()" onclick="event.preventDefault()">${driverOpts||'<option>— no drivers —</option>'}</select>`:''}</span></label>`;
-  const pinRows=leaves.length?leaves.map(v=>`<div class="pinrow"><b>${v.name}</b> <span class="keychip">${v.key}</span><button class="pinbtn ${isPinned(v.key)?'pinned':''}" onclick="togglePin('${v.key}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 10.8V5a3 3 0 0 1 6 0v5.8l2 3.2H7z"/></svg>${isPinned(v.key)?'Pinned':'Hold'}</button></div>`).join(''):'<p class="mut fz12">Chart a formula line to see its drivers here.</p>';
+function openSolveMenu(forKey){
+  const charted=visibleKeys().filter(k=>{ const v=vget(k); return v&&(v.kind==='formula'||v.kind==='output'); });
+  let activeKey;
+  if(forKey==='__model') activeKey=null;
+  else if(forKey) activeKey=forKey;
+  else activeKey=charted[0]||visibleKeys()[0]||null;
+  window.__solveFocusKey=activeKey;
+  const vFocus=activeKey?vget(activeKey):null;
+  const pol=activeKey?lineSolvePolicy(activeKey):{mode:model.solveMode||'proportional',solveDriver:model.solveDriver,pins:model.pins||[],scoped:false};
+  const mode=pol.mode||'proportional';
+  const leaves=activeKey?([...leavesOf(activeKey)].map(k=>vget(k)).filter(Boolean)):(chartedLeaves());
+  const driverOpts=leaves.map(v=>`<option value="${v.key}" ${pol.solveDriver===v.key?'selected':''}>${v.name}</option>`).join('');
+  const lineOpts=charted.map(k=>{ const v=vget(k); return `<option value="${k}" ${k===activeKey?'selected':''}>${esc(v?v.name:k)}</option>`; }).join('');
+  const opt=(id,t,d)=>`<label class="lvopt ${mode===id?'on':''}"><input type="radio" name="smode" value="${id}" ${mode===id?'checked':''} onchange="setSolveMode('${id}')"><span><span class="t">${t}</span><span class="d">${d}</span>${id==='single'?`<select class="inp" style="margin-top:8px;height:32px" onchange="setSolveDriver(this.value)" onclick="event.preventDefault()">${driverOpts||'<option>— no drivers —</option>'}</select>`:''}</span></label>`;
+  const pinRows=leaves.length?leaves.map(v=>`<div class="pinrow"><b>${v.name}</b> <span class="keychip">${v.key}</span><button class="pinbtn ${isPinned(v.key,activeKey)?'pinned':''}" onclick="togglePin('${v.key}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 10.8V5a3 3 0 0 1 6 0v5.8l2 3.2H7z"/></svg>${isPinned(v.key,activeKey)?'Pinned':'Hold'}</button></div>`).join(''):'<p class="mut fz12">Chart a formula line to see its drivers here.</p>';
   showModal(`<div class="mhead"><h3>How should a drag resolve?</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
-      <p class="mut fz12" style="margin:0 0 12px">When you drag a calculated line (like revenue), the tool changes the <b>input assumptions underneath it</b> — never the formula. Choose how the change spreads across those inputs.</p>
-      ${opt('proportional','Spread proportionally','Every free driver moves by the same % — keeps the current mix. The safe default, like breakback in Anaplan.')}
-      ${opt('single','Move one driver','Hold everything else; make a single driver absorb the whole change. Most legible — “units went from 100 to 137.”')}
-      ${opt('balanced','Balanced (least change)','Move each driver in proportion to how much it actually shifts the line — the smallest overall change. Good for messy trees.')}
+      <p class="mut fz12" style="margin:0 0 12px">When you drag a calculated line, the tool changes the <b>input assumptions underneath it</b> — never the formula. Pure ×÷ trees use an exact algebraic breakback; otherwise numeric search. Policy can be global or <b>per line</b>.</p>
+      ${charted.length?`<div class="field" style="margin-bottom:12px"><label>Applies to</label><select class="inp" id="solveFocus" onchange="openSolveMenu(this.value)">${lineOpts}<option value="__model" ${!activeKey?'selected':''}>Model default (all lines)</option></select></div>`:''}
+      ${vFocus?`<p class="mut fz11" style="margin:-4px 0 10px">${pol.scoped?'Line override active for <b>'+esc(vFocus.name)+'</b>.':'Using model default — changes here become a line override for <b>'+esc(vFocus.name)+'</b>.'} <button class="btn sm" onclick="clearLineSolvePolicy('${activeKey}')">Clear line override</button></p>`:''}
+      ${opt('proportional','Spread proportionally','Every free driver moves by the same % — keeps the current mix. Exact on pure ×÷ trees.')}
+      ${opt('single','Move one driver','Hold everything else; make a single driver absorb the whole change. Exact on pure ×÷ when one leaf is free.')}
+      ${opt('balanced','Balanced (least change)','Move each driver in proportion to how much it actually shifts the line — numeric Newton. Good for + / if trees.')}
       <div style="margin-top:16px"><p class="eyebrow" style="margin-bottom:8px">Hold drivers fixed</p>
         <div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${pinRows}</div></div>
       <div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn primary" onclick="closeModal();renderForecast()">Done</button></div>
     </div>`);
 }
-function setSolveMode(m){ model.solveMode=m; document.querySelectorAll('.lvopt').forEach(l=>l.classList.toggle('on',l.querySelector('input').value===m)); renderSolveBar(); saveModel(); }
-function togglePin(k,btn){ const p=model.pins||(model.pins=[]); const i=p.indexOf(k); if(i>=0)p.splice(i,1); else p.push(k);
-  btn.classList.toggle('pinned',i<0); btn.innerHTML=btn.innerHTML.replace(i<0?'Hold':'Pinned', i<0?'Pinned':'Hold'); renderSolveBar(); saveModel(); }
+function solvePolicyTarget(){
+  const k=window.__solveFocusKey;
+  if(k && vget(k)) return vget(k);
+  return null;
+}
+function setSolveMode(m){
+  const t=solvePolicyTarget();
+  if(t){ t.solveMode=m; }
+  else model.solveMode=m;
+  document.querySelectorAll('.lvopt').forEach(l=>l.classList.toggle('on',l.querySelector('input').value===m));
+  renderSolveBar(); saveModel();
+}
+function setSolveDriver(k){
+  const t=solvePolicyTarget();
+  if(t) t.solveDriver=k; else model.solveDriver=k;
+  renderSolveBar(); saveModel();
+}
+function togglePin(k,btn){
+  const t=solvePolicyTarget();
+  const p=t?(t.pins||(t.pins=[])):(model.pins||(model.pins=[]));
+  const i=p.indexOf(k); if(i>=0)p.splice(i,1); else p.push(k);
+  btn.classList.toggle('pinned',i<0); btn.innerHTML=btn.innerHTML.replace(i<0?'Hold':'Pinned', i<0?'Pinned':'Hold');
+  renderSolveBar(); saveModel();
+}
+function clearLineSolvePolicy(key){
+  const v=vget(key); if(!v) return;
+  delete v.solveMode; delete v.solveDriver; delete v.pins;
+  saveModel(); openSolveMenu(key);
+}
 
 /* which variables are charted (multi-select) */
 function visibleKeys(){ let ks=(model.displayVars||[]).filter(k=>vget(k)); if(!ks.length){ ks=[(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key].filter(Boolean); model.displayVars=ks.slice(); } return ks; }
@@ -1157,7 +1469,8 @@ function renderLineChips(){
   const el=document.getElementById('lineChips'); if(!el) return;
   const sel=new Set(visibleKeys());
   el.innerHTML=model.vars.map((v,i)=>{ const on=sel.has(v.key); const col=COLORS[[...sel].indexOf(v.key)%COLORS.length];
-    return `<span class="linechip ${on?'on':''}" style="${on?`background:${col};`:''}" onclick="toggleLine('${v.key}')"><i style="${on?'background:#fff':''}"></i>${v.name}</span>`; }).join('')
+    const gear=(v.kind==='formula'||v.kind==='output')?`<span class="gear" title="Breakback policy for this line" onclick="event.stopPropagation();openSolveMenu('${v.key}')">⚙</span>`:'';
+    return `<span class="linechip ${on?'on':''}" style="${on?`background:${col};`:''}" onclick="toggleLine('${v.key}')"><i style="${on?'background:#fff':''}"></i>${v.name}${gear}</span>`; }).join('')
     +`<span class="linechip" onclick="window.__pendingChart=true;addVar()" style="border-style:dashed;color:#8a92a4">＋ new variable</span>`;
 }
 function toggleLine(k){
@@ -1348,7 +1661,13 @@ function bindDrag(svg){ let active=null, moved=false, startY=0;
     if(!active) return;
     const was=active; active=null; _dragging=false;
     if(!moved){ openXray({key:was.key,period:was.i,whichA:'scenario',whichB:'plan'}); return; }
-    if(was.canDrag){ renderForecast(); renderAssumptions(); saveModel(); }
+    if(was.canDrag){
+      renderForecast(); renderAssumptions(); saveModel();
+      if(_lastDragXray && _lastDragXray.key===was.key){
+        const xr=_lastDragXray; _lastDragXray=null;
+        openXray({key:xr.key,period:xr.period,whichA:'scenario',whichB:'plan'});
+      }
+    }
   };
   svg.addEventListener('pointerup',end); svg.addEventListener('pointercancel',end);
 }
@@ -1364,12 +1683,24 @@ function bindDrag(svg){ let active=null, moved=false, startY=0;
    Pinned leaves are removed from the free set. If the free set can't reach the
    target, we solve as close as possible and flag it (feasibility guard). */
 let _solveMsg='';
-function isPinned(k){ return (model.pins||[]).includes(k); }
+let _lastDragXray=null; /* {key,period} open X-ray after successful formula drag */
+function lineSolvePolicy(key){
+  const v=vget(key)||{};
+  const mode=(v.solveMode!=null&&v.solveMode!=='')?v.solveMode:(model.solveMode||'proportional');
+  const solveDriver=(v.solveDriver!=null&&v.solveDriver!=='')?v.solveDriver:model.solveDriver;
+  const pins=Array.isArray(v.pins)?v.pins:(model.pins||[]);
+  return {mode, solveDriver, pins, scoped: !!(v.solveMode||v.solveDriver||(v.pins&&v.pins.length))};
+}
+function isPinned(k, forKey){
+  const pins=forKey!=null?lineSolvePolicy(forKey).pins:(model.pins||[]);
+  return (pins||[]).includes(k);
+}
 function freeLeavesOf(key){
-  const pins=new Set(model.pins||[]);
+  const pol=lineSolvePolicy(key);
+  const pins=new Set(pol.pins||[]);
   let ls=[...leavesOf(key)].map(k=>vget(k)).filter(v=>v&&v.kind==='input'&&!pins.has(v.key));
-  if((model.solveMode||'proportional')==='single' && model.solveDriver){
-    const d=ls.find(v=>v.key===model.solveDriver); if(d) ls=[d];
+  if(pol.mode==='single' && pol.solveDriver){
+    const d=ls.find(v=>v.key===pol.solveDriver); if(d) ls=[d];
   }
   return ls;
 }
@@ -1387,14 +1718,25 @@ function outAt(key,period){ return (evalModel(true)[key]||[])[period]||0; }
 
 function applyDrag(key,period,target){
   const v=vget(key); if(!v) return;
-  if(v.kind==='input'){ setOv(key,period,target); _solveMsg=''; return; }
-  backsolvePeriod(key,period,target);
+  if(v.kind==='input'){ setOv(key,period,target); _solveMsg=''; _lastDragXray=null; return; }
+  const ok=backsolvePeriod(key,period,target);
+  if(ok && v.kind==='formula') _lastDragXray={key,period};
+  else if(!ok) _lastDragXray=null;
 }
 function backsolvePeriod(key,period,target){
-  const mode=model.solveMode||'proportional';
+  const pol=lineSolvePolicy(key);
+  const mode=pol.mode||'proportional';
   const leaves=freeLeavesOf(key);
   if(!leaves.length){ _solveMsg='All drivers of this line are pinned — release one to plan it.'; return false; }
   const cur=leaves.map(v=>stableCur(v,period));
+
+  /* P3: exact closed-form for pure multiply/divide (monomial) trees */
+  if(mode==='proportional' || mode==='single'){
+    const exact=tryExactBacksolve(key,period,target,leaves,mode);
+    if(exact.ok && exact.hit){ _solveMsg='Exact breakback (×÷).'; return true; }
+    /* if algebraic path missed due to decimal rounding, fall through to bisection */
+    if(exact.ok && !exact.hit){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); }
+  }
 
   if(mode==='balanced'){
     // damped Newton: Δxᵢ = gᵢ·(target−y)/Σgⱼ² , iterate, halve step on overshoot
@@ -1406,19 +1748,19 @@ function backsolvePeriod(key,period,target){
       const g=leaves.map(v=>{ const x0=inputVal(v,period,true), eps=Math.max(1e-4,Math.abs(x0)*1e-4);
         setOv(v.key,period,x0+eps); const yp=outAt(key,period); setOv(v.key,period,x0); return (yp-y)/eps; });
       const g2=g.reduce((s,x)=>s+x*x,0);
-      if(g2<1e-20){ _solveMsg='These drivers barely move this line — try another driver.'; return false; }
+      if(g2<1e-20){ _solveMsg='These drivers barely move this line — try another driver or unpin one.'; return false; }
       let damp=1; if(Math.abs(res)>prev) damp=0.5; prev=Math.abs(res);
       leaves.forEach((v,i)=>{ const x0=inputVal(v,period,true); setOv(v.key,period,x0+g[i]*res/g2*damp); });
     }
     const y=outAt(key,period); _solveMsg = Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4)?`Closest reachable: ${fmtVar(y,vget(key).unit)} (drivers maxed out).`:''; return true;
   }
 
-  // proportional / single: common factor r on the free leaves, bisected
+  // proportional / single fallback: common factor r on the free leaves, bisected
   if(cur.every(x=>Math.abs(x)<1e-12)){ _solveMsg='These drivers are zero at this month — nothing to scale. Set a base or pick another driver.'; return false; }
   const f=r=>{ leaves.forEach((v,i)=>setOv(v.key,period,cur[i]*r)); return outAt(key,period); };
   let lo=0.0001,hi=8,flo=f(lo),fhi=f(hi), tries=0;
   while(((fhi>flo)?(fhi<target):(fhi>target)) && tries<50){ hi*=1.6; fhi=f(hi); tries++; }   // expand to bracket
-  if(flo===fhi){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); _solveMsg='This line doesn’t respond to these drivers.'; return false; }
+  if(flo===fhi){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); _solveMsg='This line doesn’t respond to these drivers — check the formula tree or pins.'; return false; }
   for(let it=0;it<54;it++){ const mid=(lo+hi)/2,val=f(mid); if((fhi>flo)?val<target:val>target) lo=mid; else hi=mid; }
   const r=(lo+hi)/2; const y=f(r);
   _solveMsg = Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4)?`Closest reachable: ${fmtVar(y,vget(key).unit)}.`:'';
@@ -2320,29 +2662,54 @@ async function scanModelSheet(){
     if(!F.lines.length) throw new Error('No line items found. Set the Label column, Header row and First-month column manually below, then Scan again.');
     const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
     const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
+    /* P0 merge: preserve non-srcLine drivers (manual formula graph) */
     const keep=model.vars.filter(v=>!(v.srcLine||(v.kind==='output'&&v.account!=null)));
     const usedK={}; keep.forEach(v=>{ usedK[v.key]=1; });
     const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
     const lastCol=numToCol(colToNum(src.firstCol)+periods.length-1);
     const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
-    const newOutputs=F.lines.map((l,idx)=>{ const name=l.name, metric=l.metric||'';
-      const key=uk((metric?metric+'_':'')+name);
-      const series=periods.map((_,pi)=> (l.series[pi]===undefined?null:l.series[pi]));
-      const v={key,name,metric,account:name,kind:'output',unit:inferUnit(metric+' '+name),forecast:series,read:series,srcLine:true};
-      const prev=oldByAcct[nrm(metric)+'|'+nrm(name)]||{};
-      ['good','favOverride','agg','group','actuals','actualRange'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
-      return v; });
-    model.vars=keep.concat(newOutputs); model.periods=periods;
-    if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newOutputs[newOutputs.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
+    const sheetName=src.tab||'';
+    /* provisional keys + cell map for formula parse */
+    const provisional=F.lines.map((l)=>{
+      const name=l.name, metric=l.metric||'';
+      const id=nrm(metric)+'|'+nrm(name);
+      const prev=oldByAcct[id];
+      const key=(prev&&prev.key&&!usedK[prev.key])?prev.key:uk((metric?metric+'_':'')+name);
+      usedK[key]=1;
+      return {l, name, metric, key, id, prev, row:l.row};
+    });
+    const cellMap=buildCellMapFromScan({sheet:sheetName, firstCol:src.firstCol||'B', lines:provisional.map(p=>({key:p.key,row:p.row,name:p.name,metric:p.metric}))});
+    const classes=classifyLinesFromFormulas(F.lines, cellMap, sheetName, true);
+    let nForm=0, nIn=0, nOut=0;
+    const newLines=provisional.map((p,idx)=>{
+      const series=periods.map((_,pi)=> (p.l.series[pi]===undefined?null:p.l.series[pi]));
+      const cls=classes[idx]||{kind:'output',mapStatus:'auto'};
+      const range=p.row?buildRange(sheetName, src.firstCol||'B', p.row, periods.length):'';
+      const v={key:p.key,name:p.name,metric:p.metric,account:p.name,kind:cls.kind,unit:inferUnit(p.metric+' '+p.name),forecast:series,read:series,srcLine:true,mapStatus:cls.mapStatus||'auto',range:range||''};
+      if(cls.kind==='formula'){ v.expr=cls.expr; v.sheetFormula=cls.sheetFormula||''; nForm++; }
+      else if(cls.kind==='input'){
+        v.writable=true; v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
+        if(series.length){ for(let i=1;i<series.length;i++) if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]}); }
+        nIn++;
+      } else { nOut++; if(cls.sheetFormula) v.sheetFormula=cls.sheetFormula; }
+      const prev=p.prev||{};
+      ['good','favOverride','agg','group','actuals','actualRange','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
+      /* upsert: if prev was formula/input with manual map, keep kind/expr unless we auto-parsed */
+      if(prev.kind==='formula' && prev.expr && cls.kind!=='formula'){ v.kind='formula'; v.expr=prev.expr; v.mapStatus=prev.mapStatus||'manual'; }
+      if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
+      return v;
+    });
+    model.vars=keep.concat(newLines); model.periods=periods;
+    if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newLines.find(v=>v.kind==='formula')||newLines[newLines.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
     if(!vget(_vState.line)) _vState.line=null; if(_cState&&!vget(_cState.line)) _cState.line=null;
     _vState.userVer=false; _vState.winUser=false;
-    // remember the layout so Refresh / re-scan reuse it
     model.sources=Object.assign({}, model.sources, {forecast:src});
     conn.sheets=conn.sheets||[]; saveConn();
     recompileAll(); saveModel();
-    const mergeNote=keep.length?` Merged ${newOutputs.length} outputs; kept ${keep.length} driver line(s).`:` Loaded ${newOutputs.length} line(s).`;
+    const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''} auto-mapped`:'';
+    const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${formNote}.`:` Loaded ${newLines.length} line(s)${formNote}.`;
     fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
-    setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newOutputs.length} outputs; kept ${keep.length} driver lines`:`Loaded ${newOutputs.length} lines from the sheet`); },1100);
+    setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newLines.length} lines; kept ${keep.length} drivers${formNote}`:`Loaded ${newLines.length} lines${formNote}`); },1100);
   }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Scan failed: ${err.message||err}</div>`; }
 }
 async function doConnect(){
@@ -2362,10 +2729,23 @@ async function doConnect(){
     let maxN=0;
     if(mapped.length){
       const ranges=[...new Set(mapped.map(v=>v.range))];
-      const data=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=${encodeURIComponent(ranges.join('|'))}`,{redirect:'follow'}).then(r=>r.json());
+      let data;
+      try{ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:true}); }
+      catch(e){ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:false}); }
       if(!data.ok) throw new Error(data.error||'read failed');
       sheetName=sheetName||data.spreadsheet||"";
-      mapped.forEach(v=>{ const raw=(data.values[v.range]&&data.values[v.range][0])||[]; let N=raw.length; while(N>0&&(raw[N-1]===''||raw[N-1]==null))N--; const arr=raw.slice(0,N).map(x=>toNum(x,scale)); if(v.kind==='output'){ v.read=arr; } else if(v.kind==='input'){ if(arr.length){ v.base=arr[0]; v.steps=[]; for(let i=1;i<arr.length;i++) if(Math.abs(arr[i]-arr[i-1])>1e-9) v.steps.push({from:i,value:arr[i]}); } } maxN=Math.max(maxN,N); });
+      mapped.forEach(v=>{
+        const raw=(data.values[v.range]&&data.values[v.range][0])||[];
+        let N=raw.length; while(N>0&&(raw[N-1]===''||raw[N-1]==null))N--;
+        const arr=raw.slice(0,N).map(x=>toNum(x,scale));
+        const fraw=(data.formulas&&data.formulas[v.range]&&data.formulas[v.range][0])||[];
+        const f0=String((fraw[0]==null?'':fraw[0])).trim();
+        if(f0) v.sheetFormula=f0;
+        if(v.kind==='output'){ v.read=arr; }
+        else if(v.kind==='input'){ if(arr.length){ v.base=arr[0]; v.steps=[]; for(let i=1;i<arr.length;i++) if(Math.abs(arr[i]-arr[i-1])>1e-9) v.steps.push({from:i,value:arr[i]}); } }
+        else if(v.kind==='formula' && arr.length){ v.read=arr; }
+        maxN=Math.max(maxN,N);
+      });
       if(maxN>0 && maxN!==P()){ model.periods=genMonths(maxN,startMonthIdx(),startYear()); }
     } else {
       // verify token/access even with nothing mapped yet
@@ -2488,39 +2868,121 @@ function detectLayoutFromGrid(grid){
   for(let c=0;c<firstColIdx;c++){ let t=0; for(let r=headerRowIdx+1;r<Math.min(grid.length,headerRowIdx+201);r++){ const cell=(grid[r]||[])[c]; if(cell==null) continue; const s=String(cell).trim(); if(s && !isRealNum(cell)) t++; } if(t>bestText){ bestText=t; labelColIdx=c; } }
   return { labelColIdx, headerRowIdx, firstColIdx, months };
 }
+
+/* P3: fetch values (+ optional formulas) from Apps Script */
+async function gasReadRanges(ranges, opts){
+  opts=opts||{};
+  const q=encodeURIComponent;
+  const url=opts.url||conn.url, token=opts.token||conn.token;
+  const ssid=opts.ssid!=null?opts.ssid:conn.ssid;
+  const includeFormulas=!!opts.includeFormulas;
+  const list=(ranges||[]).filter(Boolean);
+  if(!url||!token) throw new Error('Not connected');
+  /* Prefer POST for long range lists + formulas flag */
+  try{
+    const body={token, action:'read', ssid:ssid||'', ranges:list, includeFormulas};
+    const data=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),redirect:'follow'}).then(r=>r.json());
+    if(data&&data.ok) return data;
+  }catch(e){}
+  const sq=ssid?`&ssid=${q(ssid)}`:'';
+  const fq=includeFormulas?`&includeFormulas=true`:'';
+  const data=await fetch(`${url}?action=read&token=${q(token)}${sq}${fq}&ranges=${q(list.join('|'))}`,{redirect:'follow'}).then(r=>r.json());
+  if(!data.ok) throw new Error(data.error||'read failed');
+  return data;
+}
+/**
+ * Attach parsed sheet formulas onto scanned line objects.
+ * lines: [{name,metric,series,row?,formula?}] — formula is first-period cell formula if known.
+ * Mutates into model vars later; here returns classification hints per line index.
+ */
+function classifyLinesFromFormulas(lines, cellMap, defaultSheet, asForecast){
+  return (lines||[]).map((l,idx)=>{
+    const f=String(l.formula||'').trim();
+    if(f && f.startsWith('=')){
+      const parsed=sheetFormulaToExpr(f, cellMap, defaultSheet);
+      if(parsed.ok){
+        return {kind:'formula', expr:parsed.expr, mapStatus:'auto', sheetFormula:f, deps:parsed.deps};
+      }
+      /* formula present but not recoverable → keep as output (values-only) */
+      return {kind:'output', mapStatus:'auto', sheetFormula:f, parseNote:parsed.reason};
+    }
+    /* empty formula + numeric values */
+    const hasVal=(l.series||[]).some(x=>x!=null && x!=='');
+    if(hasVal && asForecast){
+      return {kind:'input', mapStatus:'auto', writable:true};
+    }
+    return {kind:'output', mapStatus:'auto'};
+  });
+}
 /* Read a broad block, detect the layout, and parse the lines — the "just works" path. */
 async function autoDetectAndRead(src){
-  const q=encodeURIComponent, cap=300, wideCol='BZ';
+  const cap=300, wideCol='BZ';
   const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
   const rng=`${qt}A1:${wideCol}${cap}`;
-  const url=`${conn.url}?action=read&token=${q(conn.token)}${src.ssid?`&ssid=${q(src.ssid)}`:''}&ranges=${q(rng)}`;
-  const data=await fetch(url,{redirect:'follow'}).then(r=>r.json());
-  if(!data.ok) throw new Error(data.error||'read failed');
+  let data;
+  try{ data=await gasReadRanges([rng],{ssid:src.ssid||'', includeFormulas:true}); }
+  catch(e){ data=await gasReadRanges([rng],{ssid:src.ssid||'', includeFormulas:false}); }
   const grid=data.values[rng]||[];
+  const fgrid=(data.formulas&&data.formulas[rng])||null;
   const det=detectLayoutFromGrid(grid);
   if(!det) return null;
   const { labelColIdx, headerRowIdx, firstColIdx, months }=det;
   const hrow=grid[headerRowIdx]||[];
   const headers=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) headers.push(String(hrow[c]==null?'':hrow[c]).trim());
-  const labels=[], dgrid=[];
-  for(let r=headerRowIdx+1;r<grid.length;r++){ const row=grid[r]||[]; labels.push(String(row[labelColIdx]==null?'':row[labelColIdx]).trim()); const dr=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) dr.push(row[c]); dgrid.push(dr); }
-  return { name:data.spreadsheet||'', headers, lines:parseLines(labels,headers,dgrid),
-    detected:{ labelCol:numToCol(labelColIdx+1), headerRow:headerRowIdx+1, firstCol:numToCol(firstColIdx+1), months } };
+  const labels=[], dgrid=[], fcol=[];
+  for(let r=headerRowIdx+1;r<grid.length;r++){
+    const row=grid[r]||[];
+    labels.push(String(row[labelColIdx]==null?'':row[labelColIdx]).trim());
+    const dr=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) dr.push(row[c]); dgrid.push(dr);
+    const frow=fgrid? (fgrid[r]||[]) : [];
+    fcol.push(String((frow[firstColIdx]==null?'':frow[firstColIdx])).trim());
+  }
+  const lines=parseLines(labels,headers,dgrid);
+  /* attach sheet row (1-based) + first-period formula for each parsed line */
+  let li=0;
+  for(let i=0;i<labels.length;i++){
+    const nm=String(labels[i]==null?'':labels[i]).trim();
+    const row=dgrid[i]||[];
+    const nReal=headers.reduce((n,_,c)=>n+(isRealNum(row[c])?1:0),0);
+    if(nReal===0||!nm) continue;
+    if(lines[li]){
+      lines[li].row=headerRowIdx+2+i; /* 1-based sheet row */
+      lines[li].formula=fcol[i]||'';
+    }
+    li++;
+  }
+  return { name:data.spreadsheet||'', headers, lines,
+    detected:{ labelCol:numToCol(labelColIdx+1), headerRow:headerRowIdx+1, firstCol:numToCol(firstColIdx+1), months, tab:src.tab||'' },
+    formulasAvailable:!!fgrid };
 }
 async function readSource(src){
-  const rowsCap=300, q=encodeURIComponent;
+  const rowsCap=300;
   const lastCol=numToCol(colToNum(src.firstCol)+Math.max(1,src.months)-1);
   const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
   const rL=`${qt}${src.labelCol}${src.headerRow+1}:${src.labelCol}${src.headerRow+rowsCap}`;
   const rH=`${qt}${src.firstCol}${src.headerRow}:${lastCol}${src.headerRow}`;
   const rD=`${qt}${src.firstCol}${src.headerRow+1}:${lastCol}${src.headerRow+rowsCap}`;
-  const url=`${conn.url}?action=read&token=${q(conn.token)}${src.ssid?`&ssid=${q(src.ssid)}`:''}&ranges=${q([rL,rH,rD].join('|'))}`;
-  const data=await fetch(url,{redirect:'follow'}).then(r=>r.json());
-  if(!data.ok) throw new Error(data.error||'read failed');
+  let data;
+  try{ data=await gasReadRanges([rL,rH,rD],{ssid:src.ssid||'', includeFormulas:true}); }
+  catch(e){ data=await gasReadRanges([rL,rH,rD],{ssid:src.ssid||'', includeFormulas:false}); }
   const labels=(data.values[rL]||[]).map(r=>String(r[0]==null?'':r[0]).trim());
   const headers=((data.values[rH]||[])[0]||[]).map(h=>String(h==null?'':h).trim());
   const grid=data.values[rD]||[];
-  return {name:data.spreadsheet||'', headers, lines:parseLines(labels,headers,grid)};
+  const fgrid=(data.formulas&&data.formulas[rD])||null;
+  const lines=parseLines(labels,headers,grid);
+  let li=0;
+  for(let i=0;i<labels.length;i++){
+    const nm=String(labels[i]==null?'':labels[i]).trim();
+    const row=grid[i]||[];
+    const nReal=headers.reduce((n,_,c)=>n+(isRealNum(row[c])?1:0),0);
+    if(nReal===0||!nm) continue;
+    if(lines[li]){
+      lines[li].row=src.headerRow+1+i;
+      lines[li].formula=fgrid?String((fgrid[i]&&fgrid[i][0])||'').trim():'';
+    }
+    li++;
+  }
+  return {name:data.spreadsheet||'', headers, lines, formulasAvailable:!!fgrid};
 }
 async function importSources(){
   const g=id=>document.getElementById(id);
@@ -2557,25 +3019,51 @@ async function doImport(fSrc,aSrc){
   const usedK={}; keep.forEach(v=>{ usedK[v.key]=1; });
   const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
   let matched=0;
-  const newOutputs=order.map(id=>{ const meta=metaById[id]||{name:id,metric:''}; const name=meta.name, metric=meta.metric||'';
-    const key=uk((metric?metric+'_':'')+name);
-    const fs=fById[id], as=aById[id];
+  /* Build line list from forecast (preferred) with formulas when available */
+  const fLineById={}; F.lines.forEach(l=>{ fLineById[idOf(l)]=l; });
+  const provisional=order.map(id=>{
+    const meta=metaById[id]||{name:id,metric:''};
+    const name=meta.name, metric=meta.metric||'';
+    const prev=oldByAcct[id];
+    const key=(prev&&prev.key&&!usedK[prev.key])?prev.key:uk((metric?metric+'_':'')+name);
+    usedK[key]=1;
+    const fl=fLineById[id];
+    return {id,name,metric,key,prev,row:fl&&fl.row,formula:fl&&fl.formula,l:fl};
+  });
+  const cellMap=buildCellMapFromScan({sheet:fSrc.tab||'', firstCol:fSrc.firstCol||'B', lines:provisional.map(p=>({key:p.key,row:p.row,name:p.name,metric:p.metric}))});
+  const fakeLines=provisional.map(p=>({name:p.name,metric:p.metric,series:(fById[p.id]||[]),formula:p.formula||'',row:p.row}));
+  const classes=classifyLinesFromFormulas(fakeLines, cellMap, fSrc.tab||'', true);
+  let nForm=0;
+  const newOutputs=provisional.map((p,idx)=>{
+    const fs=fById[p.id], as=aById[p.id];
     const fser=fs?periods.map((_,pi)=>fs[pi]===undefined?null:fs[pi]):null;
     const aser=as||null;
     if(fs&&as&&as.some(x=>x!=null)) matched++;
-    const prev=oldByAcct[id]||{};
-    const v={key,name,metric,account:name,kind:'output',unit:inferUnit(metric+' '+name),forecast:fser,actuals:aser,read:fser,srcLine:true};
-    ['good','favOverride','agg','group'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
-    return v; });
+    const cls=Object.assign({}, classes[idx]||{kind:'output',mapStatus:'auto'});
+    /* actuals-only lines stay output */
+    if(!fs && as){ cls.kind='output'; }
+    const range=p.row?buildRange(fSrc.tab||'', fSrc.firstCol||'B', p.row, periods.length):'';
+    const v={key:p.key,name:p.name,metric:p.metric,account:p.name,kind:cls.kind,unit:inferUnit(p.metric+' '+p.name),forecast:fser,actuals:aser,read:fser,srcLine:true,mapStatus:cls.mapStatus||'auto',range:range||''};
+    if(cls.kind==='formula'){ v.expr=cls.expr; v.sheetFormula=cls.sheetFormula||''; nForm++; }
+    else if(cls.kind==='input'){
+      v.writable=true; const series=fser||[]; v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
+      for(let i=1;i<series.length;i++) if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]});
+    } else if(cls.sheetFormula) v.sheetFormula=cls.sheetFormula;
+    const prev=p.prev||{};
+    ['good','favOverride','agg','group','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
+    if(prev.kind==='formula' && prev.expr && cls.kind!=='formula'){ v.kind='formula'; v.expr=prev.expr; v.mapStatus=prev.mapStatus||'manual'; }
+    if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
+    return v;
+  });
   if(!newOutputs.length) throw new Error('No line items found — check the label column and header row');
   model.vars=keep.concat(newOutputs); model.periods=periods; model.closed=lastActualIdx()+1;
   model.sources={forecast:fSrc,actual:aSrc};
-  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newOutputs[newOutputs.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
+  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newOutputs.find(v=>v.kind==='formula')||newOutputs[newOutputs.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
   if(!vget(_vState.line)) _vState.line=null; if(!vget(_cState.line)) _cState.line=null;
-  _vState.userVer=false; _vState.winUser=false;   // fresh import → re-default to Actuals vs Forecast
+  _vState.userVer=false; _vState.winUser=false;
   try{delete sessionStorage.__vinit;}catch(e){}
   recompileAll(); saveModel(); saveConn();
-  return {total:newOutputs.length, matched, kept:keep.length};
+  return {total:newOutputs.length, matched, kept:keep.length, formulas:nForm};
 }
 function setStatus(name,live){ const el=document.getElementById('modelStatus'); if(!el)return; el.innerHTML=`<span class="status-dot"></span>${name}<span>•</span>${live?'Live':'Local model'}`; }
 

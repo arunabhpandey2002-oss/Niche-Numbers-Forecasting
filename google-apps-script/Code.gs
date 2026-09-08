@@ -3,6 +3,9 @@
  *
  * One deployment can read and write any spreadsheet that the Google account
  * deploying this script can access. Replace CHANGE_ME before deployment.
+ *
+ * P3: read supports includeFormulas (GET query or POST body) and returns a
+ * parallel `formulas` map keyed like `values` (rows of cells from getFormulas).
  */
 
 const TOKEN = 'CHANGE_ME';
@@ -20,12 +23,22 @@ function json_(value) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function readRanges_(spreadsheet, ranges) {
+function truthy_(v) {
+  if (v === true || v === 1) return true;
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+}
+
+function readRanges_(spreadsheet, ranges, includeFormulas) {
   const values = {};
+  const formulas = includeFormulas ? {} : null;
   (ranges || []).forEach(function (range) {
-    values[range] = spreadsheet.getRange(range).getValues();
+    const rng = spreadsheet.getRange(range);
+    values[range] = rng.getValues();
+    if (includeFormulas) formulas[range] = rng.getFormulas();
   });
-  return values;
+  if (includeFormulas) return { values: values, formulas: formulas };
+  return { values: values };
 }
 
 function doGet(event) {
@@ -55,11 +68,15 @@ function doGet(event) {
         .split('|')
         .map(function (range) { return range.trim(); })
         .filter(Boolean);
-      return json_({
+      const includeFormulas = truthy_(params.includeFormulas);
+      const packed = readRanges_(spreadsheet, ranges, includeFormulas);
+      const out = {
         ok: true,
         spreadsheet: spreadsheet.getName(),
-        values: readRanges_(spreadsheet, ranges)
-      });
+        values: packed.values
+      };
+      if (includeFormulas) out.formulas = packed.formulas;
+      return json_(out);
     }
 
     return json_({ ok: false, error: 'Unknown action' });
@@ -76,11 +93,15 @@ function doPost(event) {
     const spreadsheet = openSpreadsheet_(body.ssid);
 
     if (body.action === 'read') {
-      return json_({
+      const includeFormulas = truthy_(body.includeFormulas);
+      const packed = readRanges_(spreadsheet, body.ranges || [], includeFormulas);
+      const out = {
         ok: true,
         spreadsheet: spreadsheet.getName(),
-        values: readRanges_(spreadsheet, body.ranges || [])
-      });
+        values: packed.values
+      };
+      if (includeFormulas) out.formulas = packed.formulas;
+      return json_(out);
     }
 
     if (body.action === 'write') {
