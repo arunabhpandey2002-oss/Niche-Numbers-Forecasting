@@ -42,6 +42,28 @@ Existing `+ − * /` and the deterministic decimal engine are unchanged. Run `no
 - **Reconnect polish** — Apps Script URL, sheet IDs, and scale are remembered after disconnect; re-enter token and Test & connect.
 - Engine verification: `node engine-test.mjs` (no CI required for this pass).
 
+
+
+## P3 — formula-aware scan + breakback
+
+**Formula-aware auto-mapping** (deterministic, no LLMs):
+
+- Apps Script `read` accepts `includeFormulas: true` (GET query or POST body) and returns a parallel `formulas` map (same shape as `values`) via `Range.getFormulas()`.
+- Scan / import / connect fetch formulas when the redeployed connector supports them.
+- Simple Excel formulas (`+ − × ÷`, `A1`, `Sheet!B2`, `$A$1`) are tokenized and mapped onto line-item keys from the scanned block. Recoverable formulas become `kind:'formula'` with an `expr` in variable keys; bare values on a forecast sheet become candidate `kind:'input'`; everything else stays `kind:'output'`.
+- Each variable has `mapStatus`: `auto` | `suggested` | `manual` | `unmapped`. Model setup shows a status chip, a “N lines need review” banner, and filters. Name-only heuristics are not applied silently.
+- Merge stays non-destructive (P0): keeps non-`srcLine` drivers; upserts by account identity; attaches parsed formulas when present.
+
+**Breakback upgrades** (leaf inverse-solve, not dimensional splash):
+
+- Pure multiply/divide trees use an **exact algebraic** scale (`output = C · Π leaf^p`). Messy graphs (`+`, `if`, …) still use bisection / damped Newton.
+- Per-line policy: `v.solveMode`, `v.solveDriver`, `v.pins` override model defaults. Open the gear on a chart line chip (or the solve bar) to edit that line’s policy.
+- After a successful drag on a formula line, **Number X-ray** opens for that key + period.
+
+Run `node engine-test.mjs` for P0–P3 checks (A1→expr parse + exact price×volume backsolve).
+
+**Redeploy note:** update Apps Script from `google-apps-script/Code.gs` (**Deploy → Manage deployments → Edit → New version**) so `includeFormulas` / `getFormulas` are live. Existing `/exec` URL is unchanged.
+
 ## Included
 
 - `index.html` — the complete application and calculation engine.

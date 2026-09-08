@@ -1,4 +1,4 @@
-/** Isolated P1 engine test harness. Run: node engine-test.mjs */
+/** Isolated engine test harness (P0–P3). Run: node engine-test.mjs */
 let model = { periods: ["P1"], ov: {}, vars: [] };
 
 /* ---- expression compiler (shunting-yard → RPN) + FP&A helpers ---- */
@@ -266,7 +266,7 @@ function assert(cond, msg){
 }
 function approx(a,b,eps=1e-6){ return Math.abs(a-b) < eps; }
 
-console.log("=== Niche Numbers P1 engine tests ===");
+console.log("=== Niche Numbers engine tests (P0–P3) ===");
 
 {
   const v = evalRPN(compile("10 / 2").rpn, {});
@@ -434,6 +434,233 @@ function periodContribFromExpr(expr, depsA, depsB, scopeKeys){
   // deps order follows compile deps
   assert(r.steps.length===2, "two driver steps");
   assert(approx(r.steps.reduce((s,x)=>s+x.delta,0), 1000), "steps sum to gap (got "+r.steps.map(x=>x.delta)+")");
+}
+
+
+
+/* ---- P3: sheet formula A1 → expr + exact ×÷ breakback ---- */
+function colToNum(c){ let n=0; for(const ch of String(c).toUpperCase()) if(ch>='A'&&ch<='Z') n=n*26+(ch.charCodeAt(0)-64); return n; }
+function a1ColRow(ref){
+  const m=String(ref||'').replace(/\$/g,'').match(/^([A-Za-z]+)(\d+)$/);
+  if(!m) return null;
+  return {col:m[1].toUpperCase(), row:+m[2], colNum:colToNum(m[1])};
+}
+function tokenizeSheetFormula(src){
+  let s=String(src||'').trim();
+  if(s.startsWith('=')) s=s.slice(1);
+  const toks=[]; let i=0;
+  while(i<s.length){
+    const ch=s[i];
+    if(/\s/.test(ch)){ i++; continue; }
+    if('+-*/(),'.includes(ch)){ toks.push({t:'op', v:ch}); i++; continue; }
+    if(/[0-9.]/.test(ch)){
+      let j=i+1; while(j<s.length && /[0-9.]/.test(s[j])) j++;
+      toks.push({t:'num', v:s.slice(i,j)}); i=j; continue;
+    }
+    if(ch==="'"){
+      let j=i+1; while(j<s.length && s[j]!=="'") j++;
+      if(j>=s.length){ toks.push({t:'bad', v:s.slice(i)}); break; }
+      const sheet=s.slice(i+1,j); j++;
+      if(s[j]==='!'){
+        j++;
+        const m=s.slice(j).match(/^\$?[A-Za-z]+\$?\d+/);
+        if(!m){ toks.push({t:'bad', v:s.slice(i)}); break; }
+        toks.push({t:'ref', sheet, a1:m[0].replace(/\$/g,'')}); i=j+m[0].length; continue;
+      }
+      toks.push({t:'bad', v:s.slice(i)}); break;
+    }
+    const rest=s.slice(i);
+    const sheetRef=rest.match(/^([A-Za-z_][A-Za-z0-9_]*)!(\$?[A-Za-z]+\$?\d+)/);
+    if(sheetRef){
+      toks.push({t:'ref', sheet:sheetRef[1], a1:sheetRef[2].replace(/\$/g,'')});
+      i+=sheetRef[0].length; continue;
+    }
+    const cell=rest.match(/^\$?[A-Za-z]+\$?\d+/);
+    if(cell){
+      toks.push({t:'ref', sheet:'', a1:cell[0].replace(/\$/g,'')});
+      i+=cell[0].length; continue;
+    }
+    const ident=rest.match(/^[A-Za-z_][A-Za-z0-9_.]*/);
+    if(ident){ toks.push({t:'ident', v:ident[0]}); i+=ident[0].length; continue; }
+    toks.push({t:'bad', v:ch}); i++;
+  }
+  return toks;
+}
+function sheetFormulaToExpr(formula, cellMap, defaultSheet){
+  const toks=tokenizeSheetFormula(formula);
+  if(!toks.length) return {ok:false, reason:'empty'};
+  if(toks.some(t=>t.t==='bad')) return {ok:false, reason:'unsupported token'};
+  if(toks.some(t=>t.t==='ident')) return {ok:false, reason:'function or name'};
+  const parts=[]; const deps=[]; const unresolved=[];
+  const ds=String(defaultSheet||'').trim();
+  for(const t of toks){
+    if(t.t==='op'){ parts.push(t.v==='/'?' / ':t.v==='*'?' * ':t.v==='+'?' + ':t.v==='-'?' - ':t.v); continue; }
+    if(t.t==='num'){ parts.push(t.v); continue; }
+    if(t.t==='ref'){
+      const cr=a1ColRow(t.a1); if(!cr){ unresolved.push(t.a1); parts.push('?'); continue; }
+      const sh=(t.sheet||ds||'').trim();
+      const keys=[
+        (sh?sh+'!':'')+cr.col+cr.row,
+        cr.col+cr.row,
+        (sh?sh.toUpperCase()+'!':'')+cr.col+cr.row
+      ].map(k=>k.toUpperCase());
+      let key=null;
+      for(const k of keys){ if(cellMap[k]){ key=cellMap[k]; break; } }
+      if(!key){
+        for(const mk of Object.keys(cellMap)){
+          const bare=mk.includes('!')?mk.split('!').pop():mk;
+          if(bare===cr.col+cr.row){ key=cellMap[mk]; break; }
+        }
+      }
+      if(!key){ unresolved.push((sh?sh+'!':'')+cr.col+cr.row); parts.push('?'); continue; }
+      parts.push(key); deps.push(key); continue;
+    }
+  }
+  if(unresolved.length) return {ok:false, reason:'unresolved '+unresolved.join(','), unresolved};
+  const expr=parts.join('').replace(/\s+/g,' ').trim();
+  try{ compile(expr); }catch(e){ return {ok:false, reason:String(e.message||e)}; }
+  return {ok:true, expr, deps:[...new Set(deps)]};
+}
+
+{
+  const map={B2:'price', B3:'volume', 'B2':'price', 'B3':'volume'};
+  Object.keys(map).forEach(k=>{ map[k.toUpperCase()]=map[k]; });
+  const r=sheetFormulaToExpr('=$B$2*$B$3', map, '');
+  assert(r.ok, "parse $B$2*$B$3 ok");
+  assert(r.expr.replace(/\s/g,'')==='price*volume', "expr is price*volume (got "+r.expr+")");
+  const mapPL=Object.assign({}, map);
+  mapPL['P&L!B2']='revenue'; mapPL['P&L!B2'.toUpperCase()]='revenue'; mapPL['B3']='units'; mapPL['B3']='units';
+  const r2=sheetFormulaToExpr("='P&L'!B2/B3", mapPL, 'P&L');
+  assert(r2.ok && /revenue\s*\/\s*units/.test(r2.expr), "quoted sheet ref parse (got "+(r2.expr||r2.reason)+")");
+  const map3={'B5':'distributors','B6':'units_per_dist'};
+  Object.keys(map3).forEach(k=>{ map3[k.toUpperCase()]=map3[k]; });
+  const r3=sheetFormulaToExpr('=B5*B6', map3, 'Forecast');
+  assert(r3.ok && r3.expr.replace(/\s/g,'')==='distributors*units_per_dist', "B5*B6 → distributors*units_per_dist (got "+(r3.expr||r3.reason)+")");
+  const r4=sheetFormulaToExpr('=SUM(B2:B10)', map, '');
+  assert(!r4.ok, "SUM range not silently accepted");
+  const r5=sheetFormulaToExpr('=B2+B3', map, '');
+  assert(r5.ok && /price\s*\+\s*volume/.test(r5.expr), "addition maps too (got "+r5.expr+")");
+}
+
+/* Minimal exact backsolve harness mirroring app monomial + proportional scale */
+function monomialFactorizationTest(key, period, leafKeys){
+  const leafSet=new Set(leafKeys.map(k=>k.toLowerCase()));
+  const memo={};
+  function fac(k, seen){
+    const kl=String(k).toLowerCase();
+    if(kl in memo) return memo[kl];
+    if(seen.has(kl)) return memo[kl]={ok:false};
+    seen=new Set(seen); seen.add(kl);
+    const v=vget(k)||model.vars.find(x=>x.key.toLowerCase()===kl);
+    if(!v) return memo[kl]={ok:false};
+    if(v.kind==='input'){
+      if(!leafSet.has(v.key.toLowerCase()) && !leafSet.has(kl)){
+        const val=inputVal(v,period,true);
+        return memo[kl]={ok:true, exp:{}, c:Number(val)};
+      }
+      const exp={}; exp[v.key]=1;
+      return memo[kl]={ok:true, exp, c:1};
+    }
+    if(v.kind!=='formula') return memo[kl]={ok:false};
+    let compiled; try{ compiled=v.compiled&&v.compiled.rpn?v.compiled:compile(v.expr); }catch(e){ return memo[kl]={ok:false}; }
+    const st=[];
+    for(const x of compiled.rpn){
+      if('n' in x){ st.push({ok:true, exp:{}, c:x.n}); continue; }
+      if('vref' in x) return memo[kl]={ok:false};
+      if('v' in x){ st.push(fac(x.v, seen)); continue; }
+      if(x.fn) return memo[kl]={ok:false};
+      if(x.op){
+        const b=st.pop(), a=st.pop();
+        if(!a||!b||!a.ok||!b.ok) return memo[kl]={ok:false};
+        if(x.op==='*'){
+          const exp={}; Object.keys(a.exp).forEach(k=>exp[k]=(exp[k]||0)+a.exp[k]);
+          Object.keys(b.exp).forEach(k=>exp[k]=(exp[k]||0)+b.exp[k]);
+          st.push({ok:true, exp, c:a.c*b.c}); continue;
+        }
+        if(x.op==='/'){
+          if(Math.abs(b.c)<1e-15) return memo[kl]={ok:false};
+          const exp={}; Object.keys(a.exp).forEach(k=>exp[k]=(exp[k]||0)+a.exp[k]);
+          Object.keys(b.exp).forEach(k=>exp[k]=(exp[k]||0)-b.exp[k]);
+          st.push({ok:true, exp, c:a.c/b.c}); continue;
+        }
+        return memo[kl]={ok:false};
+      }
+    }
+    if(st.length!==1||!st[0].ok) return memo[kl]={ok:false};
+    return memo[kl]=st[0];
+  }
+  const r=fac(key, new Set());
+  if(!r||!r.ok) return {ok:false};
+  const exp={}; Object.keys(r.exp).forEach(k=>{ if(Math.abs(r.exp[k])>1e-12) exp[k]=r.exp[k]; });
+  return {ok:true, exponents:exp, constant:r.c};
+}
+
+{
+  model = {
+    periods: ["M1"],
+    ov: {},
+    vars: [
+      {key:"price", name:"Price", unit:"Rs", kind:"input", base:100, steps:[], delta:0},
+      {key:"volume", name:"Volume", unit:"#", kind:"input", base:50, steps:[], delta:0},
+      {key:"revenue", name:"Revenue", unit:"Rs", kind:"formula", expr:"price * volume"},
+    ]
+  };
+  recompileAll();
+  const y0 = evalModel(true).revenue[0];
+  assert(approx(y0, 5000), "price*volume base 5000 (got "+y0+")");
+  const leaves = [vget('price'), vget('volume')];
+  const fac = monomialFactorizationTest('revenue', 0, ['price','volume']);
+  assert(fac.ok, "monomial ok for price*volume");
+  assert(fac.exponents.price===1 && fac.exponents.volume===1, "exponents 1,1");
+  const target = 8000;
+  const ratio = target / y0;
+  const psum = 2;
+  let r = Math.pow(ratio, 1/psum);
+  leaves.forEach(v=> setOv(v.key, 0, (v.base)*r));
+  let y1 = evalModel(true).revenue[0];
+  const corr = Math.pow(target/y1, 1/psum);
+  r *= corr;
+  leaves.forEach(v=> setOv(v.key, 0, (v.base)*r));
+  y1 = evalModel(true).revenue[0];
+  assert(approx(y1, 8000, 0.02), "exact proportional backsolve revenue→8000 (got "+y1+")");
+}
+
+{
+  model = {
+    periods: ["M1"],
+    ov: {},
+    vars: [
+      {key:"price", name:"Price", unit:"Rs", kind:"input", base:100, steps:[], delta:0},
+      {key:"volume", name:"Volume", unit:"#", kind:"input", base:50, steps:[], delta:0},
+      {key:"revenue", name:"Revenue", unit:"Rs", kind:"formula", expr:"price * volume"},
+    ]
+  };
+  recompileAll();
+  /* single-leaf: only price free */
+  const y0 = evalModel(true).revenue[0];
+  const target = 6000;
+  const fac = monomialFactorizationTest('revenue', 0, ['price']);
+  assert(fac.ok && fac.exponents.price===1, "single-leaf monomial");
+  const scale = target/y0;
+  setOv('price', 0, 100*scale);
+  const y1 = evalModel(true).revenue[0];
+  assert(approx(y1, 6000, 1e-4), "exact single-driver price drag (got "+y1+")");
+  assert(approx(model.ov.price[0], 120, 1e-4), "price→120 (got "+model.ov.price[0]+")");
+}
+
+{
+  model = {
+    periods: ["M1"],
+    ov: {},
+    vars: [
+      {key:"a", name:"A", unit:"#", kind:"input", base:10, steps:[], delta:0},
+      {key:"b", name:"B", unit:"#", kind:"input", base:5, steps:[], delta:0},
+      {key:"s", name:"S", unit:"#", kind:"formula", expr:"a + b"},
+    ]
+  };
+  recompileAll();
+  const fac = monomialFactorizationTest('s', 0, ['a','b']);
+  assert(!fac.ok, "a+b is not a monomial — fall back to numeric");
 }
 
 
