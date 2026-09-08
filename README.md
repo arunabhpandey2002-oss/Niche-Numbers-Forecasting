@@ -2,13 +2,20 @@
 
 A portable forecasting and variance modelling tool that connects directly to Google Sheets through Google Apps Script.
 
+## Hybrid truth (authoritative math)
+
+**Planning math runs in the app engine** (deterministic RPN evaluation with fixed-scale decimal arithmetic and topological formula order). Google Sheets are the source for **actuals**, **sync**, and **promote** — not the place where driver-based forecast arithmetic is redefined.
+
+- **Determinism**: `+ − × ÷` use integer micros at scale `1e8`; division by zero throws; unresolved formula dependencies are marked with `v.err` (values are `NaN`, never silent zeros).
+- **Scenario forks**: saved versions freeze the full driver state (base / steps / ramp / phase / delta) plus overrides, and a series snapshot for variance compare. Load a version as the working scenario to restore drivers for live editing.
+
 ## Included
 
 - `index.html` — the complete application and calculation engine.
 - `google-apps-script/Code.gs` — the Google Sheets read/write connector.
 - `vercel.json` — simple Vercel configuration.
 
-No paid database, server or AI API is required. Model settings are stored in the user's browser. Spreadsheet calculations remain in Google Sheets.
+No paid database, server or AI API is required. Model settings are stored in the user's browser.
 
 ## Put it on GitHub
 
