@@ -9,6 +9,24 @@ A portable forecasting and variance modelling tool that connects directly to Goo
 - **Determinism**: `+ − × ÷` use integer micros at scale `1e8`; division by zero throws; unresolved formula dependencies are marked with `v.err` (values are `NaN`, never silent zeros).
 - **Scenario forks**: saved versions freeze the full driver state (base / steps / ramp / phase / delta) plus overrides, and a series snapshot for variance compare. Load a version as the working scenario to restore drivers for live editing.
 
+
+## P1 — formula helpers, variance polish, promote
+
+**Formula builder v2** (no bundler): formulas support FP&A helpers usable from the Insert/Helpers chips in the variable editor:
+
+| Helper | Meaning |
+|--------|---------|
+| `lag(var, n)` | Value of `var` *n* periods ago (`0` if out of range) |
+| `if(cond, a, b)` | `a` when `cond ≠ 0`, else `b` |
+| `sum_periods(var)` / `sum(var)` | Running sum of `var` from period 0 through the **current** period |
+| `pct(a, b)` | `a / b × 100` |
+
+Existing `+ − * /` and the deterministic decimal engine are unchanged. Run `node engine-test.mjs` to verify P0 demos plus the new helpers.
+
+**Variance**: version dropdowns label saved forks clearly; window/compare prefs persist via `model.uiState`; **Refresh actuals** is always visible on the Variance tab; comparing forks notes that frozen series snapshots are used; Compare lists saved forks as chips.
+
+**Promote scenario to Sheets**: from Forecast, Versions, or Compare → **Promote to Sheets**. Option A writes mapped input ranges (dry-run when disconnected). Option B creates/overwrites a tab named after the scenario with a driver grid — requires redeploying `google-apps-script/Code.gs` (`ensureSheet` action).
+
 ## Included
 
 - `index.html` — the complete application and calculation engine.

@@ -357,36 +357,123 @@
 const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function genMonths(n,startM=8,startY=26){ let m=startM,y=startY,out=[]; for(let i=0;i<n;i++){ out.push(MN[m]+" ’"+y); m++; if(m>11){m=0;y++;} } return out; }
 
-/* ---- expression compiler (shunting-yard → RPN) ---- */
+/* ---- expression compiler (shunting-yard → RPN) + FP&A helpers ---- */
+const NN_FN_ARITY={lag:2, if:3, sum_periods:1, sum:1, pct:2};
+const NN_FN_VREF=new Set(['lag','sum_periods','sum']); /* first arg is a variable reference */
 function compile(expr){
-  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[()+\-*/]/g))||[];
+  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[(),+\-*/]/g))||[];
   const out=[],ops=[],prec={'+':1,'-':1,'*':2,'/':2};
-  for(const t of toks){
+  const arityStack=[];
+  const flushOp=o=>{
+    if(typeof o==='object'&&o&&o.fn) return {fn:o.fn, arity:NN_FN_ARITY[o.fn]||o.arity||0};
+    return {op:o};
+  };
+  for(let i=0;i<toks.length;i++){
+    const t=toks[i];
     if(/^[\d.]/.test(t)) out.push({n:+t});
-    else if(/^[A-Za-z_]/.test(t)) out.push({v:t});
-    else if(t==='(') ops.push(t);
-    else if(t===')'){ while(ops.length&&ops[ops.length-1]!=='(') out.push({op:ops.pop()}); ops.pop(); }
-    else { while(ops.length&&prec[ops[ops.length-1]]>=prec[t]) out.push({op:ops.pop()}); ops.push(t); }
+    else if(/^[A-Za-z_]/.test(t)){
+      const fn=t.toLowerCase();
+      if(NN_FN_ARITY[fn]!=null && toks[i+1]==='('){ ops.push({fn}); }
+      else out.push({v:t});
+    }
+    else if(t==='('){
+      ops.push(t);
+      if(ops.length>=2 && typeof ops[ops.length-2]==='object' && ops[ops.length-2].fn){
+        /* peek whether args are empty: next token ) → arity 0 */
+        arityStack.push(toks[i+1]===')'?0:1);
+      }
+    }
+    else if(t===','){
+      while(ops.length && ops[ops.length-1]!=='(') out.push(flushOp(ops.pop()));
+      if(arityStack.length) arityStack[arityStack.length-1]++;
+    }
+    else if(t===')'){
+      while(ops.length && ops[ops.length-1]!=='(') out.push(flushOp(ops.pop()));
+      if(ops.length && ops[ops.length-1]==='(') ops.pop();
+      if(ops.length && typeof ops[ops.length-1]==='object' && ops[ops.length-1].fn){
+        const f=ops.pop(); const expect=NN_FN_ARITY[f.fn];
+        const got=arityStack.length?arityStack.pop():expect;
+        if(expect!=null && got!==expect) throw new Error(f.fn+'() expects '+expect+' arg(s)');
+        out.push({fn:f.fn, arity:expect});
+      }
+    }
+    else {
+      while(ops.length && typeof ops[ops.length-1]==='string' && ops[ops.length-1]!=='(' && prec[ops[ops.length-1]]>=prec[t])
+        out.push(flushOp(ops.pop()));
+      ops.push(t);
+    }
   }
-  while(ops.length) out.push({op:ops.pop()});
-  const deps=[...new Set(out.filter(x=>'v' in x).map(x=>x.v))];
+  while(ops.length){
+    const o=ops.pop();
+    if(o==='('||o===')') continue;
+    out.push(flushOp(o));
+  }
+  /* rewrite lag/sum first-arg variables into {vref} so eval keeps the name */
+  (function rewriteVrefs(rpn){
+    const stack=[];
+    for(let i=0;i<rpn.length;i++){
+      const x=rpn[i];
+      if('n' in x || 'v' in x || 'vref' in x){ stack.push(i); continue; }
+      if(x.op){ stack.pop(); stack.pop(); stack.push(i); continue; }
+      if(x.fn){
+        const args=[]; for(let a=0;a<(x.arity||0);a++) args.unshift(stack.pop());
+        if(NN_FN_VREF.has(x.fn) && args[0]!=null && rpn[args[0]] && 'v' in rpn[args[0]])
+          rpn[args[0]]={vref:rpn[args[0]].v};
+        stack.push(i);
+      }
+    }
+  })(out);
+  const deps=[...new Set(out.filter(x=>'v' in x || 'vref' in x).map(x=>x.v||x.vref))];
   return {rpn:out,deps};
 }
 /* Fixed-scale decimal arithmetic (integer micros at 1e8) for deterministic + - * / */
 const NN_SCALE=1e8;
 function nnToMicro(n){ const x=Number(n); return Number.isFinite(x)?Math.round(x*NN_SCALE):NaN; }
 function nnFromMicro(m){ return Number.isFinite(m)?m/NN_SCALE:NaN; }
-function evalRPN(rpn,scope){
+/* ctx optional: {period, lookup(key,q)} for lag / sum_periods across time */
+function evalRPN(rpn,scope,ctx){
   const st=[];
+  const period=(ctx&&ctx.period!=null)?ctx.period:0;
+  const lookup=(ctx&&typeof ctx.lookup==='function')?ctx.lookup:(key,q)=>{
+    if(q!==period) return 0;
+    const raw=scope[String(key).toLowerCase()];
+    return raw;
+  };
+  const pushNum=raw=>{
+    if(raw===undefined || raw===null || (typeof raw==='number' && Number.isNaN(raw))) st.push(NaN);
+    else st.push(nnToMicro(Number(raw)));
+  };
   for(const x of rpn){
     if('n' in x) st.push(nnToMicro(x.n));
-    else if('v' in x){
-      const raw=scope[x.v.toLowerCase()];
-      if(raw===undefined || raw===null || (typeof raw==='number' && Number.isNaN(raw))) st.push(NaN);
-      else st.push(nnToMicro(Number(raw)));
+    else if('vref' in x) st.push({__ref:x.vref});
+    else if('v' in x) pushNum(scope[x.v.toLowerCase()]);
+    else if(x.fn){
+      const args=[]; for(let i=0;i<(x.arity||0);i++) args.unshift(st.pop());
+      if(x.fn==='lag'){
+        const ref=args[0], nMicro=args[1];
+        const key=ref&&ref.__ref; const n=Math.round(nnFromMicro(nMicro));
+        const q=period-n;
+        let val=0;
+        if(key && q>=0){ const raw=lookup(key,q); if(raw!=null && raw!=='' && !(typeof raw==='number'&&Number.isNaN(raw))) val=Number(raw); }
+        st.push(nnToMicro(val));
+      } else if(x.fn==='sum_periods' || x.fn==='sum'){
+        const ref=args[0]; const key=ref&&ref.__ref; let s=0;
+        if(key){ for(let q=0;q<=period;q++){ const raw=lookup(key,q); if(raw!=null && raw!=='' && !(typeof raw==='number'&&Number.isNaN(raw))) s+=Number(raw); } }
+        st.push(nnToMicro(s));
+      } else if(x.fn==='if'){
+        const cond=args[0], a=args[1], b=args[2];
+        if(!Number.isFinite(cond)) st.push(NaN);
+        else st.push(cond!==0 ? a : b);
+      } else if(x.fn==='pct'){
+        const a=args[0], b=args[1];
+        if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
+        if(b===0) throw new Error('Division by zero');
+        st.push(Math.round((a*100*NN_SCALE)/b));
+      } else st.push(NaN);
     }
     else {
       const b=st.pop(), a=st.pop();
+      if(a&&typeof a==='object'&&a.__ref || b&&typeof b==='object'&&b.__ref){ st.push(NaN); continue; }
       if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
       let r;
       if(x.op==='+') r=a+b;
@@ -401,6 +488,7 @@ function evalRPN(rpn,scope){
   }
   if(!st.length) return 0;
   const top=st[st.length-1];
+  if(top&&typeof top==='object'&&top.__ref) return NaN;
   return Number.isFinite(top)?nnFromMicro(top):NaN;
 }
 
@@ -531,7 +619,15 @@ function evalModel(scenario){
         return;
       }
       try{
-        const val=evalRPN(v.compiled.rpn, scope);
+        const val=evalRPN(v.compiled.rpn, scope, {period:p, lookup:(key,q)=>{
+          if(q<0||q>=n) return 0;
+          const sk=String(key).toLowerCase();
+          if(q===p && (sk in scope)) return scope[sk];
+          const kk=Object.keys(res).find(x=>x.toLowerCase()===sk);
+          if(!kk) return 0;
+          const raw=res[kk][q];
+          return raw==null?0:raw;
+        }});
         if(Number.isNaN(val)){ v.err=v.err||'Evaluation produced NaN'; }
         scope[v.key.toLowerCase()]=val;
         res[v.key][p]=val;
@@ -847,6 +943,8 @@ function varModal(idx){
       <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
         <div class="field"><label>Formula</label><textarea class="inp" id="vExpr" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
         <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Insert:</span>${chips||'<span class="mut fz11">add other variables first</span>'}${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}</div>
+        <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Helpers:</span><button type="button" class="tok op" title="lag(var,n)" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" title="if(cond,a,b)" onclick="insFn('if')">if(</button><button type="button" class="tok op" title="sum_periods(var)" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" title="pct(a,b)" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
+        <p class="mut fz11" style="margin:6px 0 0"><code>lag(var,n)</code> = value n periods ago (0 if out of range) · <code>if(cond,a,b)</code> = a if cond≠0 else b · <code>sum_periods(var)</code> = running sum from period 0 through current · <code>pct(a,b)</code> = a/b×100. Alias: <code>sum(var)</code>.</p>
       </div>
       <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
         <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
@@ -879,6 +977,7 @@ function varKindToggle(){ const k=document.getElementById('vKind').value;
 }
 function autoKey(){ const kEl=document.getElementById('vKey'); if(kEl.value) return; kEl.value=document.getElementById('vName').value.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,''); }
 function insTok(t){ const e=document.getElementById('vExpr'); if(!e)return; const cur=e.value; e.value=(cur&&!/[\s(]$/.test(cur)?cur+' ':cur)+t+(/[a-z0-9_]/i.test(t)?' ':''); e.focus(); }
+function insFn(name){ const e=document.getElementById('vExpr'); if(!e)return; const cur=e.value; const pad=cur&&!/[\s(]$/.test(cur)?' ':''; e.value=cur+pad+name+'('; e.focus(); }
 function updRangePrev(){ const el=document.getElementById('rangePrev'); if(!el)return;
   const sh=(document.getElementById('vSheet')||{}).value||'', col=(document.getElementById('vCol')||{}).value||'', row=(document.getElementById('vRow')||{}).value||'';
   const r=buildRange(sh,col,row,P());
@@ -954,7 +1053,7 @@ function viewForecast(){
       <div class="serieslegend" id="serieslegend"></div>
       <div class="result-foot" style="margin-top:12px">
         <div class="txt"><strong>Scenario is a plan, not yet saved</strong><span>Write-back pushes only the input assumptions you changed — formulas recompute themselves.</span></div>
-        <div class="acts"><button class="btn sm" onclick="saveVersionModal()">Save as version</button><button class="btn sm" onclick="openWriteback()">Review write-back</button></div>
+        <div class="acts"><button class="btn sm" onclick="saveVersionModal()">Save as version</button><button class="btn sm" onclick="openWriteback()">Review write-back</button><button class="btn sm" onclick="openPromoteModal(null)">Promote to Sheets</button></div>
       </div>
     </div>
   </div>`;
@@ -1293,7 +1392,7 @@ function verLabel(which){
   if(which==='plan')return 'Plan (baseline)'; if(which==='scenario')return 'Scenario (your plan)';
   if(which==='forecast')return 'Forecast (from sheet)';
   if(which==='actual')return 'Actuals'; if(which==='prior')return PRIOR_LABEL[_vState.priorN||1]||'Prior period';
-  if(which&&which.slice(0,2)==='v:'){ const v=(model.versions||[]).find(x=>x.id===which.slice(2)); return v?v.name:'(deleted version)'; }
+  if(which&&which.slice(0,2)==='v:'){ const v=(model.versions||[]).find(x=>x.id===which.slice(2)); return v?(v.name+(v.drivers?' (fork)':'')):'(deleted version)'; }
   return which;
 }
 function verShort(which){ if(which&&which.slice(0,2)==='v:'){ const v=(model.versions||[]).find(x=>x.id===which.slice(2)); return v?(v.name.length>14?v.name.slice(0,13)+'…':v.name):'—'; } return {plan:'Plan',scenario:'Scenario',forecast:'Forecast',actual:'Actuals',prior:PRIOR_LABEL[_vState.priorN||1]||'Prior'}[which]||which; }
@@ -1361,11 +1460,11 @@ function deleteVersion(id){ model.versions=(model.versions||[]).filter(v=>v.id!=
   ['A','B'].forEach(s=>{ if(_vState[s]==='v:'+id) _vState[s]= s==='A'?'scenario':'plan'; }); saveModel(); renderVariance(); }
 function openVersions(){
   model.versions=model.versions||[];
-  const rows=model.versions.length? model.versions.map(v=>`<div class="pinrow" style="flex-wrap:wrap;gap:6px"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}${v.drivers?' · scenario fork':''}</span><span style="margin-left:auto;display:flex;gap:6px"><button class="pinbtn" onclick="applyScenarioFork('${v.id}')">Load as working scenario</button><button class="pinbtn" onclick="deleteVersion('${v.id}')">Delete</button></span></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save freezes the full scenario (all drivers + overrides) so you can restore or compare later.</p>';
+  const rows=model.versions.length? model.versions.map(v=>`<div class="pinrow" style="flex-wrap:wrap;gap:6px"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}${v.drivers?' · scenario fork':''}</span><span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="pinbtn" onclick="applyScenarioFork('${v.id}')">Load as working scenario</button><button class="pinbtn" onclick="openPromoteModal('${v.id}')">Promote to Sheets</button><button class="pinbtn" onclick="deleteVersion('${v.id}')">Delete</button></span></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save freezes the full scenario (all drivers + overrides) so you can restore or compare later.</p>';
   showModal(`<div class="mhead"><h3>Saved versions</h3><button class="x" onclick="closeModal()">×</button></div>
-    <div class="mbody"><p class="mut fz12" style="margin:0 0 10px">Each save freezes the full scenario (drivers + overrides) and a series snapshot. Variance compare uses the stored series; <b>Load as working scenario</b> restores drivers for live editing.</p>
+    <div class="mbody"><p class="mut fz12" style="margin:0 0 10px">Each save freezes the full scenario (drivers + overrides) and a series snapshot. Variance compare uses the stored series; <b>Load as working scenario</b> restores drivers for live editing. <b>Promote to Sheets</b> writes a fork’s inputs (or a driver dump tab) back to Google Sheets.</p>
       <div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${rows}</div>
-      <div style="display:flex;justify-content:space-between;margin-top:14px"><button class="btn" onclick="saveVersionModal()">＋ Save current plan</button><button class="btn primary" onclick="closeModal()">Done</button></div>
+      <div style="display:flex;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px"><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="saveVersionModal()">＋ Save current plan</button><button class="btn" onclick="openPromoteModal(null)">Promote working scenario</button></div><button class="btn primary" onclick="closeModal()">Done</button></div>
     </div>`);
 }
 
@@ -1394,7 +1493,18 @@ function bridge(key,A,B,win){
   const c=compile(v.expr), deps=c.deps.map(d=>vget(d)).filter(Boolean);
   const startArr=[],endArr=[],stepArr={}; deps.forEach(d=>stepArr[d.key]=[]);
   for(let p=win[0];p<=win[1];p++){
-    const val=(sub)=>{ const scope={}; deps.forEach(d=>{ scope[d.key.toLowerCase()]=(sub.has(d.key)?A:B)[d.key][p]; }); return evalRPN(c.rpn,scope); };
+    const val=(sub)=>{ const scope={}; deps.forEach(d=>{ scope[d.key.toLowerCase()]=(sub.has(d.key)?A:B)[d.key][p]; });
+      return evalRPN(c.rpn,scope,{period:p, lookup:(key,q)=>{
+        if(q<0) return 0;
+        const sk=String(key).toLowerCase();
+        if(q===p && (sk in scope)) return scope[sk];
+        const useA=[...sub].some(k=>k.toLowerCase()===sk);
+        const src=useA?A:B;
+        const kk=Object.keys(src).find(x=>x.toLowerCase()===sk);
+        if(!kk) return 0;
+        const raw=(src[kk]||[])[q];
+        return raw==null?0:raw;
+      }}); };
     let prev=val(new Set()); startArr.push(prev); const used=new Set();
     deps.forEach(d=>{ used.add(d.key); const now=val(used); stepArr[d.key].push(now-prev); prev=now; });
     endArr.push(prev);
@@ -1463,12 +1573,12 @@ function mountVariance(){
   if(!_vState.line||!vget(_vState.line)) _vState.line=prefer?prefer.key:null;
   renderVariance();
 }
-function setVer(side,val){ _vState.userVer=true; _vState[side]=val; if(_vState.A===_vState.B){ _vState.B = _vState.A==='plan'?'scenario':'plan'; } renderVariance(); }
-function setVWin(v){ _vState.winUser=true; if(v==='all') _vState.win=[0,P()-1]; else { const p=+v; _vState.win=[p,p]; } renderVariance(); }
+function setVer(side,val){ _vState.userVer=true; _vState[side]=val; if(_vState.A===_vState.B){ _vState.B = _vState.A==='plan'?'scenario':'plan'; } saveModel(); renderVariance(); }
+function setVWin(v){ _vState.winUser=true; if(v==='all') _vState.win=[0,P()-1]; else { const p=+v; _vState.win=[p,p]; } saveModel(); renderVariance(); }
 function pickVLine(k){ _vState.line=k; renderVariance(); }
 function toggleGood(k){ const v=vget(k); v.good=goodDir(v)==='up'?'down':'up'; renderVariance(); saveModel(); }
 
-function setVerPrior(n){ _vState.priorN=+n; renderVariance(); }
+function setVerPrior(n){ _vState.priorN=+n; saveModel(); renderVariance(); }
 function ragOf(r){ if(Math.abs(r.d)<1e-9||r.b===0) return 'na'; if(r.fav) return 'g'; return Math.abs(r.pct)>=10?'r':'a'; }
 const RAG_TITLE={g:'On track / favourable',a:'Watch — moderate unfavourable',r:'Alert — large unfavourable',na:'No material variance'};
 function renderVariance(){
@@ -1518,11 +1628,18 @@ function renderVariance(){
       <span class="explbadge" title="Share of variance with a reason tagged"><span class="explbar"><span style="width:${explPct}%"></span></span>${explPct}% explained</span>
       ${model.sources?`<button class="btn sm" onclick="importSources2()" title="Re-read both files">↻ Refresh</button>`:''}
       <button class="btn sm" onclick="openSources()">${model.sources?'Sources':'＋ Import 2 files'}</button>
-      ${conn.actualsSsid?`<button class="btn sm" onclick="refreshActuals()" title="Re-read actuals from your actuals sheet">↻ Actuals</button>`:''}
+      <button class="btn sm indigo" onclick="refreshActuals()" title="Re-read actuals from your actuals sheet"${conn.actualsSsid?'':' disabled style="opacity:.55"'}">↻ Refresh actuals</button>
       <button class="btn sm" onclick="openVersions()">Versions${(model.versions||[]).length?` · ${model.versions.length}`:''}</button>
       <button class="btn sm" onclick="saveVersionModal()">＋ Save version</button>
+      <button class="btn sm" onclick="openPromoteModal(null)" title="Write scenario inputs or dump drivers to Sheets">Promote to Sheets</button>
     </div>
-    ${priorNote?`<p class="mut fz11" style="margin:10px 0 0">${priorNote}</p>`:!hasActuals()?`<p class="mut fz11" style="margin:10px 0 0">No actuals yet — comparing plan versions. Add an <b>actuals sheet</b> in Connect, map each line's actuals cell in Model setup, then hit <b>Refresh actuals</b> — or save named versions to compare plans.</p>`:''}`;
+    ${(()=>{ const forkHint=([_vState.A,_vState.B].some(w=>w&&w.slice(0,2)==='v:'&&(model.versions||[]).find(x=>x.id===w.slice(2)&&x.drivers)));
+      const bits=[];
+      if(priorNote) bits.push(priorNote);
+      if(forkHint) bits.push('Comparing a saved <b>scenario fork</b> — variance uses the frozen series snapshot (not live drivers). Load the fork as working scenario to edit drivers.');
+      if(!hasActuals()) bits.push('No actuals yet — comparing plan versions. Add an <b>actuals sheet</b> in Connect, map each line\'s actuals cell in Model setup, then hit <b>Refresh actuals</b> — or save named versions to compare plans.');
+      return bits.length?`<p class="mut fz11" style="margin:10px 0 0">${bits.join(' · ')}</p>`:'';
+    })()}`;
   document.getElementById('vTable').innerHTML=`
     <div class="results-head" style="margin-bottom:8px"><div><p class="eyebrow">All lines · ${winLabel}</p><h2 style="font-size:16px">${verShort(_vState.A)} vs ${verShort(_vState.B)}</h2></div></div>
     <div class="scrollx"><table class="vtable">
@@ -1669,6 +1786,8 @@ function renderCompare(){
   const baseOpts=vers.map(k=>`<option value="${k}" ${k===_cState.base?'selected':''}>${verLabel(k)}</option>`).join('');
   const cmpOpts=vers.map(k=>`<option value="${k}" ${k===_cState.cmp?'selected':''}>${verLabel(k)}</option>`).join('');
   const perOpts=`<option value="all" ${win[0]===0&&win[1]===P()-1?'selected':''}>Full timeline</option>`+model.periods.map((m,i)=>`<option value="${i}" ${win[0]===win[1]&&win[0]===i?'selected':''}>${m}</option>`).join('');
+  const forkList=(model.versions||[]);
+  const forkStrip=forkList.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Saved forks</span>${forkList.map(v=>`<button class="tok ${(_cState.base==='v:'+v.id||_cState.cmp==='v:'+v.id)?'op':''}" onclick="setCBase('v:${v.id}')" title="Set as baseline">${esc(v.name)}</button>`).join('')}<button class="btn sm" onclick="openPromoteModal(null)">Promote to Sheets</button></div>`:`<p class="mut fz11" style="margin:10px 0 0">Only Plan and your working scenario so far — save a few named versions (Budget, Upside, Downside) to line up more here.</p>`;
   document.getElementById('cControls').innerHTML=`<div class="selrow2">
     <div class="field"><label>Line to compare</label><select onchange="setCLine(this.value)">${lineOpts}</select></div>
     <div class="field"><label>Baseline</label><select onchange="setCBase(this.value)">${baseOpts}</select></div>
@@ -1676,7 +1795,7 @@ function renderCompare(){
     <div style="flex:1"></div>
     <button class="btn sm" onclick="openVersions()">Versions${(model.versions||[]).length?` · ${model.versions.length}`:''}</button>
     <button class="btn sm" onclick="saveVersionModal()">＋ Save version</button>
-  </div>${vers.length<3?`<p class="mut fz11" style="margin:10px 0 0">Only Plan and your working scenario so far — save a few named versions (Budget, Upside, Downside) to line up more here.</p>`:''}`;
+  </div>${forkStrip}`;
   // focus line across versions
   const vals=vers.map(k=>({k,val:vAgg(data[k],_cState.line,win)}));
   const maxAbs=Math.max(1,...vals.map(x=>Math.abs(x.val)));
@@ -1705,6 +1824,134 @@ function renderCompare(){
     <div class="results-head" style="margin-bottom:8px"><div><p class="eyebrow">All lines × versions · ${winLabel}</p><h2 style="font-size:16px">Every line across every projection</h2></div></div>
     <div class="scrollx"><table class="vtable"><thead><tr>${matHead}</tr></thead><tbody>${matBody}</tbody></table></div>
     <p class="mut fz11" style="margin-top:8px">Colour shows movement vs the ${verShort(_cState.base)} column. Click any line to feature it above.</p>`;
+}
+
+/* ============================ PROMOTE SCENARIO TO SHEETS ============================ */
+function levelArrayFromDriver(d,n,fallbackBase){
+  if(d && d.ramp && d.ramp.on){
+    const r=d.ramp, s=Math.max(0,Math.min(n-1,r.start|0)), m=Math.max(1,r.months|0),
+      from=(r.from!=null?r.from:0), to=(r.to!=null?r.to:(d.base!=null?d.base:fallbackBase));
+    const arr=new Array(n);
+    for(let p=0;p<n;p++){ arr[p]= p<s?from : p>=s+m?to : from+(to-from)*((p-s+1)/m); }
+    return arr;
+  }
+  const base=d&&d.base!=null?d.base:fallbackBase;
+  const arr=new Array(n).fill(base!=null?base:0);
+  (d&&d.steps||[]).slice().sort((a,b)=>a.from-b.from).forEach(st=>{ for(let p=st.from;p<n;p++) arr[p]=st.value; });
+  return arr;
+}
+function scheduleFromDriver(d,n,fallbackBase){
+  let arr=levelArrayFromDriver(d,n,fallbackBase);
+  if(d&&d.phase&&d.phase.length) arr=arr.map((x,p)=>x*(d.phase[p]!=null?d.phase[p]:1));
+  return arr;
+}
+/* Build input row for current working scenario OR a saved fork (drivers+ov), without mutating model. */
+function scenRowForPromote(verId,v){
+  const n=P();
+  if(!verId) return scenRow(v);
+  const ver=(model.versions||[]).find(x=>x.id===verId);
+  if(!ver) return scenRow(v);
+  const d=ver.drivers&&ver.drivers[v.key];
+  const ovMap=(ver.ov&&ver.ov[v.key])||{};
+  const sched=d?scheduleFromDriver(d,n,v.base):schedule(v);
+  return Array.from({length:n},(_,p)=>{
+    let a=-1; for(const k in ovMap){ const ap=+k; if(ap<=p && ap>a) a=ap; }
+    const val=a>=0 ? ovMap[a]+(sched[p]-sched[a]) : sched[p];
+    return +(Number(val)).toFixed(4);
+  });
+}
+function promoteSourceLabel(verId){
+  if(!verId) return 'Working scenario';
+  const ver=(model.versions||[]).find(x=>x.id===verId);
+  return ver?ver.name:'(missing version)';
+}
+function openPromoteModal(verId){
+  const versions=model.versions||[];
+  const initial=verId||'';
+  const opts=`<option value="" ${!initial?'selected':''}>Working scenario (current)</option>`+versions.map(v=>`<option value="${v.id}" ${v.id===initial?'selected':''}>${esc(v.name)}${v.drivers?' · fork':''}</option>`).join('');
+  showModal(`<div class="mhead"><h3>Promote scenario to Sheets</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <p class="mut fz12" style="margin:0 0 10px">Push a saved fork (or the working scenario) into Google Sheets. <b>Option A</b> writes mapped input ranges (same as write-back). <b>Option B</b> creates/overwrites a tab named after the scenario and dumps driver values as a simple grid.</p>
+      <div class="field"><label>Scenario</label><select id="pmVer" class="inp">${opts}</select></div>
+      <div class="frow two" style="margin-top:12px">
+        <label class="lvopt on" style="margin:0"><input type="radio" name="pmMode" value="inputs" checked onchange="document.getElementById('pmTabRow').style.display='none'"><span><span class="t">A · Write mapped inputs</span><span class="d">Uses each input’s mapped range. Dry-run if not connected.</span></span></label>
+        <label class="lvopt" style="margin:0"><input type="radio" name="pmMode" value="tab" onchange="document.getElementById('pmTabRow').style.display=''"><span><span class="t">B · New / overwrite tab</span><span class="d">Requires Apps Script with <code>ensureSheet</code>. Dumps drivers + periods.</span></span></label>
+      </div>
+      <div class="field" id="pmTabRow" style="display:none;margin-top:10px"><label>Sheet tab name</label><input class="inp" id="pmTab" placeholder="auto from scenario name"></div>
+      <div id="pmFeedback"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="previewPromote()">Preview dry-run</button></div>
+    </div>`);
+}
+function promoteWrites(verId){
+  return inputs().filter(v=>v.writable!==false && v.range).map(v=>({range:v.range, values:[ scenRowForPromote(verId,v) ], name:v.name, key:v.key}));
+}
+function promoteGrid(verId){
+  const n=P();
+  const header=['key','name','unit'].concat(model.periods.slice(0,n));
+  const rows=[header];
+  inputs().forEach(v=>{
+    rows.push([v.key,v.name,v.unit].concat(scenRowForPromote(verId,v)));
+  });
+  return rows;
+}
+function safeSheetName(name){
+  return String(name||'Scenario').replace(/[:\/?*\[\]]/g,'').slice(0,80) || 'Scenario';
+}
+function previewPromote(){
+  const verId=(document.getElementById('pmVer')||{}).value||'';
+  const mode=(document.querySelector('input[name="pmMode"]:checked')||{}).value||'inputs';
+  const fb=document.getElementById('pmFeedback'); if(!fb) return;
+  const label=promoteSourceLabel(verId);
+  if(mode==='inputs'){
+    const writes=promoteWrites(verId);
+    if(!writes.length){ fb.innerHTML=`<div class="write-feedback" style="background:#fff8ec;color:#8a5a12">No mapped writable inputs — map input cells in Model setup first.</div>`; return; }
+    const tbl=writes.map(w=>{
+      const row=w.values[0]; const lo=Math.min(...row), hi=Math.max(...row);
+      const rng=lo===hi?fmtVar(lo,(vget(w.key)||{}).unit):`${fmtVar(lo,(vget(w.key)||{}).unit)} – ${fmtVar(hi,(vget(w.key)||{}).unit)}`;
+      return `<tr><td><strong>${esc(w.name)}</strong></td><td class="cellref">${esc(w.range)}</td><td class="num">${rng}</td></tr>`;
+    }).join('');
+    fb.innerHTML=`<div class="hintbox" style="margin-top:10px">Dry-run for <b>${esc(label)}</b> · ${writes.length} mapped input row(s) across ${P()} periods.${!conn.connected?' Not connected — confirm will stay a dry run.':''}</div>
+      <table class="wtable"><thead><tr><th>Assumption</th><th>Target</th><th class="num">Values</th></tr></thead><tbody>${tbl}</tbody></table>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn primary" onclick="confirmPromote()">Confirm write ${writes.length} input(s)</button></div>`;
+  } else {
+    const grid=promoteGrid(verId);
+    let tab=(document.getElementById('pmTab')||{}).value||'';
+    if(!tab) tab=safeSheetName(label);
+    if(document.getElementById('pmTab') && !(document.getElementById('pmTab').value||'').trim()) document.getElementById('pmTab').value=tab;
+    fb.innerHTML=`<div class="hintbox" style="margin-top:10px">Will create/overwrite tab <b>${esc(tab)}</b> with a ${grid.length}×${grid[0].length} driver grid for <b>${esc(label)}</b>. Needs redeployed Code.gs with <code>ensureSheet</code>.${!conn.connected?' Not connected — confirm stays a dry run.':''}</div>
+      <p class="mut fz11" style="margin:8px 0">Preview (first 4 columns): <code>${esc(grid.slice(0,4).map(r=>r.slice(0,4).join(', ')).join(' · '))}</code></p>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn primary" onclick="confirmPromote()">Confirm tab dump</button></div>`;
+  }
+}
+async function confirmPromote(){
+  const verId=(document.getElementById('pmVer')||{}).value||'';
+  const mode=(document.querySelector('input[name="pmMode"]:checked')||{}).value||'inputs';
+  const fb=document.getElementById('pmFeedback'); if(!fb) return;
+  const label=promoteSourceLabel(verId);
+  if(mode==='inputs'){
+    const writes=promoteWrites(verId).map(w=>({range:w.range, values:w.values}));
+    if(!writes.length){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Nothing to write.</div>`; return; }
+    if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — ${writes.length} assumption row(s) for “${esc(label)}”. Connect a sheet to write for real.</div>`; setTimeout(()=>{closeModal();toast('Promote dry-run complete');},1100); return; }
+    fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Writing promoted inputs…</div>`;
+    try{
+      const data=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'write',ssid:conn.ssid||'',writes})}).then(r=>r.json());
+      if(!data.ok) throw new Error(data.error||'write failed');
+      fb.innerHTML=`<div class="write-feedback success">✓ Promoted ${writes.length} input row(s) for “${esc(label)}”.</div>`;
+      setTimeout(()=>{closeModal();toast('Scenario promoted');},1100);
+    }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Promote failed: ${esc(err.message||err)}</div>`; }
+    return;
+  }
+  let tab=(document.getElementById('pmTab')||{}).value||'';
+  if(!tab) tab=safeSheetName(label);
+  const values=promoteGrid(verId);
+  if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — would write tab “${esc(tab)}” (${values.length} rows). Connect + redeploy Code.gs to write for real.</div>`; setTimeout(()=>{closeModal();toast('Promote tab dry-run complete');},1100); return; }
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Creating/writing tab “${esc(tab)}”…</div>`;
+  try{
+    const data=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'ensureSheet',ssid:conn.ssid||'',sheetName:tab,clear:true,values})}).then(r=>r.json());
+    if(!data.ok) throw new Error(data.error||'ensureSheet failed — redeploy Code.gs with ensureSheet support');
+    fb.innerHTML=`<div class="write-feedback success">✓ Wrote tab “${esc(data.sheet||tab)}” (${data.rows||values.length} rows) for “${esc(label)}”.</div>`;
+    setTimeout(()=>{closeModal();toast('Scenario tab promoted');},1100);
+  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Tab promote failed: ${esc(err.message||err)}. Redeploy Apps Script from this repo’s Code.gs, or use Option A (mapped inputs).</div>`; }
 }
 
 /* ============================ WRITE-BACK (edited inputs only) ============================ */
@@ -2058,7 +2305,14 @@ async function doImport(fSrc,aSrc){
 function setStatus(name,live){ const el=document.getElementById('modelStatus'); if(!el)return; el.innerHTML=`<span class="status-dot"></span>${name}<span>•</span>${live?'Live':'Local model'}`; }
 
 /* ---- persistence ---- */
-function saveModel(){ try{ localStorage.setItem('nn_model',JSON.stringify(model)); }catch(e){} }
+function persistUiState(){
+  model.uiState=model.uiState||{};
+  try{
+    model.uiState.v={A:_vState.A,B:_vState.B,line:_vState.line,win:_vState.win?_vState.win.slice():null,priorN:_vState.priorN,userVer:!!_vState.userVer,winUser:!!_vState.winUser};
+    model.uiState.c={line:_cState.line,base:_cState.base,cmp:_cState.cmp,win:_cState.win?_cState.win.slice():null};
+  }catch(e){}
+}
+function saveModel(){ persistUiState(); try{ localStorage.setItem('nn_model',JSON.stringify(model)); }catch(e){} }
 function saveConn(){ try{ localStorage.setItem('nn_conn2',JSON.stringify(conn)); }catch(e){} }
 function ensureModelShape(){
   if(!Array.isArray(model.versions)) model.versions=[];
@@ -2083,8 +2337,13 @@ function loadLocal(){
   if(!model.ov || Array.isArray(model.ov) || typeof model.ov!=='object') model.ov={};
   if(!Array.isArray(model.displayVars) || !model.displayVars.length) model.displayVars=[(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key].filter(Boolean);
   if(!model.nodePos) model.nodePos={};
+  if(!model.uiState||typeof model.uiState!=='object') model.uiState={};
   try{ const c=localStorage.getItem('nn_conn2'); if(c){ const p=JSON.parse(c); if(p&&p.connected){ conn=p; setStatus('Reconnect from Connect sheet',false);} } }catch(e){}
   ensureModelShape();
+  try{
+    if(model.uiState.v){ const u=model.uiState.v; Object.assign(_vState,{A:u.A||_vState.A,B:u.B||_vState.B,line:u.line||null,win:u.win||null,priorN:u.priorN||1,userVer:!!u.userVer,winUser:!!u.winUser}); }
+    if(model.uiState.c){ const u=model.uiState.c; Object.assign(_cState,{line:u.line||null,base:u.base||'plan',cmp:u.cmp||'scenario',win:u.win||null}); }
+  }catch(e){}
 }
 
 /* ---- modal / toast ---- */

@@ -99,6 +99,32 @@ function doPost(event) {
       });
     }
 
+    /* Create or clear a tab, then optionally write a full grid (promote scenario dump). */
+    if (body.action === 'ensureSheet') {
+      const name = String(body.sheetName || 'Scenario').replace(/[:\\/?*\[\]]/g, '').slice(0, 80) || 'Scenario';
+      let sheet = spreadsheet.getSheetByName(name);
+      if (!sheet) sheet = spreadsheet.insertSheet(name);
+      if (body.clear) sheet.clear();
+      const values = body.values || [];
+      if (values.length) {
+        const cols = values.reduce(function (m, row) { return Math.max(m, (row || []).length); }, 0);
+        if (cols < 1) throw new Error('ensureSheet values need at least one column');
+        const padded = values.map(function (row) {
+          const r = (row || []).slice();
+          while (r.length < cols) r.push('');
+          return r;
+        });
+        sheet.getRange(1, 1, padded.length, cols).setValues(padded);
+      }
+      SpreadsheetApp.flush();
+      return json_({
+        ok: true,
+        spreadsheet: spreadsheet.getName(),
+        sheet: sheet.getName(),
+        rows: values.length
+      });
+    }
+
     return json_({ ok: false, error: 'Unknown action' });
   } catch (error) {
     return json_({ ok: false, error: String(error) });
