@@ -1,35 +1,123 @@
-/** Isolated P0 engine test harness. Run: node engine-test.mjs */
+/** Isolated P1 engine test harness. Run: node engine-test.mjs */
 let model = { periods: ["P1"], ov: {}, vars: [] };
 
+/* ---- expression compiler (shunting-yard → RPN) + FP&A helpers ---- */
+const NN_FN_ARITY={lag:2, if:3, sum_periods:1, sum:1, pct:2};
+const NN_FN_VREF=new Set(['lag','sum_periods','sum']); /* first arg is a variable reference */
 function compile(expr){
-  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[()+\-*/]/g))||[];
+  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[(),+\-*/]/g))||[];
   const out=[],ops=[],prec={'+':1,'-':1,'*':2,'/':2};
-  for(const t of toks){
+  const arityStack=[];
+  const flushOp=o=>{
+    if(typeof o==='object'&&o&&o.fn) return {fn:o.fn, arity:NN_FN_ARITY[o.fn]||o.arity||0};
+    return {op:o};
+  };
+  for(let i=0;i<toks.length;i++){
+    const t=toks[i];
     if(/^[\d.]/.test(t)) out.push({n:+t});
-    else if(/^[A-Za-z_]/.test(t)) out.push({v:t});
-    else if(t==='(') ops.push(t);
-    else if(t===')'){ while(ops.length&&ops[ops.length-1]!=='(') out.push({op:ops.pop()}); ops.pop(); }
-    else { while(ops.length&&prec[ops[ops.length-1]]>=prec[t]) out.push({op:ops.pop()}); ops.push(t); }
+    else if(/^[A-Za-z_]/.test(t)){
+      const fn=t.toLowerCase();
+      if(NN_FN_ARITY[fn]!=null && toks[i+1]==='('){ ops.push({fn}); }
+      else out.push({v:t});
+    }
+    else if(t==='('){
+      ops.push(t);
+      if(ops.length>=2 && typeof ops[ops.length-2]==='object' && ops[ops.length-2].fn){
+        /* peek whether args are empty: next token ) → arity 0 */
+        arityStack.push(toks[i+1]===')'?0:1);
+      }
+    }
+    else if(t===','){
+      while(ops.length && ops[ops.length-1]!=='(') out.push(flushOp(ops.pop()));
+      if(arityStack.length) arityStack[arityStack.length-1]++;
+    }
+    else if(t===')'){
+      while(ops.length && ops[ops.length-1]!=='(') out.push(flushOp(ops.pop()));
+      if(ops.length && ops[ops.length-1]==='(') ops.pop();
+      if(ops.length && typeof ops[ops.length-1]==='object' && ops[ops.length-1].fn){
+        const f=ops.pop(); const expect=NN_FN_ARITY[f.fn];
+        const got=arityStack.length?arityStack.pop():expect;
+        if(expect!=null && got!==expect) throw new Error(f.fn+'() expects '+expect+' arg(s)');
+        out.push({fn:f.fn, arity:expect});
+      }
+    }
+    else {
+      while(ops.length && typeof ops[ops.length-1]==='string' && ops[ops.length-1]!=='(' && prec[ops[ops.length-1]]>=prec[t])
+        out.push(flushOp(ops.pop()));
+      ops.push(t);
+    }
   }
-  while(ops.length) out.push({op:ops.pop()});
-  const deps=[...new Set(out.filter(x=>'v' in x).map(x=>x.v))];
+  while(ops.length){
+    const o=ops.pop();
+    if(o==='('||o===')') continue;
+    out.push(flushOp(o));
+  }
+  /* rewrite lag/sum first-arg variables into {vref} so eval keeps the name */
+  (function rewriteVrefs(rpn){
+    const stack=[];
+    for(let i=0;i<rpn.length;i++){
+      const x=rpn[i];
+      if('n' in x || 'v' in x || 'vref' in x){ stack.push(i); continue; }
+      if(x.op){ stack.pop(); stack.pop(); stack.push(i); continue; }
+      if(x.fn){
+        const args=[]; for(let a=0;a<(x.arity||0);a++) args.unshift(stack.pop());
+        if(NN_FN_VREF.has(x.fn) && args[0]!=null && rpn[args[0]] && 'v' in rpn[args[0]])
+          rpn[args[0]]={vref:rpn[args[0]].v};
+        stack.push(i);
+      }
+    }
+  })(out);
+  const deps=[...new Set(out.filter(x=>'v' in x || 'vref' in x).map(x=>x.v||x.vref))];
   return {rpn:out,deps};
 }
 /* Fixed-scale decimal arithmetic (integer micros at 1e8) for deterministic + - * / */
 const NN_SCALE=1e8;
 function nnToMicro(n){ const x=Number(n); return Number.isFinite(x)?Math.round(x*NN_SCALE):NaN; }
 function nnFromMicro(m){ return Number.isFinite(m)?m/NN_SCALE:NaN; }
-function evalRPN(rpn,scope){
+/* ctx optional: {period, lookup(key,q)} for lag / sum_periods across time */
+function evalRPN(rpn,scope,ctx){
   const st=[];
+  const period=(ctx&&ctx.period!=null)?ctx.period:0;
+  const lookup=(ctx&&typeof ctx.lookup==='function')?ctx.lookup:(key,q)=>{
+    if(q!==period) return 0;
+    const raw=scope[String(key).toLowerCase()];
+    return raw;
+  };
+  const pushNum=raw=>{
+    if(raw===undefined || raw===null || (typeof raw==='number' && Number.isNaN(raw))) st.push(NaN);
+    else st.push(nnToMicro(Number(raw)));
+  };
   for(const x of rpn){
     if('n' in x) st.push(nnToMicro(x.n));
-    else if('v' in x){
-      const raw=scope[x.v.toLowerCase()];
-      if(raw===undefined || raw===null || (typeof raw==='number' && Number.isNaN(raw))) st.push(NaN);
-      else st.push(nnToMicro(Number(raw)));
+    else if('vref' in x) st.push({__ref:x.vref});
+    else if('v' in x) pushNum(scope[x.v.toLowerCase()]);
+    else if(x.fn){
+      const args=[]; for(let i=0;i<(x.arity||0);i++) args.unshift(st.pop());
+      if(x.fn==='lag'){
+        const ref=args[0], nMicro=args[1];
+        const key=ref&&ref.__ref; const n=Math.round(nnFromMicro(nMicro));
+        const q=period-n;
+        let val=0;
+        if(key && q>=0){ const raw=lookup(key,q); if(raw!=null && raw!=='' && !(typeof raw==='number'&&Number.isNaN(raw))) val=Number(raw); }
+        st.push(nnToMicro(val));
+      } else if(x.fn==='sum_periods' || x.fn==='sum'){
+        const ref=args[0]; const key=ref&&ref.__ref; let s=0;
+        if(key){ for(let q=0;q<=period;q++){ const raw=lookup(key,q); if(raw!=null && raw!=='' && !(typeof raw==='number'&&Number.isNaN(raw))) s+=Number(raw); } }
+        st.push(nnToMicro(s));
+      } else if(x.fn==='if'){
+        const cond=args[0], a=args[1], b=args[2];
+        if(!Number.isFinite(cond)) st.push(NaN);
+        else st.push(cond!==0 ? a : b);
+      } else if(x.fn==='pct'){
+        const a=args[0], b=args[1];
+        if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
+        if(b===0) throw new Error('Division by zero');
+        st.push(Math.round((a*100*NN_SCALE)/b));
+      } else st.push(NaN);
     }
     else {
       const b=st.pop(), a=st.pop();
+      if(a&&typeof a==='object'&&a.__ref || b&&typeof b==='object'&&b.__ref){ st.push(NaN); continue; }
       if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
       let r;
       if(x.op==='+') r=a+b;
@@ -44,8 +132,10 @@ function evalRPN(rpn,scope){
   }
   if(!st.length) return 0;
   const top=st[st.length-1];
+  if(top&&typeof top==='object'&&top.__ref) return NaN;
   return Number.isFinite(top)?nnFromMicro(top):NaN;
 }
+
 
 function P(){ return model.periods.length; }
 function vget(k){ return model.vars.find(v=>v.key===k); }
@@ -90,7 +180,10 @@ function inputVal(v,p,scenario){
   }
   return sched[p];
 }
-
+function setOv(key,p,val){ if(!model.ov) model.ov={}; if(!model.ov[key]) model.ov[key]={}; model.ov[key][p]=+(+val).toFixed(4); }
+function delOv(key,p){ if(model.ov&&model.ov[key]){ delete model.ov[key][p]; if(!Object.keys(model.ov[key]).length) delete model.ov[key]; } }
+function hasOv(key){ return model.ov&&model.ov[key]&&Object.keys(model.ov[key]).length; }
+function clearScenario(){ model.ov={}; renderAssumptions(); renderForecast(); saveModel(); }
 /* Deterministic Kahn topological order among formulas (formula→formula edges only). */
 function formulaTopoOrder(){
   const fs=formulas();
@@ -142,7 +235,15 @@ function evalModel(scenario){
         return;
       }
       try{
-        const val=evalRPN(v.compiled.rpn, scope);
+        const val=evalRPN(v.compiled.rpn, scope, {period:p, lookup:(key,q)=>{
+          if(q<0||q>=n) return 0;
+          const sk=String(key).toLowerCase();
+          if(q===p && (sk in scope)) return scope[sk];
+          const kk=Object.keys(res).find(x=>x.toLowerCase()===sk);
+          if(!kk) return 0;
+          const raw=res[kk][q];
+          return raw==null?0:raw;
+        }});
         if(Number.isNaN(val)){ v.err=v.err||'Evaluation produced NaN'; }
         scope[v.key.toLowerCase()]=val;
         res[v.key][p]=val;
@@ -157,13 +258,15 @@ function evalModel(scenario){
   return res;
 }
 
+
+
 function assert(cond, msg){
   if(!cond){ console.error("FAIL:", msg); process.exitCode = 1; }
   else console.log("PASS:", msg);
 }
 function approx(a,b,eps=1e-6){ return Math.abs(a-b) < eps; }
 
-console.log("=== Niche Numbers P0 engine tests ===");
+console.log("=== Niche Numbers P1 engine tests ===");
 
 {
   const v = evalRPN(compile("10 / 2").rpn, {});
@@ -226,6 +329,56 @@ console.log("=== Niche Numbers P0 engine tests ===");
   const xv = model.vars.find(v=>v.key==="x");
   assert(!!xv.err && /Missing dependency/i.test(xv.err), "missing dep sets v.err (got " + xv.err + ")");
   assert(Number.isNaN(res.x[0]), "missing dep yields NaN not 0 (got " + res.x[0] + ")");
+}
+
+/* ---- P1 helpers ---- */
+{
+  const c = compile("pct(10, 40)");
+  assert(c.deps.length===0, "pct(10,40) has no var deps");
+  const v = evalRPN(c.rpn, {});
+  assert(approx(v, 25), "pct(10,40) === 25 (got " + v + ")");
+}
+
+{
+  const c = compile("if(1, 10, 20)");
+  assert(approx(evalRPN(c.rpn, {}), 10), "if(1,10,20) === 10");
+  assert(approx(evalRPN(compile("if(0, 10, 20)").rpn, {}), 20), "if(0,10,20) === 20");
+  assert(approx(evalRPN(compile("if(price, 1, 2)").rpn, {price:5}), 1), "if(truthy var)");
+  assert(approx(evalRPN(compile("if(price, 1, 2)").rpn, {price:0}), 2), "if(zero var)");
+}
+
+{
+  model = {
+    periods: ["M1","M2","M3"],
+    ov: {},
+    vars: [
+      {key:"units", name:"Units", unit:"#", kind:"input", base:10, steps:[{from:1,value:20},{from:2,value:30}], delta:0},
+      {key:"prev", name:"Prev", unit:"#", kind:"formula", expr:"lag(units, 1)"},
+      {key:"ytd", name:"YTD", unit:"#", kind:"formula", expr:"sum_periods(units)"},
+      {key:"ytd2", name:"YTD2", unit:"#", kind:"formula", expr:"sum(units)"},
+      {key:"share", name:"Share", unit:"%", kind:"formula", expr:"pct(units, ytd)"},
+      {key:"bump", name:"Bump", unit:"#", kind:"formula", expr:"if(lag(units, 1), units - lag(units, 1), units)"},
+    ]
+  };
+  recompileAll();
+  const res = evalModel(false);
+  assert(approx(res.prev[0], 0), "lag out of range → 0 (got " + res.prev[0] + ")");
+  assert(approx(res.prev[1], 10), "lag(units,1) at M2 = 10 (got " + res.prev[1] + ")");
+  assert(approx(res.prev[2], 20), "lag(units,1) at M3 = 20 (got " + res.prev[2] + ")");
+  assert(approx(res.ytd[0], 10), "sum_periods M1 = 10 (got " + res.ytd[0] + ")");
+  assert(approx(res.ytd[1], 30), "sum_periods M2 = 30 (got " + res.ytd[1] + ")");
+  assert(approx(res.ytd[2], 60), "sum_periods M3 = 60 (got " + res.ytd[2] + ")");
+  assert(approx(res.ytd2[2], 60), "sum() alias matches sum_periods");
+  assert(approx(res.share[0], 100), "pct(units,ytd) M1 = 100 (got " + res.share[0] + ")");
+  assert(approx(res.share[2], 50), "pct(units,ytd) M3 = 50 (got " + res.share[2] + ")");
+  assert(approx(res.bump[0], 10), "if+lag first period = units (got " + res.bump[0] + ")");
+  assert(approx(res.bump[1], 10), "if+lag delta M2 = 10 (got " + res.bump[1] + ")");
+  model.vars.forEach(v=>{ if(v.kind==='formula') assert(!v.err, v.key+" has no err (got "+v.err+")"); });
+}
+
+{
+  const c = compile("lag(revenue, 1) + pct(a, b)");
+  assert(c.deps.map(d=>d.toLowerCase()).sort().join(",") === "a,b,revenue", "deps include vrefs + vars (got "+c.deps.join(",")+")");
 }
 
 if(process.exitCode){ console.error("\nSome tests failed"); process.exit(1); }
