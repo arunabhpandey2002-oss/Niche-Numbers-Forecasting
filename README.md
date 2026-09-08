@@ -27,6 +27,21 @@ Existing `+ − * /` and the deterministic decimal engine are unchanged. Run `no
 
 **Promote scenario to Sheets**: from Forecast, Versions, or Compare → **Promote to Sheets**. Option A writes mapped input ranges (dry-run when disconnected). Option B creates/overwrites a tab named after the scenario with a driver grid — requires redeploying `google-apps-script/Code.gs` (`ensureSheet` action).
 
+
+## P2 — wow trio + hygiene
+
+**Wow features** (deterministic, zero new deps):
+
+1. **Number X-ray** — click any number in Forecasting (chart dots / legend KPIs), Variance (table & bridge KPIs), or Compare/Cinema → glass drawer with formula lineage and successive-substitution driver contributions for that period. Esc or click-out closes.
+2. **Bridge that talks** — Variance driver bridge adds a short plain-English narrative from bridge steps (fav/unfav + top drivers). Waterfall unchanged.
+3. **Scenario cinema** — Compare tab defaults to Cinema: Plan vs selected fork side-by-side, period scrubber/playhead, ghost delta chart, synced period KPIs. Click a cinema number to open X-ray. Toggle **Classic** for the full matrix.
+
+**Hygiene**
+
+- **Export / Import** — top bar downloads or restores a full model JSON (moves models across browsers). Connection secrets are not in the model file.
+- **Reconnect polish** — Apps Script URL, sheet IDs, and scale are remembered after disconnect; re-enter token and Test & connect.
+- Engine verification: `node engine-test.mjs` (no CI required for this pass).
+
 ## Included
 
 - `index.html` — the complete application and calculation engine.

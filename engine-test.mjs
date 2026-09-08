@@ -381,5 +381,61 @@ console.log("=== Niche Numbers P1 engine tests ===");
   assert(c.deps.map(d=>d.toLowerCase()).sort().join(",") === "a,b,revenue", "deps include vrefs + vars (got "+c.deps.join(",")+")");
 }
 
+
+/* ---- P2 wow helpers (pure) ---- */
+function bridgeNarrative(opts){
+  const line=opts.lineName||'Line', base=opts.baseLabel||'baseline';
+  const tot=opts.totVar, fav=opts.fav, unit=opts.unit||'₹';
+  const steps=(opts.steps||[]).filter(s=>Math.abs(s.delta)>1e-9).slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+  const fmt=opts.fmtDelta||((d,u)=> (d>=0?'+':'−')+Math.abs(d));
+  if(Math.abs(tot)<1e-9) return `vs ${base}, ${line} is flat — no material variance.`;
+  const verdict = fav===true ? 'favourable' : fav===false ? 'unfavourable' : (tot>=0?'up':'down');
+  let s=`vs ${base}, ${line} is ${verdict} by ${fmt(tot,unit)}.`;
+  if(!steps.length) return s;
+  const top=steps.slice(0,3);
+  const bits2=top.map(st=>`${st.name} (${fmt(st.delta,unit)})`);
+  s+=` Mainly because ${bits2.join(', ')}.`;
+  if(steps.length>3) s+=` Plus ${steps.length-3} smaller driver${steps.length-3>1?'s':''}.`;
+  return s;
+}
+/** Successive-substitution for one period: same idea as app bridge(win=[p,p]). */
+function periodContribFromExpr(expr, depsA, depsB, scopeKeys){
+  /* depsA/depsB: {key: number} driver values; evaluate expr with successive swap B→A */
+  const c=compile(expr);
+  const deps=c.deps.filter(d=>scopeKeys.includes(d)||scopeKeys.includes(d.toLowerCase()));
+  const val=(sub)=>{
+    const scope={};
+    deps.forEach(d=>{ const k=d.toLowerCase(); scope[k]=sub.has(d)||sub.has(k)?depsA[d]??depsA[k]:depsB[d]??depsB[k]; });
+    return evalRPN(c.rpn, scope);
+  };
+  let prev=val(new Set()); const steps=[];
+  const used=new Set();
+  deps.forEach(d=>{ used.add(d); const now=val(used); steps.push({key:d,delta:now-prev}); prev=now; });
+  return {start:val(new Set()), end:prev, steps};
+}
+
+{
+  const n=bridgeNarrative({lineName:'Revenue', baseLabel:'Plan', totVar:1000, fav:true, unit:'₹',
+    steps:[{name:'Price',delta:600},{name:'Volume',delta:300},{name:'Mix',delta:80},{name:'Other',delta:20}],
+    fmtDelta:(d)=> (d>=0?'+':'−')+'₹'+Math.abs(d)});
+  assert(/favourable by \+₹1000/.test(n), "narrative fav amount (got "+n+")");
+  assert(/Mainly because Price \(\+₹600\), Volume \(\+₹300\), Mix \(\+₹80\)/.test(n), "narrative top drivers (got "+n+")");
+  assert(/Plus 1 smaller driver/.test(n), "narrative smaller drivers (got "+n+")");
+}
+{
+  const n=bridgeNarrative({lineName:'Cost', baseLabel:'Budget', totVar:0, fav:null, unit:'₹', steps:[], fmtDelta:(d)=>String(d)});
+  assert(/is flat/.test(n), "flat narrative");
+}
+{
+  const r=periodContribFromExpr('price * volume', {price:110, volume:100}, {price:100, volume:100}, ['price','volume']);
+  assert(approx(r.start, 10000), "contrib start 100*100 (got "+r.start+")");
+  assert(approx(r.end, 11000), "contrib end 110*100 (got "+r.end+")");
+  const priceStep=r.steps.find(s=>s.key==='price'||s.key==='Price');
+  // deps order follows compile deps
+  assert(r.steps.length===2, "two driver steps");
+  assert(approx(r.steps.reduce((s,x)=>s+x.delta,0), 1000), "steps sum to gap (got "+r.steps.map(x=>x.delta)+")");
+}
+
+
 if(process.exitCode){ console.error("\nSome tests failed"); process.exit(1); }
 console.log("\nAll tests passed");
