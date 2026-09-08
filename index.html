@@ -372,14 +372,36 @@ function compile(expr){
   const deps=[...new Set(out.filter(x=>'v' in x).map(x=>x.v))];
   return {rpn:out,deps};
 }
+/* Fixed-scale decimal arithmetic (integer micros at 1e8) for deterministic + - * / */
+const NN_SCALE=1e8;
+function nnToMicro(n){ const x=Number(n); return Number.isFinite(x)?Math.round(x*NN_SCALE):NaN; }
+function nnFromMicro(m){ return Number.isFinite(m)?m/NN_SCALE:NaN; }
 function evalRPN(rpn,scope){
   const st=[];
   for(const x of rpn){
-    if('n' in x) st.push(x.n);
-    else if('v' in x) st.push(Number(scope[x.v.toLowerCase()])||0);   // case-insensitive var lookup
-    else { const b=st.pop(),a=st.pop(); st.push(x.op==='+'?a+b:x.op==='-'?a-b:x.op==='*'?a*b:a/((b)||1)); }
+    if('n' in x) st.push(nnToMicro(x.n));
+    else if('v' in x){
+      const raw=scope[x.v.toLowerCase()];
+      if(raw===undefined || raw===null || (typeof raw==='number' && Number.isNaN(raw))) st.push(NaN);
+      else st.push(nnToMicro(Number(raw)));
+    }
+    else {
+      const b=st.pop(), a=st.pop();
+      if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
+      let r;
+      if(x.op==='+') r=a+b;
+      else if(x.op==='-') r=a-b;
+      else if(x.op==='*') r=Math.round((a*b)/NN_SCALE);
+      else if(x.op==='/'){
+        if(b===0) throw new Error('Division by zero');
+        r=Math.round((a*NN_SCALE)/b);
+      } else r=NaN;
+      st.push(r);
+    }
   }
-  return st.length?st[st.length-1]:0;
+  if(!st.length) return 0;
+  const top=st[st.length-1];
+  return Number.isFinite(top)?nnFromMicro(top):NaN;
 }
 
 /* ---- the model ---- */
@@ -391,6 +413,8 @@ let model={
   levers:null,
   goalseek:"price",
   scenarioName:"Plan",
+  versions:[],
+  ov:{},
   vars:[
     {key:"price",          name:"Price per unit",        unit:"₹", kind:"input",   base:950, steps:[], delta:0, range:"", writable:true},
     {key:"distributors",   name:"Distributors",          unit:"#", kind:"input",   base:100, steps:[], delta:0, range:"", writable:true},
@@ -456,17 +480,68 @@ function setOv(key,p,val){ if(!model.ov) model.ov={}; if(!model.ov[key]) model.o
 function delOv(key,p){ if(model.ov&&model.ov[key]){ delete model.ov[key][p]; if(!Object.keys(model.ov[key]).length) delete model.ov[key]; } }
 function hasOv(key){ return model.ov&&model.ov[key]&&Object.keys(model.ov[key]).length; }
 function clearScenario(){ model.ov={}; renderAssumptions(); renderForecast(); saveModel(); }
+/* Deterministic Kahn topological order among formulas (formula→formula edges only). */
+function formulaTopoOrder(){
+  const fs=formulas();
+  const keys=new Set(fs.map(v=>v.key.toLowerCase()));
+  const indeg={}, adj={}, byKey={};
+  fs.forEach(v=>{ const k=v.key.toLowerCase(); byKey[k]=v; indeg[k]=0; adj[k]=[]; });
+  fs.forEach(v=>{
+    const k=v.key.toLowerCase();
+    (v.compiled?.deps||[]).forEach(d=>{
+      const dk=d.toLowerCase();
+      if(keys.has(dk)){ adj[dk].push(k); indeg[k]=(indeg[k]||0)+1; }
+    });
+  });
+  // deterministic: always dequeue the lexicographically smallest ready key
+  const ready=Object.keys(indeg).filter(k=>indeg[k]===0).sort();
+  const order=[];
+  while(ready.length){
+    const u=ready.shift();
+    order.push(byKey[u]);
+    (adj[u]||[]).forEach(w=>{
+      indeg[w]--;
+      if(indeg[w]===0){
+        let i=0; while(i<ready.length && ready[i]<w) i++;
+        ready.splice(i,0,w);
+      }
+    });
+  }
+  const ordered=new Set(order.map(v=>v.key.toLowerCase()));
+  const leftover=fs.filter(v=>!ordered.has(v.key.toLowerCase()));
+  return {order, leftover};
+}
 /* evaluate the whole graph, per period. scenario=true applies per-period input overrides */
 function evalModel(scenario){
-  const n=P(), res={}; model.vars.forEach(v=>res[v.key]=new Array(n).fill(0));
+  const n=P(), res={};
+  model.vars.forEach(v=>{ res[v.key]=new Array(n).fill(0); if(v.kind==='formula') v.err=''; });
+  const {order, leftover}=formulaTopoOrder();
+  leftover.forEach(v=>{ v.err=v.err||'Circular or unresolved dependency'; });
   for(let p=0;p<n;p++){
     const scope={};
-    inputs().forEach(v=>{ let val=inputVal(v,p,scenario); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
-    outputs().forEach(v=>{ scope[v.key.toLowerCase()]=(v.read&&v.read[p])||0; res[v.key][p]=scope[v.key.toLowerCase()]; });
-    let rem=formulas().slice();
-    for(let it=0; it<rem.length+2 && rem.length; it++){
-      rem=rem.filter(v=>{ if((v.compiled?.deps||[]).every(d=>d.toLowerCase() in scope)){ const val=evalRPN(v.compiled.rpn,scope); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; return false; } return true; });
-    }
+    inputs().forEach(v=>{ const val=inputVal(v,p,scenario); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
+    outputs().forEach(v=>{ const val=(v.read&&v.read[p])||0; scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
+    order.forEach(v=>{
+      const deps=v.compiled?.deps||[];
+      const missing=deps.filter(d=>!(d.toLowerCase() in scope));
+      if(missing.length){
+        v.err='Missing dependency: '+missing.join(', ');
+        res[v.key][p]=NaN;
+        scope[v.key.toLowerCase()]=NaN;
+        return;
+      }
+      try{
+        const val=evalRPN(v.compiled.rpn, scope);
+        if(Number.isNaN(val)){ v.err=v.err||'Evaluation produced NaN'; }
+        scope[v.key.toLowerCase()]=val;
+        res[v.key][p]=val;
+      }catch(e){
+        v.err=String(e.message||e);
+        res[v.key][p]=NaN;
+        scope[v.key.toLowerCase()]=NaN;
+      }
+    });
+    leftover.forEach(v=>{ res[v.key][p]=NaN; scope[v.key.toLowerCase()]=NaN; });
   }
   return res;
 }
@@ -1204,7 +1279,8 @@ function versionData(which,ctxA){
   }
   if(which==='prior'){ const N=_vState.priorN||1, src=ctxA||evalModel(true), n=P(), res={};
     model.vars.forEach(v=>{ res[v.key]=Array.from({length:n},(_,p)=> p-N>=0?src[v.key][p-N]:null); }); return res; }
-  if(which&&which.slice(0,2)==='v:'){ const ver=(model.versions||[]).find(x=>x.id===which.slice(2)), n=P(), res={};
+  if(which&&which.slice(0,2)==='v:'){ // use stored series for variance stability; applyScenarioFork restores live drivers
+    const ver=(model.versions||[]).find(x=>x.id===which.slice(2)), n=P(), res={};
     model.vars.forEach(v=>{ const arr=(ver&&ver.data&&ver.data[v.key])||[]; res[v.key]=Array.from({length:n},(_,p)=>arr[p]!=null?arr[p]:0); }); return res; }
   return evalModel(false);
 }
@@ -1238,11 +1314,13 @@ function setFU(k,mode){ const v=vget(k); if(!v) return;
 const FU_OPTS=[['higher','Higher is better'],['lower','Lower is better'],['neutral','Neutral (no F/U)'],['force_fav','Force favourable'],['force_unf','Force unfavourable']];
 
 /* ---- saved versions (snapshots you can compare against) ---- */
+function deepClone(o){ return JSON.parse(JSON.stringify(o==null?null:o)); }
 function saveVersionModal(){
+  model.versions=model.versions||[];
   const suggested = model.versions.some(v=>/budget/i.test(v.name))?'':'Budget FY';
   showModal(`<div class="mhead"><h3>Save this plan as a version</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
-      <p class="mut fz12" style="margin:0 0 10px">Freezes the current plan (your scenario, with every assumption) as a named snapshot. Compare against it later as Actuals come in — Budget vs Forecast vs Actual.</p>
+      <p class="mut fz12" style="margin:0 0 10px">Freezes the <b>full scenario</b> — every driver (base, steps, ramp, phase) plus overrides — and a series snapshot for variance compare. Load it later as your working scenario, or compare the frozen numbers against Actuals.</p>
       <div class="field"><label>Version name</label><input class="inp" id="verName" placeholder="e.g. Budget FY27, Forecast Q1" value="${esc(suggested)}" onkeydown="if(event.key==='Enter')commitSaveVersion()"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="commitSaveVersion()">Save version</button></div>
     </div>`);
@@ -1250,17 +1328,43 @@ function saveVersionModal(){
 }
 function commitSaveVersion(){
   const name=(document.getElementById('verName').value||'').trim(); if(!name){ return; }
+  model.versions=model.versions||[];
   const scen=evalModel(true), n=P(), data={}; model.vars.forEach(v=>data[v.key]=scen[v.key].slice(0,n));
-  model.versions.push({id:'v'+Date.now().toString(36), name, at:Date.now(), periods:n, data});
-  closeModal(); saveModel(); toast(`Saved version “${name}”`);
+  const drivers={};
+  inputs().forEach(v=>{
+    drivers[v.key]={base:v.base, steps:deepClone(v.steps||[]), ramp:v.ramp?deepClone(v.ramp):undefined, phase:v.phase?deepClone(v.phase):undefined, delta:v.delta!=null?v.delta:0};
+  });
+  const ov=deepClone(model.ov||{});
+  model.versions.push({id:'v'+Date.now().toString(36), name, at:Date.now(), periods:n, data, drivers, ov});
+  closeModal(); saveModel(); toast(`Saved scenario fork “${name}”`);
   if(uiTab==='variance') renderVariance();
+}
+function applyScenarioFork(id){
+  const ver=(model.versions||[]).find(x=>x.id===id);
+  if(!ver){ toast('Version not found'); return; }
+  if(ver.drivers){
+    Object.keys(ver.drivers).forEach(k=>{
+      const v=vget(k); if(!v||v.kind!=='input') return;
+      const d=ver.drivers[k];
+      v.base=d.base;
+      v.steps=deepClone(d.steps||[]);
+      if(d.ramp!==undefined) v.ramp=deepClone(d.ramp); else delete v.ramp;
+      if(d.phase!==undefined) v.phase=deepClone(d.phase); else delete v.phase;
+      if(d.delta!==undefined) v.delta=d.delta;
+    });
+  }
+  model.ov=ver.ov!=null?deepClone(ver.ov):{};
+  closeModal(); saveModel(); render();
+  toast(`Loaded “${ver.name}” as working scenario`);
 }
 function deleteVersion(id){ model.versions=(model.versions||[]).filter(v=>v.id!==id);
   ['A','B'].forEach(s=>{ if(_vState[s]==='v:'+id) _vState[s]= s==='A'?'scenario':'plan'; }); saveModel(); renderVariance(); }
 function openVersions(){
-  const rows=(model.versions||[]).length? model.versions.map(v=>`<div class="pinrow"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}</span><button class="pinbtn" style="margin-left:auto" onclick="deleteVersion('${v.id}')">Delete</button></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save your current plan to compare against it later.</p>';
+  model.versions=model.versions||[];
+  const rows=model.versions.length? model.versions.map(v=>`<div class="pinrow" style="flex-wrap:wrap;gap:6px"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}${v.drivers?' · scenario fork':''}</span><span style="margin-left:auto;display:flex;gap:6px"><button class="pinbtn" onclick="applyScenarioFork('${v.id}')">Load as working scenario</button><button class="pinbtn" onclick="deleteVersion('${v.id}')">Delete</button></span></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save freezes the full scenario (all drivers + overrides) so you can restore or compare later.</p>';
   showModal(`<div class="mhead"><h3>Saved versions</h3><button class="x" onclick="closeModal()">×</button></div>
-    <div class="mbody"><div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${rows}</div>
+    <div class="mbody"><p class="mut fz12" style="margin:0 0 10px">Each save freezes the full scenario (drivers + overrides) and a series snapshot. Variance compare uses the stored series; <b>Load as working scenario</b> restores drivers for live editing.</p>
+      <div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${rows}</div>
       <div style="display:flex;justify-content:space-between;margin-top:14px"><button class="btn" onclick="saveVersionModal()">＋ Save current plan</button><button class="btn primary" onclick="closeModal()">Done</button></div>
     </div>`);
 }
@@ -1699,26 +1803,29 @@ async function scanModelSheet(){
     if(!F.lines.length) throw new Error('No line items found. Set the Label column, Header row and First-month column manually below, then Scan again.');
     const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
     const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
-    const usedK={}; const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+    const keep=model.vars.filter(v=>!(v.srcLine||(v.kind==='output'&&v.account!=null)));
+    const usedK={}; keep.forEach(v=>{ usedK[v.key]=1; });
+    const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
     const lastCol=numToCol(colToNum(src.firstCol)+periods.length-1);
     const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
-    const newVars=F.lines.map((l,idx)=>{ const name=l.name, metric=l.metric||'';
+    const newOutputs=F.lines.map((l,idx)=>{ const name=l.name, metric=l.metric||'';
       const key=uk((metric?metric+'_':'')+name);
       const series=periods.map((_,pi)=> (l.series[pi]===undefined?null:l.series[pi]));
       const v={key,name,metric,account:name,kind:'output',unit:inferUnit(metric+' '+name),forecast:series,read:series,srcLine:true};
       const prev=oldByAcct[nrm(metric)+'|'+nrm(name)]||{};
       ['good','favOverride','agg','group','actuals','actualRange'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
       return v; });
-    model.vars=newVars; model.periods=periods;
-    model.displayVars=[newVars[newVars.length-1].key];
+    model.vars=keep.concat(newOutputs); model.periods=periods;
+    if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newOutputs[newOutputs.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
     if(!vget(_vState.line)) _vState.line=null; if(_cState&&!vget(_cState.line)) _cState.line=null;
     _vState.userVer=false; _vState.winUser=false;
     // remember the layout so Refresh / re-scan reuse it
     model.sources=Object.assign({}, model.sources, {forecast:src});
     conn.sheets=conn.sheets||[]; saveConn();
     recompileAll(); saveModel();
-    fb.innerHTML=`<div class="write-feedback success">✓ ${note}Loaded ${newVars.length} line(s) from “${F.name||'your sheet'}”. Closing…</div>`;
-    setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(`Loaded ${newVars.length} lines from the sheet`); },1100);
+    const mergeNote=keep.length?` Merged ${newOutputs.length} outputs; kept ${keep.length} driver line(s).`:` Loaded ${newOutputs.length} line(s).`;
+    fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
+    setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newOutputs.length} outputs; kept ${keep.length} driver lines`:`Loaded ${newOutputs.length} lines from the sheet`); },1100);
   }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Scan failed: ${err.message||err}</div>`; }
 }
 async function doConnect(){
@@ -1901,11 +2008,11 @@ async function importSources(){
   const fSrc=mk('f'), aSrc=mk('a');
   if(!fSrc.ssid){ srcFeedback('Add the forecast sheet URL.','err'); return; }
   srcFeedback('Reading both files and matching lines…','info');
-  try{ const r=await doImport(fSrc,aSrc); closeModal(); toast(`Imported ${r.total} lines · ${r.matched} matched with actuals`); uiTab='variance'; switchTab('variance'); }
+  try{ const r=await doImport(fSrc,aSrc); closeModal(); toast(r.kept?`Merged ${r.total} outputs; kept ${r.kept} driver lines · ${r.matched} matched with actuals`:`Imported ${r.total} lines · ${r.matched} matched with actuals`); uiTab='variance'; switchTab('variance'); }
   catch(err){ srcFeedback('Import failed: '+(err.message||err)+'. Check the URL, token, tab name and that access is “Anyone”.','err'); }
 }
 async function importSources2(){ if(!model.sources){ openSources(); return; } toast('Re-reading both files…');
-  try{ const r=await doImport(model.sources.forecast,model.sources.actual); toast(`Refreshed ${r.total} lines · ${r.matched} with actuals`); if(uiTab==='variance'){ autoDefaultVer(); renderVariance(); } }
+  try{ const r=await doImport(model.sources.forecast,model.sources.actual); toast(r.kept?`Merged ${r.total} outputs; kept ${r.kept} driver lines · ${r.matched} with actuals`:`Refreshed ${r.total} lines · ${r.matched} with actuals`); if(uiTab==='variance'){ autoDefaultVer(); renderVariance(); } }
   catch(err){ toast('Refresh failed: '+(err.message||err)); } }
 /* read both files, auto-match by label, rebuild the model as read-lines */
 async function doImport(fSrc,aSrc){
@@ -1924,9 +2031,11 @@ async function doImport(fSrc,aSrc){
   F.lines.forEach(l=>{ const id=idOf(l); if(!seen.has(id)){ order.push(id); seen.add(id); } });
   A.lines.forEach(l=>{ const id=idOf(l); if(!seen.has(id)){ order.push(id); seen.add(id); } });
   const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
-  const usedK={}; const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+  const keep=model.vars.filter(v=>!(v.srcLine||(v.kind==='output'&&v.account!=null)));
+  const usedK={}; keep.forEach(v=>{ usedK[v.key]=1; });
+  const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
   let matched=0;
-  const newVars=order.map(id=>{ const meta=metaById[id]||{name:id,metric:''}; const name=meta.name, metric=meta.metric||'';
+  const newOutputs=order.map(id=>{ const meta=metaById[id]||{name:id,metric:''}; const name=meta.name, metric=meta.metric||'';
     const key=uk((metric?metric+'_':'')+name);
     const fs=fById[id], as=aById[id];
     const fser=fs?periods.map((_,pi)=>fs[pi]===undefined?null:fs[pi]):null;
@@ -1936,21 +2045,28 @@ async function doImport(fSrc,aSrc){
     const v={key,name,metric,account:name,kind:'output',unit:inferUnit(metric+' '+name),forecast:fser,actuals:aser,read:fser,srcLine:true};
     ['good','favOverride','agg','group'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
     return v; });
-  if(!newVars.length) throw new Error('No line items found — check the label column and header row');
-  model.vars=newVars; model.periods=periods; model.closed=lastActualIdx()+1;
+  if(!newOutputs.length) throw new Error('No line items found — check the label column and header row');
+  model.vars=keep.concat(newOutputs); model.periods=periods; model.closed=lastActualIdx()+1;
   model.sources={forecast:fSrc,actual:aSrc};
-  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[newVars[newVars.length-1].key];
+  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newOutputs[newOutputs.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
   if(!vget(_vState.line)) _vState.line=null; if(!vget(_cState.line)) _cState.line=null;
   _vState.userVer=false; _vState.winUser=false;   // fresh import → re-default to Actuals vs Forecast
   try{delete sessionStorage.__vinit;}catch(e){}
   recompileAll(); saveModel(); saveConn();
-  return {total:newVars.length, matched};
+  return {total:newOutputs.length, matched, kept:keep.length};
 }
 function setStatus(name,live){ const el=document.getElementById('modelStatus'); if(!el)return; el.innerHTML=`<span class="status-dot"></span>${name}<span>•</span>${live?'Live':'Local model'}`; }
 
 /* ---- persistence ---- */
 function saveModel(){ try{ localStorage.setItem('nn_model',JSON.stringify(model)); }catch(e){} }
 function saveConn(){ try{ localStorage.setItem('nn_conn2',JSON.stringify(conn)); }catch(e){} }
+function ensureModelShape(){
+  if(!Array.isArray(model.versions)) model.versions=[];
+  if(!model.ov || Array.isArray(model.ov) || typeof model.ov!=='object') model.ov={};
+  // scenarios migration no-op if missing (legacy field reserved)
+  if(model.scenarios===undefined){ /* no-op */ }
+  recompileAll();
+}
 function loadLocal(){
   try{ const m=localStorage.getItem('nn_model'); if(m){ const p=JSON.parse(m); if(p&&p.vars&&p.vars.length) model=p; } }catch(e){}
   if(!Array.isArray(model.displayVars)) model.displayVars = model.displayVar ? [model.displayVar] : [(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key||'revenue'];
@@ -1968,7 +2084,7 @@ function loadLocal(){
   if(!Array.isArray(model.displayVars) || !model.displayVars.length) model.displayVars=[(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key].filter(Boolean);
   if(!model.nodePos) model.nodePos={};
   try{ const c=localStorage.getItem('nn_conn2'); if(c){ const p=JSON.parse(c); if(p&&p.connected){ conn=p; setStatus('Reconnect from Connect sheet',false);} } }catch(e){}
-  recompileAll();
+  ensureModelShape();
 }
 
 /* ---- modal / toast ---- */
