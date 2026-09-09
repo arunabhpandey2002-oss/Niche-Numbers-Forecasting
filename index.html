@@ -732,17 +732,17 @@ function sheetFormulaToExpr(formula, cellMap, defaultSheet){
     if(t.t==='ref'){
       const cr=a1ColRow(t.a1); if(!cr){ unresolved.push(t.a1); parts.push('?'); continue; }
       const sh=(t.sheet||ds||'').trim();
+      /* Sheet-qualified lookup only — bare A1 collapses Pricing/Assumptions/P&L onto one key */
       const keys=[
         (sh?sh+'!':'')+cr.col+cr.row,
-        cr.col+cr.row,
         (sh?sh.toUpperCase()+'!':'')+cr.col+cr.row
       ].map(k=>k.toUpperCase());
       let key=null;
       for(const k of keys){ if(cellMap[k]){ key=cellMap[k]; break; } }
-      if(!key){
+      if(!key && sh){
+        const want=(sh+'!'+cr.col+cr.row).toUpperCase().replace(/'/g,'');
         for(const mk of Object.keys(cellMap)){
-          const bare=mk.includes('!')?mk.split('!').pop():mk;
-          if(bare===cr.col+cr.row){ key=cellMap[mk]; break; }
+          if(String(mk).toUpperCase().replace(/'/g,'')===want){ key=cellMap[mk]; break; }
         }
       }
       if(!key){ unresolved.push((sh?sh+'!':'')+cr.col+cr.row); parts.push('?'); continue; }
@@ -763,8 +763,9 @@ function buildCellMapFromScan(opts){
   (opts.lines||[]).forEach(l=>{
     if(!l || !l.key || !l.row) return;
     const a1=first+l.row;
-    const k1=a1.toUpperCase(), k2=(sh?sh+'!'+a1:a1).toUpperCase();
-    map[k1]=l.key; map[k2]=l.key;
+    const k2=(sh?sh+'!'+a1:a1).toUpperCase();
+    map[k2]=l.key;
+    if(sh) map[(sh.toUpperCase()+'!'+a1).toUpperCase()]=l.key;
   });
   return map;
 }
@@ -961,21 +962,28 @@ async function ingestFormulaGraphFromSheet(opts){
   /* Assign stable keys */
   const usedK={};
   const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+  /* Pre-claim Pricing keys so P&L never steals revenue / revenue_total_net */
+  model.vars.forEach(v=>{ if(v&&v.srcPricing&&v.key) usedK[v.key]=1; });
   walked.nodes.forEach(n=>{
-    n.key=uk(n.label||((n.sheet?n.sheet+'_':'')+n.a1));
+    const sheetBit=String(n.sheet||'sheet').replace(/[^A-Za-z0-9]+/g,'_');
+    const labelBit=n.label||n.a1;
+    /* Always sheet-prefixed for non-ambiguous graph identity */
+    n.key=uk(sheetBit+'_'+labelBit);
   });
   const cellMap={};
   walked.nodes.forEach(n=>{
     const a1=n.a1.toUpperCase();
-    cellMap[a1]=n.key;
-    cellMap[(n.sheet+'!'+a1).toUpperCase()]=n.key;
+    const sh=String(n.sheet||'').trim();
+    if(sh){
+      cellMap[(sh+'!'+a1).toUpperCase()]=n.key;
+      cellMap[(sh.toUpperCase()+'!'+a1).toUpperCase()]=n.key;
+    }
   });
-  /* Build vars: inputs + formulas from the graph; keep non-src manual drivers only if not replaced */
+  /* Build vars from graph; drop Pricing during P&L graph ingest to avoid alias collapse in the UI */
   const graphKeys=new Set(walked.nodes.map(n=>n.key));
   const seedNames=new Set(seeds.map(s=>nrm(s.label||'')));
-  /* Drop stale localStorage graph/P&L lines so an old Input subscription_revenue cannot survive a re-scan */
   const keep=model.vars.filter(v=>{
-    if(v.srcLine||v.srcGraph) return false;
+    if(v.srcLine||v.srcGraph||v.srcPricing) return false;
     if(v.kind==='output'&&v.account!=null) return false;
     if(graphKeys.has(v.key)) return false;
     if(seedNames.has(nrm(v.name||''))||seedNames.has(nrm(v.account||''))) return false;
@@ -2242,12 +2250,14 @@ function varModal(idx){
         <div class="field"><label>Canvas page</label><select id="vPage">${(model.pages||['Page 1']).map((nm,i)=>`<option value="${i}" ${i===nodePg?'selected':''}>${esc(nm)}</option>`).join('')}</select></div>
       </div>
       <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
-        <div class="field"><label>Formula</label><textarea class="inp" id="vExpr" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
-        <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Insert:</span>${chips||'<span class="mut fz11">add other variables first</span>'}${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}</div>
-        <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Helpers:</span><button type="button" class="tok op" title="lag(var,n)" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" title="if(cond,a,b)" onclick="insFn('if')">if(</button><button type="button" class="tok op" title="sum_periods(var)" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" title="pct(a,b)" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
-        <p class="mut fz11" style="margin:6px 0 0"><code>lag(var,n)</code> = value n periods ago (0 if out of range) · <code>if(cond,a,b)</code> = a if cond≠0 else b · <code>sum_periods(var)</code> = running sum from period 0 through current · <code>pct(a,b)</code> = a/b×100. Alias: <code>sum(var)</code>.</p>
-        ${v.sheetFormula?`<p class="mut fz11" style="margin:8px 0 0">Sheet formula: <span class="expr">${esc(v.sheetFormula)}</span></p>`:''}
-        ${(()=>{ if(v.kind!=='formula'||!v.expr) return ''; try{ const d=compile(v.expr).deps||[]; if(!d.length) return ''; return '<p class="eyebrow" style="margin:10px 0 6px">Depends on (formula graph)</p><div class="tokbar">'+d.map(k=>{ const dep=vget(k); return '<span class="tok" title="'+(dep?esc(dep.name):k)+'">'+esc(k)+'</span>'; }).join('')+'</div>'; }catch(e){ return ''; } })()}
+        ${v.sheetFormula?`<p class="eyebrow" style="margin:0 0 6px">Sheet formula</p><div class="expr" style="margin-bottom:10px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word">${esc(v.sheetFormula)}</div>`:`<p class="mut fz12">No sheet formula on this line.</p>`}
+        ${(()=>{ if(v.kind!=='formula'||!v.expr) return '<p class="mut fz12">No model formula deps yet.</p>'; try{ const d=compile(v.expr).deps||[]; if(!d.length) return '<p class="mut fz12">Depends on: (none)</p>'; return '<p class="eyebrow" style="margin:10px 0 6px">Depends on</p><div class="tokbar">'+d.map(k=>{ const dep=vget(k); const lab=dep?(esc(dep.name)+' <span class="keychip">'+esc(k)+'</span>'):esc(k); return '<span class="tok" title="'+esc(k)+'">'+lab+'</span>'; }).join('')+'</div>'; }catch(e){ return ''; } })()}
+        <details style="margin-top:12px"><summary class="mut fz11" style="cursor:pointer">Edit formula</summary>
+          <div class="field" style="margin-top:8px"><label>Model formula</label><textarea class="inp" id="vExpr" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
+          <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Insert:</span>${chips||'<span class="mut fz11">add other variables first</span>'}${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}</div>
+          <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Helpers:</span><button type="button" class="tok op" title="lag(var,n)" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" title="if(cond,a,b)" onclick="insFn('if')">if(</button><button type="button" class="tok op" title="sum_periods(var)" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" title="pct(a,b)" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
+          <p class="mut fz11" style="margin:6px 0 0"><code>lag(var,n)</code> · <code>if(cond,a,b)</code> · <code>sum_periods(var)</code> · <code>pct(a,b)</code></p>
+        </details>
       </div>
       <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
         <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
@@ -4674,7 +4684,7 @@ function ensureModelShape(){
   if(model.scenarios===undefined){ /* no-op */ }
   recompileAll();
 }
-const GRAPH_INGEST_VERSION=3;
+const GRAPH_INGEST_VERSION=4;
 function isStaleFakePnLInput(v){
   if(!v) return false;
   if(v.kind==='formula' && v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
