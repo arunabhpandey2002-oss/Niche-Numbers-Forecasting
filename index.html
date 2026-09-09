@@ -1509,8 +1509,8 @@ function viewSetup(){
   <div class="hero hero-row">
     <div><p class="eyebrow">Model builder</p>
       <h1>Define your model. The tool drives the inputs.</h1>
-      <p>Connect a sheet and <b>Scan</b> to auto-tag variables and formulas into the shared graph. Confirm only what we miss — you should not rebuild the model by hand. When you plan, the tool changes inputs — never outputs.</p></div>
-    <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected':'Connect sheet'}</button>
+      <p>Use <b>Connect &amp; Scan</b> once — we place forecast and actuals for matched lines automatically. Confirm is accept only; typing cells is a last resort. When you plan, the tool changes inputs — never outputs.</p></div>
+    <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected · Re-scan':'Connect &amp; Scan'}</button>
   </div>
 
   <div class="panel" style="margin-top:22px">
@@ -1560,12 +1560,14 @@ function openConfirmClassify(key){
   /* North star: never dump founders into typing if we can Scan */
   if(!hasScanCatalog() && conn.connected){
     showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
-      <div class="mbody confirm-classify"><p class="mut fz12">Scanning your sheet to place cells — one moment…</p></div>`);
+      <div class="mbody confirm-classify"><p class="mut fz12">Reading your sheet and placing every matched line — one moment…</p></div>`);
     ensureScanCatalog().then(()=>{ closeModal(); openConfirmClassify(key); render(); }).catch(err=>{
-      showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
-        <div class="mbody confirm-classify"><p class="negv fz12">${esc(String(err.message||err))}</p>
-        <p class="mut fz12">Connect → Scan must succeed once. Typing cells is only an escape hatch.</p>
-        <div class="cc-actions"><button class="btn" onclick="closeModal();openConnect()">Open Connect</button></div></div>`);
+      showModal(`<div class="mhead"><h3>Couldn’t place sheet lines</h3><button class="x" onclick="closeModal()">×</button></div>
+        <div class="mbody confirm-classify">
+          <p class="mut fz12" style="margin:0 0 10px">We need one successful <b>Connect &amp; Scan</b> so Confirm can accept suggestions — you should not type cells.</p>
+          <p class="negv fz12">${esc(String(err.message||err))}</p>
+          <div class="cc-actions"><button class="btn primary" onclick="closeModal();openConnect()">Connect &amp; Scan</button></div>
+        </div>`);
     });
     return;
   }
@@ -1591,7 +1593,7 @@ function openConfirmClassify(key){
   const hasACat=aCat.length>0;
   showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody confirm-classify">
-      <p class="mut fz12" style="margin:0 0 12px">Accept what Scan found. Pick a sheet line — you should not type column and row.</p>
+      <p class="mut fz12" style="margin:0 0 12px">Accept what Scan found. Pick the matching sheet line if needed — typing cells is a last resort only.</p>
       <div class="cc-row"><span class="cc-k">Line</span><span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span></div>
       <div class="cc-row"><span class="cc-k">Status</span><span class="mapchip ${st}">${mapStatusLabel(st)}</span>${v.classifyConfidence?` · ${esc(v.classifyConfidence)}`:''}</div>
       ${v.sheetFormula?`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="expr">${esc(v.sheetFormula)}</span></div>`:''}
@@ -1603,7 +1605,7 @@ function openConfirmClassify(key){
       ${hasCat
         ? `<div class="field"><label>Sheet line</label><select class="inp" id="ccPickLine" onchange="onCcPickForecast()">${fOpts}</select></div>
            <div class="rangeprev" id="ccRangePrev">${v.range?`→ forecast <b>${esc(v.range)}</b>`:'<span class="mut">Pick the matching sheet line</span>'}</div>
-           <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Advanced — type cells only if Scan missed</summary>
+           <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Last resort — type cells only if Scan missed</summary>
              <div class="frow three" style="margin-top:8px">
                <div class="field"><label>Sheet</label><input class="inp" id="ccFSheet" value="${esc(parseRange(v.range||'').sheet)}" oninput="updCcRangePrev()"></div>
                <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(parseRange(v.range||'').col)}" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
@@ -1611,13 +1613,18 @@ function openConfirmClassify(key){
              </div>
              <div class="rangeprev" id="ccRangePrevAdv"></div>
            </details>`
-        : `<p class="mut fz12">Not connected — Connect &amp; Scan first. Escape hatch only:</p>
-           <div class="frow three">
-             <div class="field"><label>Sheet</label><input class="inp" id="ccFSheet" value="${esc(parseRange(v.range||'').sheet)}" oninput="updCcRangePrev()"></div>
-             <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(parseRange(v.range||'').col)}" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
-             <div class="field"><label>Start row</label><input class="inp" id="ccFRow" type="number" value="${esc(parseRange(v.range||'').row)}" oninput="updCcRangePrev()"></div>
-           </div>
-           <div class="rangeprev" id="ccRangePrev"></div>`}
+        : `<div style="padding:12px;border:1px solid var(--line);border-radius:10px;background:#fafbff">
+             <p class="mut fz12" style="margin:0 0 10px"><b>Connect &amp; Scan</b> first — that places forecast and actuals automatically. Manual cell entry is a last resort.</p>
+             <button class="btn primary" type="button" onclick="closeModal();openConnect()">Connect &amp; Scan</button>
+             <details style="margin-top:12px"><summary class="mut fz11" style="cursor:pointer">Last resort — type sheet / column / row</summary>
+               <div class="frow three" style="margin-top:8px">
+                 <div class="field"><label>Sheet</label><input class="inp" id="ccFSheet" value="${esc(parseRange(v.range||'').sheet)}" oninput="updCcRangePrev()"></div>
+                 <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(parseRange(v.range||'').col)}" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
+                 <div class="field"><label>Start row</label><input class="inp" id="ccFRow" type="number" value="${esc(parseRange(v.range||'').row)}" oninput="updCcRangePrev()"></div>
+               </div>
+               <div class="rangeprev" id="ccRangePrev"></div>
+             </details>
+           </div>`}
       <p class="eyebrow" style="margin:16px 0 6px">Actuals line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>
       ${!conn.actualsSsid
         ? `<p class="mut fz11">Actuals · not connected</p>`
@@ -1953,7 +1960,7 @@ function varModal(idx){
       <p class="eyebrow" style="margin:16px 0 6px">Forecast line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
       ${scanCatalog().length?`<div class="field"><label>Sheet line</label><select class="inp" id="vPickLine" onchange="onEditPickForecast()">${['<option value="">— pick a sheet line —</option>'].concat(scanCatalog().map(c=>{ const lab=(c.metric?c.metric+' · ':'')+c.name; const sel=(c.range===v.range)?'selected':''; return `<option value="${esc(c.id)}" ${sel}>${esc(lab)} · ${esc(c.range)}</option>`; })).join('')}</select></div>
       <div class="rangeprev" id="rangePrev">${v.range?`→ maps to <b>${esc(v.range)}</b>`:'<span class="mut">Pick a sheet line from Scan</span>'}</div>
-      <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Advanced — type cells only if Scan missed</summary>
+      <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Last resort — type cells only if Scan missed</summary>
       <div class="frow three" style="margin-top:8px">
         <div class="field"><label>Sheet / tab</label>${sheetField}</div>
         <div class="field"><label>Column</label><input class="inp" id="vCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updRangePrev()"></div>
@@ -3595,7 +3602,7 @@ function openConnect(){
             <div class="field"><label>1st month</label><input class="inp" id="cnFirst" value="${esc(s0.firstCol||'B')}" style="text-transform:uppercase"></div>
             <div class="field"><label># months</label><input class="inp" id="cnMonths" type="number" value="${s0.months||12}"></div>
           </div>
-          <button class="btn indigo sm" onclick="scanModelSheet()">Scan &amp; load lines</button>
+          <button class="btn indigo sm" onclick="scanModelSheet()">Scan again</button>
           <div id="cnScanFeedback" style="margin-top:8px"></div>
         </div>
       </details>
@@ -3775,6 +3782,32 @@ function disconnectModel(){
 }
 
 /* ============================ TWO-FILE IMPORT (forecast file + actuals file) ============================ */
+function fmtPeriodLabel(h){
+  if(h==null||h==='') return '';
+  if(typeof h==='number' && h>=20000 && h<=80000){
+    /* Excel serial date */
+    const d=new Date(Date.UTC(1899,11,30)+Math.round(h)*86400000);
+    if(!isNaN(d)) return MN[d.getUTCMonth()]+" ’"+String(d.getUTCFullYear()).slice(2);
+  }
+  const s=String(h).trim();
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const n=parseFloat(s);
+    if(n>=20000&&n<=80000){
+      const d=new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000);
+      if(!isNaN(d)) return MN[d.getUTCMonth()]+" ’"+String(d.getUTCFullYear()).slice(2);
+    }
+  }
+  if(/^\d{4}-\d{2}-\d{2}([T ]|$)/.test(s)){
+    const d=new Date(s); if(!isNaN(d)) return MN[d.getMonth()]+" ’"+String(d.getFullYear()).slice(2);
+  }
+  const m1=s.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s\-\/\'’]*(\d{2,4})$/i);
+  if(m1){
+    const mi=MN.findIndex(x=>x.toLowerCase()===m1[1].slice(0,3).toLowerCase());
+    let y=m1[2]; if(y.length===4) y=y.slice(2);
+    if(mi>=0) return MN[mi]+" ’"+y;
+  }
+  return s;
+}
 function nrm(s){ return String(s==null?'':s).toLowerCase().trim().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim(); }
 function labelTokens(s){ return nrm(s).split(' ').filter(Boolean); }
 /* Score how well a model var matches a scanned sheet line (higher = better). */
