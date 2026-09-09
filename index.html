@@ -318,7 +318,7 @@
   .scanbox{margin:10px 0 4px;padding:12px 14px;border:1px dashed var(--indigo-border);border-radius:11px;background:#fafbff}
 
   .connect-m .conn-step{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid var(--line-2)}
-  .connect-m .conn-step:last-of-type{border-bottom:none;padding-bottom:0}
+  .connect-m .conn-step:last-of-type{border-bottom:0;padding-bottom:0}
   .connect-m .conn-label{font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);margin:0 0 10px}
   .connect-m .conn-adv{margin:4px 0 8px;border:1px solid var(--line-2);border-radius:10px;background:#fafbff}
   .connect-m .conn-adv>summary{cursor:pointer;list-style:none;padding:10px 12px;font-size:12px;font-weight:600;color:var(--ink-2)}
@@ -327,6 +327,7 @@
   .connect-m .conn-adv[open]>summary::after{content:"▾"}
   .connect-m .conn-adv-body{padding:0 12px 12px}
   .connect-m .conn-actions{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:16px}
+  .connect-m .conn-err{background:#fff0f1;color:#a33d4d;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.45}
 
   .hintbox code{font-family:var(--mono);background:#e6eaff;padding:1px 5px;border-radius:4px}
   .tokbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
@@ -2606,7 +2607,39 @@ function openWriteback(){
 async function confirmWriteback(){
   const fb=document.getElementById('wbFeedback');
   const writes=inputs().filter(v=>v.writable!==false && hasOv(v.key) && v.range).map(v=>({range:v.range, values:[ scenRow(v) ]}));
-  if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — ${writes.length} assumption(s) ready. Connect a sheet to write for real.</div>`; setTfunction openConnect(){
+  if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — ${writes.length} assumption(s) ready. Connect a sheet to write for real.</div>`; setTimeout(()=>{closeModal();toast('Dry run complete');},1200); return; }
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Writing assumptions to your sheet…</div>`;
+  try{
+    const data=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'write',ssid:conn.ssid||'',writes})}).then(r=>r.json());
+    if(!data.ok) throw new Error(data.error||'write failed');
+    fb.innerHTML=`<div class="write-feedback success">✓ Wrote ${writes.length} assumption row(s). Your sheet's formulas now recompute the outputs.</div>`;
+    setTimeout(()=>{closeModal();toast('Assumptions written');},1200);
+  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Write failed: ${err.message||err}</div>`; }
+}
+
+/* ============================ CONNECT ============================ */
+
+function classifyConnectError(err, kind){
+  const raw=String((err&&err.message)||err||'').trim();
+  const m=raw.toLowerCase();
+  const where=kind==='actuals'?'actuals sheet':(kind==='model'?'model sheet':'Apps Script');
+  if(!raw) return `Couldn’t reach the ${where}. Check the URL and try again.`;
+  if(/invalid|malformed|url/.test(m) && /script|http|exec/.test(m)) return 'That Apps Script URL doesn’t look right. Paste the full /exec web app URL.';
+  if(/401|403|unauthor|forbidden|token|permission|access denied|not allowed/.test(m)) return 'Bad token or no permission. Re-check the secret token and that the script can open this Google Sheet.';
+  if(/404|not found|missing|no spreadsheet|unable to open|does not exist/.test(m)) return `Sheet not found or unreachable (${where}). Check the URL/ID and sharing with the script’s Google account.`;
+  if(/network|failed to fetch|load failed|cors|timeout|unreachable/.test(m)) return `Couldn’t reach Google (${where}). Check the Apps Script deployment (Anyone access) and your network, then retry.`;
+  if(/actuals/.test(kind||'') || kind==='actuals') return `Actuals sheet failed: ${raw}. Nothing was connected — fix actuals or clear that field.`;
+  return `Couldn’t connect: ${raw}`;
+}
+function failClosedDisconnect(keepPrefs){
+  /* Never leave a half-connected session. Optionally keep remembered URLs (no token). */
+  const url=(keepPrefs&&conn.url)||'', ssid=(keepPrefs&&conn.ssid)||'', scale=(keepPrefs&&conn.scale)||1;
+  const act=(keepPrefs&&conn.actualsSsid)||'';
+  conn={connected:false,url,token:'',scale,ssid,sheets:[],actualsSsid:act,actualsSheets:[]};
+  saveConn(); setStatus(url?'Saved URL — reconnect anytime':'No sheet connected', false);
+}
+
+function openConnect(){
   const mappedInputs=inputs().filter(v=>v.range).length, mappedOut=outputs().filter(v=>v.range).length;
   const s0=(model.sources&&model.sources.forecast)||{};
   const reconnect=!!(conn.url&&!conn.connected);
@@ -2653,12 +2686,6 @@ async function confirmWriteback(){
         <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Connect</button></div>
       </div>
     </div>`);
-}n.actualsSsid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…  (leave blank to skip)" style="font-family:var(--mono);font-size:11px"></div></div>
-      <div class="hintbox">Your projections stay in the sheet above; your <b>actuals</b> can live in this separate file. Map each line's actuals cell in Model setup, then hit <b>Refresh actuals</b> in the Variance tab. Needs the redeployed Code.gs, and the same Google account must own both sheets.</div>
-      <div id="cnFeedback" style="margin-top:12px"></div>
-      <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px"><div>${conn.connected?'<button class="btn" onclick="disconnectModel()">Disconnect</button>':''}</div>
-        <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Test &amp; connect</button></div></div>
-    </div>`);
 }
 function toNum(x,s){ if(typeof x==='number')return x*s; const n=parseFloat(String(x).replace(/[^0-9.\-]/g,'')); return (isNaN(n)?0:n)*s; }
 /* Scan the connected Model sheet and rebuild the line list from it — one sheet, live-connected.
@@ -2669,7 +2696,9 @@ async function scanModelSheet(){
   const ssid=extractSsid(g('cnSheet').value.trim());
   if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter the Web app URL and token first.</div>`; return; }
   // make sure the connection is set so readSource + later reads/writes hit this sheet
-  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; conn.connected=true;
+  /* Validate with ephemeral creds — only mark connected after a successful scan. */
+  const prevConn=Object.assign({},conn);
+  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; /* not connected yet */
   const manual={ ssid, tab:g('cnTab').value.trim(), labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
     headerRow:Math.max(1,parseInt(g('cnHeader').value)||1), firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
     months:Math.max(1,parseInt(g('cnMonths').value)||12) };
@@ -2732,30 +2761,60 @@ async function scanModelSheet(){
     const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''} auto-mapped`:'';
     const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${formNote}.`:` Loaded ${newLines.length} line(s)${formNote}.`;
     fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
+    conn.connected=true; saveConn();
     setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newLines.length} lines; kept ${keep.length} drivers${formNote}`:`Loaded ${newLines.length} lines${formNote}`); },1100);
-  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Scan failed: ${err.message||err}</div>`; }
+  }catch(err){ Object.assign(conn,prevConn,{connected:false,token:prevConn.token||'',sheets:prevConn.sheets||[]}); if(!prevConn.connected){ conn.token=''; } saveConn(); setStatus(prevConn.connected?(prevConn.ssid||'Connected'):'Not connected', !!prevConn.connected); fb.innerHTML=`<div class="conn-err">${classifyConnectError(err,'model')} Scan didn’t change your model.</div>`; }
 }
 async function doConnect(){
-  const url=document.getElementById('cnUrl').value.trim(), token=document.getElementById('cnToken').value.trim(), scale=parseFloat(document.getElementById('cnScale').value)||1;
-  const ssid=extractSsid(document.getElementById('cnSheet').value.trim());       // the sheet the whole model reads & writes
-  const sq = ssid?`&ssid=${encodeURIComponent(ssid)}`:'';                          // blank → the script's bound sheet
-  const actualsSsid=extractSsid(document.getElementById('cnActuals').value.trim());
+  const url=document.getElementById('cnUrl').value.trim();
+  const token=document.getElementById('cnToken').value.trim();
+  const scale=parseFloat(document.getElementById('cnScale').value)||1;
+  const sheetRaw=(document.getElementById('cnSheet').value||'').trim();
+  const actualsRaw=(document.getElementById('cnActuals').value||'').trim();
+  const ssid=extractSsid(sheetRaw);
+  const actualsSsid=extractSsid(actualsRaw);
+  const sq = ssid?`&ssid=${encodeURIComponent(ssid)}`:'';
   const fb=document.getElementById('cnFeedback');
-  if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter URL and token.</div>`; return; }
-  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Connecting…</div>`;
+  const showErr=msg=>{ fb.innerHTML=`<div class="conn-err">${msg}</div>`; };
+
+  if(!url||!token){ showErr('Enter the Apps Script URL and secret token.'); return; }
+  if(!/script\.google\.com\/macros\/s\//.test(url)){
+    showErr('That Apps Script URL doesn’t look right. Paste the full web app URL ending in /exec.'); return;
+  }
+  if(sheetRaw && !ssid){ showErr('Model sheet URL/ID isn’t valid. Paste a spreadsheets link or the sheet ID.'); return; }
+  if(actualsRaw && !actualsSsid){ showErr('Actuals sheet URL/ID isn’t valid. Fix it or clear the field to skip actuals.'); return; }
+
+  const prev=Object.assign({}, conn);
+  /* Fail closed while validating — no half-connected session. */
+  conn={connected:false,url,token:'',scale,ssid:ssid||'',sheets:[],actualsSsid:'',actualsSheets:[]};
+  saveConn(); setStatus('Validating…', false);
+
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Validating connection…</div>`;
+  let errKind='script';
   try{
-    // 1) list the sheet's tabs (needs the updated Code.gs; degrades gracefully)
     let sheets=[], sheetName="";
-    try{ const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}${sq}`,{redirect:'follow'}).then(r=>r.json()); if(l&&l.ok){ sheets=l.sheets||[]; sheetName=l.spreadsheet||""; } }catch(e){}
-    // 2) read any already-mapped ranges (fine if there are none yet)
+    let listOk=false;
+    try{
+      const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}${sq}`,{redirect:'follow'}).then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      if(l&&l.ok){ sheets=l.sheets||[]; sheetName=l.spreadsheet||""; listOk=true; }
+      else if(l&&l.error){ errKind='model'; throw new Error(l.error); }
+    }catch(e){
+      if(/401|403|token|forbidden|unauthor|HTTP 401|HTTP 403/i.test(String(e&&e.message||e))){ errKind='script'; throw e; }
+      /* older Code.gs may lack list — continue to read probe */
+    }
+
     const mapped=model.vars.filter(v=>v.range);
     let maxN=0;
     if(mapped.length){
+      errKind='model';
       const ranges=[...new Set(mapped.map(v=>v.range))];
       let data;
       try{ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:true}); }
       catch(e){ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:false}); }
-      if(!data.ok) throw new Error(data.error||'read failed');
+      if(!data||!data.ok) throw new Error((data&&data.error)||'Model sheet read failed');
       sheetName=sheetName||data.spreadsheet||"";
       mapped.forEach(v=>{
         const raw=(data.values[v.range]&&data.values[v.range][0])||[];
@@ -2770,19 +2829,43 @@ async function doConnect(){
         maxN=Math.max(maxN,N);
       });
       if(maxN>0 && maxN!==P()){ model.periods=genMonths(maxN,startMonthIdx(),startYear()); }
-    } else {
-      // verify token/access even with nothing mapped yet
-      if(!sheets.length){ const t=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=`,{redirect:'follow'}).then(r=>r.json()); if(!t.ok) throw new Error(t.error||'connection failed'); sheetName=sheetName||t.spreadsheet||""; }
+    } else if(!listOk){
+      errKind='model';
+      const t=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=`,{redirect:'follow'}).then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      if(!t||!t.ok) throw new Error((t&&t.error)||'connection failed');
+      sheetName=sheetName||t.spreadsheet||"";
     }
-    // actuals source: list its tabs so mapping gets a dropdown
-    let actualsSheets=[], actualsName="";
-    if(actualsSsid){ try{ const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}&ssid=${encodeURIComponent(actualsSsid)}`,{redirect:'follow'}).then(r=>r.json()); if(l&&l.ok){ actualsSheets=l.sheets||[]; actualsName=l.spreadsheet||""; } }catch(e){} }
-    conn={connected:true,url,token,scale,ssid,sheets,actualsSsid,actualsSheets}; saveConn(); setStatus(sheetName||'Connected',true);
-    const tabsMsg = sheets.length?` Found ${sheets.length} tab(s) — now pick them from the dropdown when mapping variables.`:` (Tip: redeploy the updated Code.gs to get a tab dropdown.)`;
-    const actMsg = actualsSsid?` Actuals source ${actualsName?`“${actualsName}”`:'linked'} — map each line's actuals cell in Model setup, then Refresh actuals in Variance.`:'';
-    fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”.${mapped.length?` Read ${mapped.length} mapped variable(s).`:' Nothing mapped yet — add variables and map their cells.'}${tabsMsg}${actMsg}</div>`;
-    setTimeout(()=>{closeModal();render();},1600);
-  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Couldn’t connect: ${err.message||err}. Check URL/token and that access is “Anyone”.</div>`; }
+
+    if(actualsRaw){
+      errKind='actuals';
+      const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}&ssid=${encodeURIComponent(actualsSsid)}`,{redirect:'follow'}).then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      if(!(l&&l.ok)) throw new Error((l&&l.error)||'Actuals sheet could not be opened');
+      var actualsSheets=l.sheets||[];
+      var actualsName=l.spreadsheet||"";
+    } else {
+      var actualsSheets=[];
+      var actualsName="";
+    }
+
+    conn={connected:true,url,token,scale,ssid,sheets,actualsSsid:actualsRaw?actualsSsid:'',actualsSheets};
+    saveConn(); setStatus(sheetName||'Connected',true);
+    const tabsMsg = sheets.length?` · ${sheets.length} tab(s)`:'';
+    const actMsg = actualsRaw?` · Actuals “${actualsName||'linked'}”`:'';
+    const mapMsg = mapped.length?` · ${mapped.length} mapped line(s)`:'';
+    fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>`;
+    setTimeout(()=>{closeModal();render();},1200);
+  }catch(err){
+    /* Roll back fully — never bind empty actuals or a half session */
+    conn={connected:false,url,token:'',scale,ssid:ssid||'',sheets:[],actualsSsid:'',actualsSheets:[]};
+    saveConn(); setStatus('Not connected', false); render();
+    showErr(classifyConnectError(err, errKind));
+  }
 }
 async function refreshActuals(){
   if(!conn.connected||!conn.actualsSsid){ toast('Add an actuals source first: Connect sheet → Actuals source.'); return; }
