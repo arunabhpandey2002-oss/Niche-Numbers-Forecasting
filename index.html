@@ -1038,10 +1038,14 @@ async function ingestFormulaGraphFromSheet(opts){
   }catch(e){}
   recompileAll(); saveModel();
   if(!model.uiState.scanCatalog.length) throw new Error('Formula graph produced no mapped cells');
-  /* Gate: every seed that had a sheet formula must land as formula with ≥1 dep — never a lone P&L input */
+  /* Gate: formula seeds must not become Inputs. Zero-dep non-proof lines stay Suggested (SUM/% etc.); hard-fail only the proof walk. */
   const seedFormulaLabels=new Set(seeds.filter(s=>String(s.formula||'').startsWith('=')).map(s=>nrm(s.label||'')));
+  const isProofLine=v=>{
+    const nm=nrm(v.name||''), ac=nrm(v.account||'');
+    return /subscription\s*revenue/.test(nm)||/subscription\s*revenue/.test(ac)||nm==='net revenue'||ac==='net revenue';
+  };
   const fakeInputs=[];
-  const zeroDepForms=[];
+  const zeroDepProof=[];
   newVars.forEach(v=>{
     if(!v.srcLine) return;
     const hadFormula=seedFormulaLabels.has(nrm(v.name||''))||seedFormulaLabels.has(nrm(v.account||''));
@@ -1050,17 +1054,28 @@ async function ingestFormulaGraphFromSheet(opts){
       fakeInputs.push(v.name||v.key); return;
     }
     let deps=0; try{ deps=(compile(v.expr||'').deps||[]).length; }catch(e){ deps=0; }
-    if(deps<1) zeroDepForms.push(v.name||v.key);
+    if(deps<1){
+      if(isProofLine(v)) zeroDepProof.push(v.name||v.key);
+      else {
+        v.mapStatus='suggested';
+        v.classifyNote=v.classifyNote||'Sheet formula kept; feeders not fully resolved yet — Accept after review';
+        if(!v.expr) v._suggestedExpr=String(v.sheetFormula||'').replace(/^[=\s]+/,'').trim();
+        nSug++;
+      }
+    }
   });
   if(fakeInputs.length){
     throw new Error('Proof failed: formula P&L/cash lines landed as fake Inputs (no walk): '+fakeInputs.slice(0,8).join(', ')+(fakeInputs.length>8?'…':'')+'. Redeploy Apps Script includeFormulas if needed, Clear all, Connect & Scan.');
   }
-  if(zeroDepForms.length){
-    throw new Error('Proof failed: formula lines with 0 deps (feeders not materialized): '+zeroDepForms.slice(0,8).join(', ')+(zeroDepForms.length>8?'…':''));
+  if(zeroDepProof.length){
+    throw new Error('Proof failed: Subscription revenue / Net revenue have 0 deps (feeders not materialized): '+zeroDepProof.join(', ')+'. Check Pricing/Assumptions refs in the sheet formulas.');
   }
-  const proofVar=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
+  const proofVar=newVars.find(v=>/subscription\s*revenue/i.test(v.name))||newVars.find(v=>nrm(v.name||'')==='net revenue');
   let proofDeps=0;
   if(proofVar&&proofVar.expr){ try{ proofDeps=(compile(proofVar.expr).deps||[]).length; }catch(e){ proofDeps=0; } }
+  if(proofVar && (!proofVar.expr || proofDeps<1)){
+    throw new Error('Proof failed: '+(proofVar.name||'Subscription revenue')+' did not resolve feeders from the sheet formula. Clear all → Connect & Scan after confirming the P&L cell formula references Pricing/Assumptions.');
+  }
   return {
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
@@ -4704,7 +4719,7 @@ function ensureModelShape(){
   if(model.scenarios===undefined){ /* no-op */ }
   recompileAll();
 }
-const GRAPH_INGEST_VERSION=5;
+const GRAPH_INGEST_VERSION=6;
 function isStaleFakePnLInput(v){
   if(!v) return false;
   if(v.srcPricing) return false; /* Pricing controls are not P&L walk fakes */
