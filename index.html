@@ -1356,28 +1356,38 @@ function resetPricingSeed(){
   savePricing(); syncPricingDrivers(); saveModel(); render(); toast('AI hybrid seed restored');
 }
 function pricingPromoteRows(){
-  const c=computePricing();
+  /* Full period series — scenario overrides included — so Sheets matches the live model. */
+  syncPricingDrivers();
+  const evaluated=evalModel(true);
   const periods=model.periods||[];
   const header=['key','name','unit'].concat(periods);
   const rows=[header];
-  const push=(key,name,unit,val)=>{
-    const series=periods.map(()=>val);
-    rows.push([key,name,unit].concat(series));
+  const seriesFor=(key)=>{
+    const v=vget(key);
+    return periods.map((_,p)=>{
+      if(v && v.kind==='input' && typeof inputVal==='function') return inputVal(v,p,true);
+      const s=evaluated[key];
+      return (s && s[p]!=null && s[p]!=='') ? Number(s[p]) : 0;
+    });
   };
-  push('paying_seats','Paying seats','#',c.paying_seats);
-  push('seat_list','Seat list revenue','₹',c.seat_list);
-  push('usage_list','Usage list revenue','₹',c.usage_list);
-  push('list_revenue','List revenue','₹',c.list_revenue);
-  push('seat_discount_pct','Seat line discount','%',c.seat_discount_pct);
-  push('usage_discount_pct','Usage line discount','%',c.usage_discount_pct);
-  push('contract_discount_pct','Contract discount','%',c.contract_discount_pct);
-  push('promo_discount_pct','Promo discount','%',c.promo_discount_pct);
-  push('discount_amount','Flat discount amount','₹',c.discount_amount);
-  push('revenue_seats_net','Seats net (after line discount)','₹',c.revenue_seats_net);
-  push('revenue_usage_net','Usage net (after line discount)','₹',c.revenue_usage_net);
-  push('revenue_total_net','Net after waterfall','₹',c.revenue_total_net);
-  push('arpu','ARPU','₹',c.arpu);
-  push('effective_discount_pct','Effective discount','%',c.effective_discount_pct);
+  const push=(key,name,unit)=>{
+    rows.push([key,name,unit].concat(seriesFor(key)));
+  };
+  push('paying_seats','Paying seats','#');
+  push('usage_units','Usage units','#');
+  push('seat_list','Seat list revenue','₹');
+  push('usage_list','Usage list revenue','₹');
+  push('list_revenue','List revenue','₹');
+  push('seat_discount_pct','Seat line discount','%');
+  push('usage_discount_pct','Usage line discount','%');
+  push('contract_discount_pct','Contract discount','%');
+  push('promo_discount_pct','Promo discount','%');
+  push('discount_amount','Flat discount amount','₹');
+  push('revenue_seats_net','Seats net (after line discount)','₹');
+  push('revenue_usage_net','Usage net (after line discount)','₹');
+  push('revenue_total_net','Net after waterfall','₹');
+  push('arpu','ARPU','₹');
+  push('effective_discount_pct','Effective discount','%');
   return rows;
 }
 
