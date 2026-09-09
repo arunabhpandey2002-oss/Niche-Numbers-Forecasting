@@ -770,9 +770,13 @@ function buildCellMapFromScan(opts){
 }
 function mapStatusOf(v){
   const raw=(v&&v.mapStatus)||'';
+  const hasRange=!!(v&&v.range);
+  /* Confirmed without a forecast cell is not confirmed */
+  if((raw==='confirmed'||raw==='manual') && !hasRange) return 'suggested';
   if(raw==='manual') return 'confirmed'; /* legacy label — never show MANUAL */
+  if(raw==='auto' && !hasRange) return 'unmapped';
   if(raw) return raw;
-  return (v&&v.range)?'confirmed':'unmapped';
+  return hasRange?'confirmed':'unmapped';
 }
 function mapStatusLabel(st){
   const s=String(st||'');
@@ -782,9 +786,30 @@ function mapStatusLabel(st){
   if(s==='unmapped') return 'Unmapped';
   return s||'Unmapped';
 }
+function actualsCellLabel(v){
+  if(v&&v.actualRange) return esc(v.actualRange);
+  if(conn&&conn.actualsSsid) return 'no actuals';
+  return 'actuals not connected';
+}
+function sheetCellsHtml(v){
+  const fc = v.range
+    ? `<span class="cellref">${esc(v.range)}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}`
+    : `<span class="cellref unmapped">— not mapped —</span>`;
+  const ac = v.actualRange
+    ? `<div class="mut fz10" style="margin-top:3px">Actuals · <span class="cellref">${esc(v.actualRange)}</span></div>`
+    : `<div class="mut fz10" style="margin-top:3px">${conn&&conn.actualsSsid?'Actuals · no actuals':'Actuals · not connected'}</div>`;
+  return fc+ac;
+}
 function needsMapReview(v){
   const s=mapStatusOf(v);
-  return s==='suggested' || s==='unmapped' || (v&&v.kind==='formula' && v.mapStatus==='suggested');
+  return s==='suggested' || s==='unmapped' || (v&&v.kind==='formula' && v.mapStatus==='suggested') || !!(v&&!v.range && (v.mapStatus==='confirmed'||v.mapStatus==='manual'||v.mapStatus==='auto'));
+}
+function canConfirmMap(v){ return !!(v&&v.range); }
+function demoteConfirmedWithoutRange(v){
+  if(!v) return v;
+  if((v.mapStatus==='confirmed'||v.mapStatus==='manual') && !v.range){ v.mapStatus='suggested'; }
+  if(v.mapStatus==='auto' && !v.range){ v.mapStatus='unmapped'; }
+  return v;
 }
 
 /* ---- P3 exact algebraic breakback for pure * / monomial trees ---- */
@@ -1126,13 +1151,14 @@ function computePricing(period){
 function upsertPricingVar(spec){
   let v = vget(spec.key);
   if(!v){
-    v = Object.assign({steps:[], delta:0, range:'', writable:!!spec.writable, mapStatus:'auto', group:'Pricing', srcPricing:true}, spec);
+    v = Object.assign({steps:[], delta:0, range:'', writable:!!spec.writable, mapStatus:(spec.range?'auto':'unmapped'), group:'Pricing', srcPricing:true}, spec);
     model.vars.push(v);
   } else {
     v.name = spec.name; v.unit = spec.unit; v.kind = spec.kind; v.group = 'Pricing'; v.srcPricing = true;
     if(spec.kind==='input'){ v.writable = spec.writable!==false; v.base = spec.base; if(spec.expr!=null) delete v.expr; }
     if(spec.kind==='formula'){ v.expr = spec.expr; }
   }
+  demoteConfirmedWithoutRange(v);
   return v;
 }
 /** Keep Pricing drivers first-class in the shared model graph ( forecaster / X-ray / scenarios ). */
@@ -1450,7 +1476,7 @@ function viewSetup(){
     const def = v.kind==="formula" ? `<span class="expr">${esc(v.expr||'')}</span>${v.err?` <span class="negv fz10">⚠ ${esc(v.err)}</span>`:''}`
       : v.kind==="input" ? `<span class="mut fz11">base ${fmtVar(v.base,v.unit)}${(v.steps&&v.steps.length)?` · ${v.steps.length} step${v.steps.length>1?'s':''}`:''}</span>`
       : `<span class="mut fz11">read from sheet</span>`;
-    const cell = v.range ? `<span class="cellref">${esc(v.range)}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}` : `<span class="cellref unmapped">— not mapped —</span>`;
+    const cell = sheetCellsHtml(v);
     const confirm = (st==='suggested'||st==='unmapped')?` <button class="btn sm" style="height:22px;padding:0 8px;font-size:10px" onclick="openConfirmClassify('${v.key}')">Confirm</button>`:'';
     return `<tr>
       <td><strong>${esc(v.name)}</strong> <span class="keychip">${esc(v.key)}</span></td>
@@ -1519,8 +1545,16 @@ function viewSetup(){
 }
 function addVarKind(kind){ varModal(null); const k=document.getElementById('vKind'); if(k){ k.value=kind; varKindToggle(); } }
 function setMapFilter(f){ model.uiState=model.uiState||{}; model.uiState.mapFilter=f; saveModel(); render(); }
-function confirmMapStatus(key){ const v=vget(key); if(!v) return; v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; saveModel(); render(); toast('Confirmed '+v.name); }
-function confirmSuggestedFormula(key){ const v=vget(key); if(!v||!v._suggestedExpr) return; v.kind='formula'; v.expr=v._suggestedExpr; delete v._suggestedExpr; v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; recompileAll(); saveModel(); render(); }
+function confirmMapStatus(key){
+  const v=vget(key); if(!v) return;
+  if(!canConfirmMap(v)){ toast('Map a forecast cell before Confirm'); openConfirmClassify(key); return; }
+  v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; saveModel(); render(); toast('Confirmed '+v.name);
+}
+function confirmSuggestedFormula(key){
+  const v=vget(key); if(!v||!v._suggestedExpr) return;
+  if(!canConfirmMap(v)){ toast('Map a forecast cell before Confirm'); openConfirmClassify(key); return; }
+  v.kind='formula'; v.expr=v._suggestedExpr; delete v._suggestedExpr; v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; recompileAll(); saveModel(); render();
+}
 function openConfirmClassify(key){
   const v=vget(key); if(!v) return;
   const st=mapStatusOf(v);
@@ -1529,24 +1563,63 @@ function openConfirmClassify(key){
   const kindOpts=['input','formula','output'].map(k=>`<option value="${k}" ${kindSel===k?'selected':''}>${k}</option>`).join('');
   const suggested=(v._suggestedExpr!=null&&v._suggestedExpr!=='')?v._suggestedExpr:(v.expr||'');
   const showFormula = !!(v.sheetFormula || st==='suggested' || v.kind==='formula');
+  const rp=parseRange(v.range||'');
+  const ra=parseRange(v.actualRange||'');
+  const knownSheets=[...new Set([...(conn.sheets||[]).map(s=>s.name), rp.sheet, ...model.vars.map(x=>parseRange(x.range).sheet)].filter(Boolean))];
+  const knownActSheets=[...new Set([...(conn.actualsSheets||[]).map(s=>s.name), ra.sheet].filter(Boolean))];
+  const fSheetField = (conn.sheets&&conn.sheets.length)
+    ? `<select id="ccFSheet" oninput="updCcRangePrev()">${['',...conn.sheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===rp.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
+    : `<input class="inp" id="ccFSheet" value="${esc(rp.sheet)}" placeholder="Assumptions" oninput="updCcRangePrev()">`;
+  const aSheetField = (conn.actualsSheets&&conn.actualsSheets.length)
+    ? `<select id="ccASheet" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}>${['',...conn.actualsSheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===ra.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
+    : `<input class="inp" id="ccASheet" value="${esc(ra.sheet)}" placeholder="Actuals" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}>`;
+  const actHint = conn.actualsSsid
+    ? (v.actualRange?'':'Leave blank for explicit “no actuals” on this line.')
+    : 'No actuals workbook connected — Connect sheet → Actuals to map, or leave blank.';
   showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody confirm-classify">
-      <p class="mut fz12" style="margin:0 0 12px">Confirm what Scan found. Edit only if needed — this is not a second model build.</p>
+      <p class="mut fz12" style="margin:0 0 12px">Confirm type and <b>where it lives</b>. Forecast cell is required for Confirmed. Actuals are optional.</p>
       <div class="cc-row"><span class="cc-k">Line</span><span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span></div>
       <div class="cc-row"><span class="cc-k">Status</span><span class="mapchip ${st}">${mapStatusLabel(st)}</span>${v.classifyConfidence?` · ${esc(v.classifyConfidence)}`:''}</div>
-      <div class="cc-row"><span class="cc-k">Sheet</span><span class="cellref">${v.range?esc(v.range):'— not mapped —'}</span></div>
       ${v.sheetFormula?`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="expr">${esc(v.sheetFormula)}</span></div>`:`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="mut">None (values only)</span></div>`}
       ${v.classifyNote?`<div class="cc-row"><span class="cc-k">Note</span><span class="mut">${esc(v.classifyNote)}</span></div>`:''}
       <div class="field" style="margin-top:12px"><label>Type</label><select class="inp" id="ccKind">${kindOpts}</select></div>
       <div class="field" id="ccExprRow" style="margin-top:10px;${showFormula?'':'display:none'}"><label>Model formula ${v.sheetFormula?'(accept / edit from sheet)':''}</label>
         <input class="inp" id="ccExpr" value="${esc(suggested)}" placeholder="e.g. price * new_customers"></div>
+      <p class="eyebrow" style="margin:16px 0 6px">Forecast cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required)</span></p>
+      <div class="frow three">
+        <div class="field"><label>Sheet / tab</label>${fSheetField}</div>
+        <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
+        <div class="field"><label>Start row</label><input class="inp" id="ccFRow" type="number" value="${esc(rp.row)}" placeholder="11" oninput="updCcRangePrev()"></div>
+      </div>
+      <div class="rangeprev" id="ccRangePrev"></div>
+      <p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>
+      <p class="mut fz11" style="margin:0 0 8px">${actHint}</p>
+      <div class="frow three">
+        <div class="field"><label>Tab</label>${aSheetField}</div>
+        <div class="field"><label>Column</label><input class="inp" id="ccACol" value="${esc(ra.col)}" placeholder="K" style="text-transform:uppercase" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}></div>
+        <div class="field"><label>Start row</label><input class="inp" id="ccARow" type="number" value="${esc(ra.row)}" placeholder="11" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}></div>
+      </div>
+      <div class="rangeprev" id="ccActualPrev">${conn.actualsSsid?(v.actualRange?'':''):'Actuals · not connected'}</div>
       <div class="cc-actions">
         <button class="btn" onclick="closeModal();editVar(model.vars.indexOf(vget('${jesc(key)}')))">Full edit</button>
         <button class="btn primary" onclick="commitConfirmClassify('${jesc(key)}')">Confirm</button>
       </div>
     </div>`);
   const kindEl=document.getElementById('ccKind');
-  if(kindEl) kindEl.onchange=()=>{ const row=document.getElementById('ccExprRow'); if(row) row.style.display=(kindEl.value==='formula' || document.getElementById('ccExpr').value)?'':'none'; };
+  if(kindEl) kindEl.onchange=()=>{ const row=document.getElementById('ccExprRow'); if(row) row.style.display=(kindEl.value==='formula' || (document.getElementById('ccExpr')||{}).value)?'':'none'; };
+  updCcRangePrev(); updCcActualPrev();
+}
+function updCcRangePrev(){ const el=document.getElementById('ccRangePrev'); if(!el)return;
+  const sh=(document.getElementById('ccFSheet')||{}).value||'', col=(document.getElementById('ccFCol')||{}).value||'', row=(document.getElementById('ccFRow')||{}).value||'';
+  const r=buildRange(sh,col,row,P());
+  el.innerHTML = r ? `→ forecast <b>${r}</b> · ${P()} cells` : `<span class="mut">pick sheet, column &amp; row (required for Confirmed)</span>`;
+}
+function updCcActualPrev(){ const el=document.getElementById('ccActualPrev'); if(!el)return;
+  if(!conn.actualsSsid){ el.innerHTML=`<span class="mut">Actuals · not connected</span>`; return; }
+  const sh=(document.getElementById('ccASheet')||{}).value||'', col=(document.getElementById('ccACol')||{}).value||'', row=(document.getElementById('ccARow')||{}).value||'';
+  const r=buildRange(sh,col,row,P());
+  el.innerHTML = r ? `→ actuals <b>${r}</b>` : `<span class="mut">Actuals · no actuals (optional)</span>`;
 }
 function commitConfirmClassify(key){
   const v=vget(key); if(!v) return;
@@ -1554,24 +1627,34 @@ function commitConfirmClassify(key){
   v.kind=kind;
   if(kind==='formula'){
     let expr=((document.getElementById('ccExpr')||{}).value||'').trim();
-    if(!expr && v.sheetFormula){
-      toast('Enter a model formula from the sheet formula above, or use Full edit'); return;
-    }
+    if(!expr && v.sheetFormula){ toast('Enter a model formula from the sheet formula above, or use Full edit'); return; }
     if(!expr){ toast('Enter a formula or pick another type'); return; }
     try{ compile(expr); }catch(e){ toast(String(e.message||e)); return; }
     v.expr=expr; delete v._suggestedExpr;
   }
   if(kind==='input'){ v.writable=true; if(v.base==null) v.base=0; }
   if(kind==='output'){ v.writable=false; }
+  const fr=buildRange((document.getElementById('ccFSheet')||{}).value||'', (document.getElementById('ccFCol')||{}).value||'', (document.getElementById('ccFRow')||{}).value||'', P());
+  if(!fr){ toast('Map a forecast cell before Confirm'); return; }
+  v.range=fr;
+  if(conn.actualsSsid && document.getElementById('ccASheet')){
+    const ar=buildRange((document.getElementById('ccASheet')||{}).value||'', (document.getElementById('ccACol')||{}).value||'', (document.getElementById('ccARow')||{}).value||'', P());
+    if(ar) v.actualRange=ar; else delete v.actualRange;
+  }
   v.mapStatus='confirmed'; v.classifyConfidence='confirmed';
   applyRollupHeuristic(v);
   recompileAll(); saveModel(); closeModal(); render(); toast('Confirmed '+v.name);
 }
 function confirmAllSuggested(){
-  let n=0;
-  model.vars.forEach(v=>{ if(mapStatusOf(v)==='suggested'){ v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; n++; } });
+  let n=0, skipped=0;
+  model.vars.forEach(v=>{
+    if(mapStatusOf(v)!=='suggested') return;
+    if(!canConfirmMap(v)){ skipped++; return; }
+    v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; n++;
+  });
+  if(!n && skipped){ toast(skipped+' suggested line'+(skipped===1?'':'s')+' still need a forecast cell'); return; }
   if(!n){ toast('Nothing suggested to confirm'); return; }
-  saveModel(); render(); toast('Confirmed '+n+' suggested line'+(n===1?'':'s'));
+  saveModel(); render(); toast('Confirmed '+n+(skipped?` · ${skipped} still need a forecast cell`:''));
 }
 
 const CANW=2600, CANH=1500;
@@ -1807,7 +1890,7 @@ function varModal(idx){
       <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
         <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
       </div>
-      <p class="eyebrow" style="margin:16px 0 6px">Where it lives in the sheet ${conn.connected?'':'<span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(you can map this any time)</span>'}</p>
+      <p class="eyebrow" style="margin:16px 0 6px">Forecast cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
       <div class="frow three">
         <div class="field"><label>Sheet / tab</label>${sheetField}</div>
         <div class="field"><label>Column</label><input class="inp" id="vCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updRangePrev()"></div>
@@ -1815,14 +1898,16 @@ function varModal(idx){
       </div>
       <div class="rangeprev" id="rangePrev"></div>
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-2);margin-top:10px" id="vWritableRow"><input type="checkbox" id="vWritable" ${v.writable?'checked':''}> This is an input cell — write my plan back here</label>
-      ${conn.actualsSsid?(()=>{ const ra=parseRange(v.actualRange||''); const asheet=(conn.actualsSheets&&conn.actualsSheets.length)
-          ? `<select id="vaSheet" oninput="updActualPrev()">${['',...conn.actualsSheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===ra.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
-          : `<input class="inp" id="vaSheet" value="${esc(ra.sheet)}" placeholder="Actuals" oninput="updActualPrev()">`;
-        return `<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(in your separate actuals sheet)</span></p>
+      ${(()=>{ const ra=parseRange(v.actualRange||''); const linked=!!conn.actualsSsid;
+        const asheet=(conn.actualsSheets&&conn.actualsSheets.length)
+          ? `<select id="vaSheet" oninput="updActualPrev()" ${linked?'':'disabled'}>${['',...conn.actualsSheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===ra.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
+          : `<input class="inp" id="vaSheet" value="${esc(ra.sheet)}" placeholder="Actuals" oninput="updActualPrev()" ${linked?'':'disabled'}>`;
+        return `<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>
+        <p class="mut fz11" style="margin:0 0 8px">${linked?(v.actualRange?'':'Leave blank for explicit “no actuals” on this line.'):'Actuals · not connected — add an actuals workbook in Connect to map.'}</p>
         <div class="frow three"><div class="field"><label>Tab</label>${asheet}</div>
-          <div class="field"><label>Column</label><input class="inp" id="vaCol" value="${esc(ra.col)}" placeholder="K" style="text-transform:uppercase" oninput="updActualPrev()"></div>
-          <div class="field"><label>Start row</label><input class="inp" id="vaRow" type="number" value="${esc(ra.row)}" placeholder="11" oninput="updActualPrev()"></div></div>
-        <div class="rangeprev" id="actualPrev"></div>`; })():''}
+          <div class="field"><label>Column</label><input class="inp" id="vaCol" value="${esc(ra.col)}" placeholder="K" style="text-transform:uppercase" oninput="updActualPrev()" ${linked?'':'disabled'}></div>
+          <div class="field"><label>Start row</label><input class="inp" id="vaRow" type="number" value="${esc(ra.row)}" placeholder="11" oninput="updActualPrev()" ${linked?'':'disabled'}></div></div>
+        <div class="rangeprev" id="actualPrev"></div>`; })()}
       <div id="vErr" class="negv fz11" style="margin-top:8px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save'}</button></div>
     </div>`);
@@ -1842,9 +1927,10 @@ function updRangePrev(){ const el=document.getElementById('rangePrev'); if(!el)r
   el.innerHTML = r ? `→ maps to <b>${r}</b> · ${P()} cells across your timeline` : `<span class="mut">pick a sheet, column &amp; row to map (${P()} cells will span the timeline)</span>`;
 }
 function updActualPrev(){ const el=document.getElementById('actualPrev'); if(!el)return;
+  if(!conn.actualsSsid){ el.innerHTML=`<span class="mut">Actuals · not connected</span>`; return; }
   const sh=(document.getElementById('vaSheet')||{}).value||'', col=(document.getElementById('vaCol')||{}).value||'', row=(document.getElementById('vaRow')||{}).value||'';
   const r=buildRange(sh,col,row,P());
-  el.innerHTML = r ? `→ actuals from <b>${r}</b> in your actuals sheet` : `<span class="mut">pick tab, column &amp; row for this line's actuals</span>`;
+  el.innerHTML = r ? `→ actuals from <b>${r}</b> in your actuals sheet` : `<span class="mut">Actuals · no actuals (optional)</span>`;
 }
 function addVar(){ varModal(null); }
 function editVar(i){ varModal(i); }
@@ -1868,8 +1954,9 @@ function saveVar(idx){
       const known=model.vars.filter((_,i)=>i!==(idx==null?-1:idx)).map(x=>x.key.toLowerCase()); const missing=c.deps.filter(d=>!known.includes(d.toLowerCase()));
       if(!v.expr){ err.textContent="Enter a formula (use the Insert buttons)."; return; }
       if(missing.length){ err.textContent="Unknown variable(s): "+missing.join(", ")+". Use the Insert buttons to add existing ones."; return; } }
-  if(range) v.mapStatus=v.mapStatus==='auto'?'auto':'confirmed';
-  else if(!v.mapStatus) v.mapStatus='unmapped';
+  if(range) v.mapStatus=(v.mapStatus==='auto')?'auto':'confirmed';
+  else v.mapStatus='unmapped';
+  demoteConfirmedWithoutRange(v);
   if(idx==null) model.vars.push(v); else model.vars[idx]=v;
   // canvas page + node position bookkeeping
   model.nodePos=model.nodePos||{};
@@ -3457,6 +3544,7 @@ async function scanModelSheet(){
       const range=p.row?buildRange(sheetName, src.firstCol||'B', p.row, periods.length):'';
       const v={key:p.key,name:p.name,metric:p.metric,account:p.name,forecast:series,read:series,srcLine:true,range:range||''};
       applyClassifyToVar(v, cls);
+      demoteConfirmedWithoutRange(v);
       if(cls.kind==='formula'){ nForm++; }
       else if(cls.kind==='input'){
         v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
@@ -3470,6 +3558,22 @@ async function scanModelSheet(){
       if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
       return v;
     });
+    /* Auto-fill actualRange when actuals workbook is connected and labels match */
+    try{
+      if(conn.actualsSsid){
+        const aSrc=Object.assign({}, src, {ssid:conn.actualsSsid}, (model.sources&&model.sources.actual)||{});
+        aSrc.ssid=conn.actualsSsid;
+        const A=await readSource(aSrc);
+        const idOf=l=>nrm(l.metric||'')+'|'+nrm(l.name);
+        const aById={}; (A.lines||[]).forEach(l=>{ aById[idOf(l)]=l; });
+        newLines.forEach(v=>{
+          if(v.actualRange) return;
+          const id=nrm(v.metric||'')+'|'+nrm(v.account||v.name||'');
+          const al=aById[id];
+          if(al&&al.row){ v.actualRange=buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', al.row, periods.length); if(al.series) v.actuals=periods.map((_,pi)=>al.series[pi]===undefined?null:al.series[pi]); }
+        });
+      }
+    }catch(e){ /* actuals optional — leave explicit no-actuals */ }
     model.vars=keep.concat(newLines); model.periods=periods;
     if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newLines.find(v=>v.kind==='formula')||newLines[newLines.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
     if(!vget(_vState.line)) _vState.line=null; if(_cState&&!vget(_cState.line)) _cState.line=null;
@@ -3906,8 +4010,12 @@ async function doImport(fSrc,aSrc){
     /* actuals-only lines stay output */
     if(!fs && as){ cls.kind='output'; }
     const range=p.row?buildRange(fSrc.tab||'', fSrc.firstCol||'B', p.row, periods.length):'';
+    const aLine=A.lines.find(l=>nrm(l.metric||'')+'|'+nrm(l.name)===p.id);
+    const actualRange=(aLine&&aLine.row&&aSrc)?buildRange(aSrc.tab||'', aSrc.firstCol||'B', aLine.row, periods.length):'';
     const v={key:p.key,name:p.name,metric:p.metric,account:p.name,forecast:fser,actuals:aser,read:fser,srcLine:true,range:range||''};
+    if(actualRange) v.actualRange=actualRange;
     applyClassifyToVar(v, cls);
+    demoteConfirmedWithoutRange(v);
     if(cls.kind==='formula'){ v.expr=cls.expr; v.sheetFormula=cls.sheetFormula||''; nForm++; }
     else if(cls.kind==='input'){
       v.writable=true; const series=fser||[]; v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
