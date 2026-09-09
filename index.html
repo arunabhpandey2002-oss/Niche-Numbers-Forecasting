@@ -1025,22 +1025,37 @@ async function ingestFormulaGraphFromSheet(opts){
   }
   recompileAll(); saveModel();
   if(!model.uiState.scanCatalog.length) throw new Error('Formula graph produced no mapped cells');
+  /* Gate: every seed that had a sheet formula must land as formula with ≥1 dep — never a lone P&L input */
+  const seedFormulaLabels=new Set(seeds.filter(s=>String(s.formula||'').startsWith('=')).map(s=>nrm(s.label||'')));
+  const fakeInputs=[];
+  const zeroDepForms=[];
+  newVars.forEach(v=>{
+    if(!v.srcLine) return;
+    const hadFormula=seedFormulaLabels.has(nrm(v.name||''))||seedFormulaLabels.has(nrm(v.account||''));
+    if(!hadFormula) return;
+    if(v.kind!=='formula' || !String(v.sheetFormula||'').startsWith('=')){
+      fakeInputs.push(v.name||v.key); return;
+    }
+    let deps=0; try{ deps=(compile(v.expr||'').deps||[]).length; }catch(e){ deps=0; }
+    if(deps<1) zeroDepForms.push(v.name||v.key);
+  });
+  if(fakeInputs.length){
+    throw new Error('Proof failed: formula P&L/cash lines landed as fake Inputs (no walk): '+fakeInputs.slice(0,8).join(', ')+(fakeInputs.length>8?'…':'')+'. Redeploy Apps Script includeFormulas if needed, Clear all, Connect & Scan.');
+  }
+  if(zeroDepForms.length){
+    throw new Error('Proof failed: formula lines with 0 deps (feeders not materialized): '+zeroDepForms.slice(0,8).join(', ')+(zeroDepForms.length>8?'…':''));
+  }
   const proofVar=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
   let proofDeps=0;
   if(proofVar&&proofVar.expr){ try{ proofDeps=(compile(proofVar.expr).deps||[]).length; }catch(e){ proofDeps=0; } }
-  if(proofVar && proofVar.kind!=='formula'){
-    throw new Error('Proof failed: Subscription revenue landed as '+proofVar.kind+' without a sheet formula. Feeders were not walked — check Apps Script includeFormulas and re-scan.');
-  }
-  if(proofVar && proofVar.kind==='formula' && proofDeps<1){
-    throw new Error('Proof failed: Subscription revenue is a formula but has 0 deps — Pricing/Assumptions were not materialized.');
-  }
   return {
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
     name:F.name||sheetName, mode:'formula-graph',
     proof: proofVar?proofVar.key:'',
     proofKind: proofVar?proofVar.kind:'',
-    proofDeps
+    proofDeps,
+    formulaSeeds: seedFormulaLabels.size
   };
 }
 function mapStatusOf(v){
