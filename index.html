@@ -1032,6 +1032,10 @@ async function ingestFormulaGraphFromSheet(opts){
     const sub=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
     model.displayVars=[(sub||newVars.find(v=>v.srcLine&&v.kind==='formula')||newVars[0]||{}).key].filter(Boolean);
   }
+  /* Graph owns P&L Net revenue — kill Pricing alias + any Pricing→P&L row maps */
+  try{
+    if(typeof pricing==='object' && pricing){ pricing.link_revenue=false; if(typeof savePricing==='function') savePricing(); }
+  }catch(e){}
   recompileAll(); saveModel();
   if(!model.uiState.scanCatalog.length) throw new Error('Formula graph produced no mapped cells');
   /* Gate: every seed that had a sheet formula must land as formula with ≥1 dep — never a lone P&L input */
@@ -1449,6 +1453,8 @@ function computePricing(period){
 }
 function upsertPricingVar(spec){
   let v = vget(spec.key);
+  /* Never steal P&L/cash graph lines or cells that still carry a sheet formula */
+  if(v && (v.srcGraph || v.srcLine || (v.sheetFormula && String(v.sheetFormula).startsWith('=')))) return v;
   if(!v){
     v = Object.assign({steps:[], delta:0, range:'', writable:!!spec.writable, mapStatus:(spec.range?'auto':'unmapped'), group:'Pricing', srcPricing:true}, spec);
     model.vars.push(v);
@@ -1456,6 +1462,8 @@ function upsertPricingVar(spec){
     v.name = spec.name; v.unit = spec.unit; v.kind = spec.kind; v.group = 'Pricing'; v.srcPricing = true;
     if(spec.kind==='input'){ v.writable = spec.writable!==false; v.base = spec.base; if(spec.expr!=null) delete v.expr; }
     if(spec.kind==='formula'){ v.expr = spec.expr; }
+    /* Pricing drivers must not keep stale P&L row maps from legacy label-match */
+    if(v.range && /p\s*&\s*l|pnl/i.test(String(v.range))){ v.range=''; v.mapStatus='unmapped'; }
   }
   demoteConfirmedWithoutRange(v);
   return v;
@@ -1497,9 +1505,12 @@ function syncPricingDrivers(){
   upsertPricingVar({key:'arpu', name:'ARPU', unit:'₹', kind:'formula', expr:'if(paying_seats, revenue_total_net / paying_seats, 0)'});
   upsertPricingVar({key:'effective_discount_pct', name:'Effective discount', unit:'%', kind:'formula', expr:'if(list_revenue, 1 - revenue_total_net / list_revenue, 0)'});
 
-  if(pricing.link_revenue){
+  /* Never alias P&L Net revenue into Pricing’s revenue_total_net after a formula-graph Scan */
+  if(pricing.link_revenue && !(model.sources && model.sources.graph)){
     const rev = vget('revenue');
-    if(rev){ rev.kind='formula'; rev.expr='revenue_total_net'; rev.name = rev.name||'Net revenue'; rev.unit = rev.unit||'₹'; }
+    const sheetBacked = rev && (rev.srcGraph || rev.srcLine || (rev.sheetFormula && String(rev.sheetFormula).startsWith('=')));
+    if(sheetBacked){ /* keep walk */ }
+    else if(rev){ rev.kind='formula'; rev.expr='revenue_total_net'; rev.name = rev.name||'Net revenue'; rev.unit = rev.unit||'₹'; }
     else upsertPricingVar({key:'revenue', name:'Net revenue', unit:'₹', kind:'formula', expr:'revenue_total_net'});
   }
   if(!model.displayVars || !model.displayVars.length) model.displayVars = ['revenue_total_net'];
@@ -2054,6 +2065,9 @@ function clearModel(){ showModal(`<div class="mhead"><h3>Clear the whole model?<
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" style="background:#c23140;border-color:#c23140;color:#fff" onclick="doClearModel()">Clear everything</button></div></div>`); }
 function doClearModel(){ model.vars=[]; model.nodePos={}; model.displayVars=[]; model.pages=['Page 1']; model.canvasPage=0;
   _pan={x:0,y:0}; _vState.line=null; if(typeof _cState==='object'&&_cState) _cState.line=null;
+  if(model.sources) model.sources.graph=false;
+  if(model.uiState){ model.uiState.graphIngestVersion=0; model.uiState.scanCatalog=[]; }
+  try{ if(typeof pricing==='object'&&pricing){ pricing.link_revenue=false; if(typeof savePricing==='function') savePricing(); } }catch(e){}
   recompileAll(); saveModel(); closeModal(); render(); toast('Model cleared — blank slate'); }
 
 /* ---- drag-and-drop lineage canvas ---- */
@@ -4135,7 +4149,7 @@ function labelMatchScore(v, line){
   /* light key synonyms for Pricing drivers */
   const syn={
     paying_seats:[/paying seats|paid seats|\bseats\b|subscribers|customers/],
-    usage_units:[/usage units|\busage\b|\bunits\b|consumption/],
+    usage_units:[/usage units|usage qty|usage quantity|consumption units/],
     price:[/\bprice\b|asp|arpu|price per/],
     seat_discount_pct:[/seat.*discount|discount.*seat/],
     usage_discount_pct:[/usage.*discount|discount.*usage/],
@@ -4143,7 +4157,7 @@ function labelMatchScore(v, line){
     promo_discount_pct:[/promo.*discount|discount.*promo/],
     discount_amount:[/flat discount|discount amount|\bdiscount\b/],
     list_revenue:[/list revenue|gross revenue|\brevenue\b/],
-    revenue_total_net:[/net revenue|revenue total|net after/],
+    revenue_total_net:[/net after waterfall|revenue total net|net after/],
     gross_revenue:[/gross revenue|list revenue/],
     net_revenue:[/net revenue/],
     direct_costs:[/direct cost|cogs|cost of/],
@@ -4172,14 +4186,19 @@ function hasScanCatalog(){ return scanCatalog().length>0; }
 async function ingestFromConnectedSheet(opts){
   opts=opts||{};
   if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
-  /* North star: formula-graph ingest from P&L/cash lines (fallback to legacy classify on hard failure) */
+  /* North star: formula-graph only. Legacy classify left fake P&L Inputs + Pricing aliases and stuck the stale banner. */
   try{
     return await ingestFormulaGraphFromSheet(opts);
   }catch(graphErr){
-    console.warn('formula-graph ingest failed, legacy fallback', graphErr);
-    if(opts.forceLegacy) throw graphErr;
-    /* continue into legacy path below */
+    console.warn('formula-graph ingest failed', graphErr);
+    if(opts.forceLegacy){
+      /* explicit escape hatch only */
+    } else {
+      const msg=String((graphErr&&graphErr.message)||graphErr||'formula-graph ingest failed');
+      throw new Error(msg+( /formula|includeFormulas|Apps Script/i.test(msg) ? '' : ' Redeploy Apps Script Code.gs with includeFormulas, then Clear all → Connect & Scan.'));
+    }
   }
+  if(!opts.forceLegacy) throw new Error('formula-graph ingest failed');
 
   const scale=conn.scale||1;
   const ssid=conn.ssid||'';
@@ -4210,6 +4229,7 @@ async function ingestFromConnectedSheet(opts){
   const consumedIds=new Set();
   const keepMatchedKeys=[];
   keep.forEach(v=>{
+    if(v.srcPricing) return; /* Pricing drivers must not bind to P&L revenue/COGS rows */
     const hit=bestLabelMatch(v, F.lines, consumedIds);
     if(!hit) return;
     consumedIds.add(hit.id);
@@ -4684,9 +4704,10 @@ function ensureModelShape(){
   if(model.scenarios===undefined){ /* no-op */ }
   recompileAll();
 }
-const GRAPH_INGEST_VERSION=4;
+const GRAPH_INGEST_VERSION=5;
 function isStaleFakePnLInput(v){
   if(!v) return false;
+  if(v.srcPricing) return false; /* Pricing controls are not P&L walk fakes */
   if(v.kind==='formula' && v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
   /* P&L revenue/COGS-looking lines stored as Input with only a P&L range and no sheet formula = pre-walk localStorage */
   const nm=String(v.name||'');
