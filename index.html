@@ -718,7 +718,7 @@ function sheetFormulaToExpr(formula, cellMap, defaultSheet){
   const toks=tokenizeSheetFormula(formula);
   if(!toks.length) return {ok:false, reason:'empty'};
   if(toks.some(t=>t.t==='bad')) return {ok:false, reason:'unsupported token'};
-  const EXCEL_FN={IF:'if', SUM:'sum'};
+  const EXCEL_FN={IF:'if', SUM:'sum', MAX:'max', MIN:'min'};
   const parts=[]; const deps=[]; const unresolved=[]; const unsupported=[];
   const ds=String(defaultSheet||'').trim();
   for(const t of toks){
@@ -767,6 +767,203 @@ function buildCellMapFromScan(opts){
     map[k1]=l.key; map[k2]=l.key;
   });
   return map;
+}
+/** Extract cross-sheet / A1 refs from an Excel formula. */
+function extractSheetRefs(formula, defaultSheet){
+  const toks=tokenizeSheetFormula(formula);
+  const ds=String(defaultSheet||'').trim();
+  const out=[];
+  toks.forEach(t=>{
+    if(t.t!=='ref') return;
+    const cr=a1ColRow(t.a1); if(!cr) return;
+    const sheet=(t.sheet||ds||'').trim();
+    out.push({sheet, col:cr.col, row:cr.row, a1:cr.col+cr.row, key:(sheet?sheet+'!':'')+cr.col+cr.row});
+  });
+  return out;
+}
+function quoteSheetRange(sheet, a1){
+  const sh=String(sheet||'').trim();
+  if(!sh) return a1;
+  return (/[^A-Za-z0-9_]/.test(sh)?`'${sh.replace(/'/g,"''")}'`:sh)+'!'+a1;
+}
+function cellId(sheet, a1){ return (String(sheet||'').trim()+'!'+String(a1||'').toUpperCase()).toUpperCase(); }
+function keyFromCell(sheet, a1, label){
+  const base=slugKey(label||((sheet?sheet+'_':'')+a1));
+  return base;
+}
+/**
+ * Walk sheet formulas from seed P&L cells across tabs.
+ * Returns {nodes:[{id,sheet,a1,col,row,formula,value,label,kind}], edges, cellMap}
+ * Leaves (no formula) → input; cells with formulas → formula.
+ */
+async function walkFormulaGraph(seeds, opts){
+  opts=opts||{};
+  const maxNodes=Math.min(200, opts.maxNodes||120);
+  const nodes=new Map(); /* id -> node */
+  const queue=[];
+  (seeds||[]).forEach(s=>{
+    if(!s||!s.a1) return;
+    const id=cellId(s.sheet, s.a1);
+    if(nodes.has(id)) return;
+    const n={id, sheet:s.sheet||'', a1:String(s.a1).toUpperCase(), col:s.col, row:s.row, label:s.label||'', seed:!!s.seed, formula:'', value:null, kind:'pending'};
+    nodes.set(id,n); queue.push(n);
+  });
+  let guard=0;
+  while(queue.length && nodes.size<=maxNodes && guard++<40){
+    const batch=queue.splice(0,40);
+    const ranges=batch.map(n=>quoteSheetRange(n.sheet, n.a1));
+    let data;
+    try{ data=await gasReadRanges(ranges,{includeFormulas:true}); }
+    catch(e){ data=await gasReadRanges(ranges,{includeFormulas:false}); }
+    batch.forEach((n,i)=>{
+      const rng=ranges[i];
+      const val=((data.values&&data.values[rng])||[[]])[0];
+      const fraw=((data.formulas&&data.formulas[rng])||[[]])[0];
+      const formula=String((fraw&&fraw[0])||'').trim();
+      const value=(val&&val[0]!=null&&val[0]!=='')?val[0]:null;
+      n.formula=formula; n.value=value;
+      if(formula && formula.startsWith('=')){
+        n.kind='formula';
+        extractSheetRefs(formula, n.sheet).forEach(ref=>{
+          const id=cellId(ref.sheet, ref.a1);
+          if(nodes.has(id)) return;
+          if(nodes.size>=maxNodes) return;
+          const child={id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, label:'', seed:false, formula:'', value:null, kind:'pending'};
+          nodes.set(id, child); queue.push(child);
+        });
+      } else {
+        n.kind='input';
+      }
+    });
+  }
+  /* Best-effort labels: read A{row} (or label col) on each sheet for node rows */
+  const bySheet={};
+  [...nodes.values()].forEach(n=>{
+    if(!n.row) return;
+    const sh=n.sheet||'';
+    bySheet[sh]=bySheet[sh]||new Set();
+    bySheet[sh].add(n.row);
+  });
+  for(const sh of Object.keys(bySheet)){
+    const rows=[...bySheet[sh]].sort((a,b)=>a-b);
+    if(!rows.length) continue;
+    const labelRanges=rows.map(r=>quoteSheetRange(sh,'A'+r));
+    try{
+      const lab=await gasReadRanges(labelRanges,{includeFormulas:false});
+      rows.forEach((r,i)=>{
+        const rng=labelRanges[i];
+        const txt=String((((lab.values||{})[rng]||[[]])[0]||[])[0]||'').trim();
+        if(!txt) return;
+        [...nodes.values()].filter(n=>(n.sheet||'')===sh && n.row===r).forEach(n=>{ if(!n.label) n.label=txt; });
+      });
+    }catch(e){}
+  }
+  return {nodes:[...nodes.values()], cellMap:{}};
+}
+
+/**
+ * Formula-graph ingest (north star):
+ * Start from P&L/cash lines with formulas → walk to leaves (inputs) and mid formulas.
+ * Day-to-day later only changes inputs; Accept reviews the graph.
+ */
+async function ingestFormulaGraphFromSheet(opts){
+  opts=opts||{};
+  if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
+  const ssid=conn.ssid||'';
+  /* Prefer a P&L-like tab; fall back to auto-detect / first tab */
+  const tabs=(conn.sheets||[]).map(s=>s.name);
+  const pnlName=opts.tab||tabs.find(n=>/p\s*&\s*l|pnl|profit|income|forecast|model/i.test(n))||tabs[0]||'';
+  let F=null, src={ssid, tab:pnlName, labelCol:'A', headerRow:1, firstCol:'B', months:Math.max(12,P()||12)};
+  try{
+    const auto=await autoDetectAndRead({ssid, tab:pnlName});
+    if(auto&&auto.lines.length){ F=auto; src=Object.assign({}, src, auto.detected, {tab:pnlName||auto.detected.tab}); }
+  }catch(e){}
+  if(!F){ F=await readSource(src); }
+  if(!F.lines.length) throw new Error('No P&L lines found — pick the P&L tab and Scan again');
+  const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
+  const firstCol=src.firstCol||'B';
+  const sheetName=src.tab||pnlName||'';
+  /* Seed: every P&L line that has a formula (or all numeric lines for review) */
+  const seeds=[];
+  F.lines.forEach(l=>{
+    if(!l.row) return;
+    const a1=firstCol+l.row;
+    seeds.push({sheet:sheetName, a1, col:firstCol, row:l.row, label:l.name||'', seed:true, formula:l.formula||''});
+  });
+  const walked=await walkFormulaGraph(seeds, {maxNodes:150});
+  /* Ensure seed formulas from scan are attached even if single-cell read missed */
+  const byId=new Map(walked.nodes.map(n=>[n.id,n]));
+  seeds.forEach(s=>{
+    const id=cellId(s.sheet,s.a1);
+    const n=byId.get(id);
+    if(n && !n.formula && s.formula){ n.formula=s.formula; n.kind=s.formula.startsWith('=')?'formula':'input'; }
+    if(n && s.label) n.label=s.label;
+  });
+  /* Assign stable keys */
+  const usedK={};
+  const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+  walked.nodes.forEach(n=>{
+    n.key=uk(n.label||((n.sheet?n.sheet+'_':'')+n.a1));
+  });
+  const cellMap={};
+  walked.nodes.forEach(n=>{
+    const a1=n.a1.toUpperCase();
+    cellMap[a1]=n.key;
+    cellMap[(n.sheet+'!'+a1).toUpperCase()]=n.key;
+  });
+  /* Build vars: inputs + formulas from the graph; keep non-src manual drivers only if not replaced */
+  const graphKeys=new Set(walked.nodes.map(n=>n.key));
+  const keep=model.vars.filter(v=>!(v.srcLine||v.srcGraph||(v.kind==='output'&&v.account!=null)) && !graphKeys.has(v.key));
+  keep.forEach(v=>{ usedK[v.key]=1; });
+  let nIn=0,nForm=0,nSug=0;
+  const newVars=walked.nodes.map(n=>{
+    const range=buildRange(n.sheet||sheetName, n.col||firstCol, n.row, periods.length);
+    const v={
+      key:n.key, name:n.label||(n.sheet+'!'+n.a1), unit:inferUnit(n.label||''),
+      range:range||'', sheetFormula:n.formula||'', srcGraph:true, srcLine:!!n.seed,
+      account:n.seed?(n.label||''):undefined, metric:n.seed?'':(n.sheet||''),
+      group:n.sheet||sheetName, mapStatus:'auto'
+    };
+    if(n.kind==='formula' && n.formula){
+      const parsed=sheetFormulaToExpr(n.formula, cellMap, n.sheet||sheetName);
+      if(parsed.ok){
+        v.kind='formula'; v.expr=parsed.expr; v.mapStatus='auto'; v.classifyConfidence='high'; nForm++;
+      } else {
+        v.kind='formula'; v.expr=''; v.mapStatus='suggested'; v.classifyConfidence='low';
+        v.classifyNote=parsed.reason; v._suggestedExpr=n.formula.replace(/^[=\s]+/,'').trim(); nSug++; nForm++;
+      }
+    } else {
+      v.kind='input'; v.writable=true; v.base=toNum(n.value, conn.scale||1); v.steps=[]; v.delta=0;
+      v.mapStatus='auto'; v.classifyConfidence='high'; nIn++;
+    }
+    demoteConfirmedWithoutRange(v);
+    applyRollupHeuristic(v);
+    return v;
+  });
+  /* Prefer seed P&L order first, then other graph nodes */
+  newVars.sort((a,b)=>(b.srcLine?1:0)-(a.srcLine?1:0));
+  model.vars=keep.concat(newVars);
+  model.periods=periods;
+  model.sources=Object.assign({}, model.sources, {forecast:src, graph:true});
+  model.uiState=model.uiState||{};
+  model.uiState.scanCatalog=newVars.filter(v=>v.range).map(v=>{
+    const rp=parseRange(v.range);
+    return {name:v.name, metric:v.metric||'', row:+rp.row||0, sheet:rp.sheet||'', firstCol:rp.col||firstCol, range:v.range, id:nrm(v.metric||'')+'|'+nrm(v.name||'')};
+  });
+  model.uiState.scanMeta={sheet:sheetName, firstCol, months:periods.length, mode:'formula-graph'};
+  model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[];
+  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length){
+    const sub=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
+    model.displayVars=[(sub||newVars.find(v=>v.srcLine&&v.kind==='formula')||newVars[0]||{}).key].filter(Boolean);
+  }
+  recompileAll(); saveModel();
+  if(!model.uiState.scanCatalog.length) throw new Error('Formula graph produced no mapped cells');
+  return {
+    newLines:newVars.length, keep:keep.length, keepMatched:0,
+    catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
+    name:F.name||sheetName, mode:'formula-graph',
+    proof: (newVars.find(v=>/subscription\s*revenue/i.test(v.name))||{}).key||''
+  };
 }
 function mapStatusOf(v){
   const raw=(v&&v.mapStatus)||'';
@@ -1509,7 +1706,7 @@ function viewSetup(){
   <div class="hero hero-row">
     <div><p class="eyebrow">Model builder</p>
       <h1>Define your model. The tool drives the inputs.</h1>
-      <p>Use <b>Connect &amp; Scan</b> once — we place forecast and actuals for matched lines automatically. Confirm is accept only; typing cells is a last resort. When you plan, the tool changes inputs — never outputs.</p></div>
+      <p>Use <b>Connect &amp; Scan</b> once — we walk P&amp;L formulas across sheets to inputs and formulas. Confirm is accept only. Forecasting then only changes assumptions unless you add a variable and rewrite a sheet formula. When you plan, the tool changes inputs — never outputs.</p></div>
     <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected · Re-scan':'Connect &amp; Scan'}</button>
   </div>
 
@@ -1593,7 +1790,7 @@ function openConfirmClassify(key){
   const hasACat=aCat.length>0;
   showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody confirm-classify">
-      <p class="mut fz12" style="margin:0 0 12px">Accept what Scan found. Pick the matching sheet line if needed — typing cells is a last resort only.</p>
+      <p class="mut fz12" style="margin:0 0 12px">Accept the formula graph Scan built from your P&L. Day-to-day you only change assumption inputs — typing cells is a last resort.</p>
       <div class="cc-row"><span class="cc-k">Line</span><span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span></div>
       <div class="cc-row"><span class="cc-k">Status</span><span class="mapchip ${st}">${mapStatusLabel(st)}</span>${v.classifyConfidence?` · ${esc(v.classifyConfidence)}`:''}</div>
       ${v.sheetFormula?`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="expr">${esc(v.sheetFormula)}</span></div>`:''}
@@ -3748,7 +3945,7 @@ async function doConnect(){
       const tabEl=document.getElementById('cnTab');
       const ing=await ingestFromConnectedSheet({tab:(tabEl&&tabEl.value)||''});
       fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}</div>`;
-      setTimeout(()=>{closeModal();render(); toast('Scan placed '+ing.catalog+' lines — Confirm is accept only');},1100);
+      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas');},1100);
     }catch(scanErr){
       fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
         <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}. Open Connect and use Scan &amp; load lines.</div>`;
@@ -3867,6 +4064,15 @@ function hasScanCatalog(){ return scanCatalog().length>0; }
 async function ingestFromConnectedSheet(opts){
   opts=opts||{};
   if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
+  /* North star: formula-graph ingest from P&L/cash lines (fallback to legacy classify on hard failure) */
+  try{
+    return await ingestFormulaGraphFromSheet(opts);
+  }catch(graphErr){
+    console.warn('formula-graph ingest failed, legacy fallback', graphErr);
+    if(opts.forceLegacy) throw graphErr;
+    /* continue into legacy path below */
+  }
+
   const scale=conn.scale||1;
   const ssid=conn.ssid||'';
   const srcPref=(model.sources&&model.sources.forecast)||{};
