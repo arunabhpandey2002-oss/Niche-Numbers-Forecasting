@@ -796,6 +796,24 @@ function keyFromCell(sheet, a1, label){
  * Returns {nodes:[{id,sheet,a1,col,row,formula,value,label,kind}], edges, cellMap}
  * Leaves (no formula) → input; cells with formulas → formula.
  */
+function lookupGridCell(map, rng){
+  if(!map) return null;
+  if(map[rng]!=null) return map[rng];
+  const norm=s=>String(s||'').replace(/'/g,'').toUpperCase();
+  const want=norm(rng);
+  const hit=Object.keys(map).find(k=>norm(k)===want);
+  return hit!=null?map[hit]:null;
+}
+function enqueueFormulaDeps(n, nodes, queue, maxNodes){
+  if(!n||!n.formula||!String(n.formula).startsWith('=')) return;
+  extractSheetRefs(n.formula, n.sheet).forEach(ref=>{
+    const id=cellId(ref.sheet, ref.a1);
+    if(nodes.has(id)) return;
+    if(nodes.size>=maxNodes) return;
+    const child={id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, label:'', seed:false, formula:'', value:null, kind:'pending'};
+    nodes.set(id, child); queue.push(child);
+  });
+}
 async function walkFormulaGraph(seeds, opts){
   opts=opts||{};
   const maxNodes=Math.min(200, opts.maxNodes||120);
@@ -805,38 +823,41 @@ async function walkFormulaGraph(seeds, opts){
     if(!s||!s.a1) return;
     const id=cellId(s.sheet, s.a1);
     if(nodes.has(id)) return;
-    const n={id, sheet:s.sheet||'', a1:String(s.a1).toUpperCase(), col:s.col, row:s.row, label:s.label||'', seed:!!s.seed, formula:'', value:null, kind:'pending'};
+    const known=String(s.formula||'').trim();
+    const n={id, sheet:s.sheet||'', a1:String(s.a1).toUpperCase(), col:s.col, row:s.row, label:s.label||'', seed:!!s.seed, formula:known, value:null, kind:known.startsWith('=')?'formula':'pending'};
     nodes.set(id,n); queue.push(n);
+    /* Expand seed formulas immediately so Pricing/Assumptions enter the queue even if cell formula read fails later */
+    if(n.kind==='formula') enqueueFormulaDeps(n, nodes, queue, maxNodes);
   });
   let guard=0;
-  while(queue.length && nodes.size<=maxNodes && guard++<40){
+  while(queue.length && nodes.size<=maxNodes && guard++<60){
     const batch=queue.splice(0,40);
     const ranges=batch.map(n=>quoteSheetRange(n.sheet, n.a1));
-    let data;
+    let data={values:{}, formulas:{}};
     try{ data=await gasReadRanges(ranges,{includeFormulas:true}); }
-    catch(e){ data=await gasReadRanges(ranges,{includeFormulas:false}); }
+    catch(e){
+      try{ data=await gasReadRanges(ranges,{includeFormulas:false}); }
+      catch(e2){ data={values:{}, formulas:{}}; }
+    }
     batch.forEach((n,i)=>{
       const rng=ranges[i];
-      const val=((data.values&&data.values[rng])||[[]])[0];
-      const fraw=((data.formulas&&data.formulas[rng])||[[]])[0];
-      const formula=String((fraw&&fraw[0])||'').trim();
-      const value=(val&&val[0]!=null&&val[0]!=='')?val[0]:null;
-      n.formula=formula; n.value=value;
-      if(formula && formula.startsWith('=')){
+      const valRow=lookupGridCell(data.values, rng);
+      const fRow=lookupGridCell(data.formulas, rng);
+      const readFormula=String((fRow&&fRow[0])||'').trim();
+      const value=(valRow&&valRow[0]!=null&&valRow[0]!=='')?valRow[0]:null;
+      if(value!=null) n.value=value;
+      /* Prefer live formula read; keep seed/known formula if read is empty */
+      if(readFormula){ n.formula=readFormula; }
+      if(n.formula && String(n.formula).startsWith('=')){
         n.kind='formula';
-        extractSheetRefs(formula, n.sheet).forEach(ref=>{
-          const id=cellId(ref.sheet, ref.a1);
-          if(nodes.has(id)) return;
-          if(nodes.size>=maxNodes) return;
-          const child={id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, label:'', seed:false, formula:'', value:null, kind:'pending'};
-          nodes.set(id, child); queue.push(child);
-        });
+        enqueueFormulaDeps(n, nodes, queue, maxNodes);
       } else {
         n.kind='input';
+        if(!n.formula) n.formula='';
       }
     });
   }
-  /* Best-effort labels: read A{row} (or label col) on each sheet for node rows */
+  /* Best-effort labels: read A{row} on each sheet for node rows */
   const bySheet={};
   [...nodes.values()].forEach(n=>{
     if(!n.row) return;
@@ -852,7 +873,8 @@ async function walkFormulaGraph(seeds, opts){
       const lab=await gasReadRanges(labelRanges,{includeFormulas:false});
       rows.forEach((r,i)=>{
         const rng=labelRanges[i];
-        const txt=String((((lab.values||{})[rng]||[[]])[0]||[])[0]||'').trim();
+        const row=lookupGridCell(lab.values, rng);
+        const txt=String((row&&row[0])||'').trim();
         if(!txt) return;
         [...nodes.values()].filter(n=>(n.sheet||'')===sh && n.row===r).forEach(n=>{ if(!n.label) n.label=txt; });
       });
@@ -872,7 +894,7 @@ async function ingestFormulaGraphFromSheet(opts){
   const ssid=conn.ssid||'';
   /* Prefer a P&L-like tab; fall back to auto-detect / first tab */
   const tabs=(conn.sheets||[]).map(s=>s.name);
-  const pnlName=opts.tab||tabs.find(n=>/p\s*&\s*l|pnl|profit|income|forecast|model/i.test(n))||tabs[0]||'';
+  const pnlName=opts.tab||tabs.find(n=>/^p\s*&\s*l$/i.test(String(n).trim()))||tabs.find(n=>/p\s*&\s*l|\bpnl\b|profit|income/i.test(n))||tabs[0]||'';
   let F=null, src={ssid, tab:pnlName, labelCol:'A', headerRow:1, firstCol:'B', months:Math.max(12,P()||12)};
   try{
     const auto=await autoDetectAndRead({ssid, tab:pnlName});
@@ -891,14 +913,24 @@ async function ingestFormulaGraphFromSheet(opts){
     seeds.push({sheet:sheetName, a1, col:firstCol, row:l.row, label:l.name||'', seed:true, formula:l.formula||''});
   });
   const walked=await walkFormulaGraph(seeds, {maxNodes:150});
-  /* Ensure seed formulas from scan are attached even if single-cell read missed */
   const byId=new Map(walked.nodes.map(n=>[n.id,n]));
   seeds.forEach(s=>{
     const id=cellId(s.sheet,s.a1);
     const n=byId.get(id);
-    if(n && !n.formula && s.formula){ n.formula=s.formula; n.kind=s.formula.startsWith('=')?'formula':'input'; }
-    if(n && s.label) n.label=s.label;
+    if(!n) return;
+    if(s.label) n.label=s.label;
+    if(s.formula && String(s.formula).startsWith('=') && (!n.formula || !String(n.formula).startsWith('='))){
+      n.formula=s.formula; n.kind='formula';
+    }
   });
+  /* Second pass: ensure every formula node's deps exist as graph nodes (Pricing/Assumptions). */
+  const nodeMap=new Map(walked.nodes.map(n=>[n.id,n]));
+  const more=[];
+  walked.nodes.forEach(n=>{ if(n.kind==='formula' && n.formula) enqueueFormulaDeps(n, nodeMap, more, 150); });
+  if(more.length){
+    const moreWalk=await walkFormulaGraph(more.map(n=>({sheet:n.sheet,a1:n.a1,col:n.col,row:n.row,label:n.label||'',formula:'',seed:false})), {maxNodes:150});
+    moreWalk.nodes.forEach(n=>{ if(!nodeMap.has(n.id)){ nodeMap.set(n.id,n); walked.nodes.push(n); } });
+  }
   /* Assign stable keys */
   const usedK={};
   const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
@@ -962,7 +994,9 @@ async function ingestFormulaGraphFromSheet(opts){
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
     name:F.name||sheetName, mode:'formula-graph',
-    proof: (newVars.find(v=>/subscription\s*revenue/i.test(v.name))||{}).key||''
+    proof: (newVars.find(v=>/subscription\s*revenue/i.test(v.name))||{}).key||'',
+    proofKind: (newVars.find(v=>/subscription\s*revenue/i.test(v.name))||{}).kind||'',
+    proofDeps: (function(){ const p=newVars.find(v=>/subscription\s*revenue/i.test(v.name)); if(!p||!p.expr) return 0; try{ return (compile(p.expr).deps||[]).length; }catch(e){ return 0; } })()
   };
 }
 function mapStatusOf(v){
@@ -2150,6 +2184,8 @@ function varModal(idx){
         <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Insert:</span>${chips||'<span class="mut fz11">add other variables first</span>'}${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}</div>
         <div class="tokbar"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Helpers:</span><button type="button" class="tok op" title="lag(var,n)" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" title="if(cond,a,b)" onclick="insFn('if')">if(</button><button type="button" class="tok op" title="sum_periods(var)" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" title="pct(a,b)" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
         <p class="mut fz11" style="margin:6px 0 0"><code>lag(var,n)</code> = value n periods ago (0 if out of range) · <code>if(cond,a,b)</code> = a if cond≠0 else b · <code>sum_periods(var)</code> = running sum from period 0 through current · <code>pct(a,b)</code> = a/b×100. Alias: <code>sum(var)</code>.</p>
+        ${v.sheetFormula?`<p class="mut fz11" style="margin:8px 0 0">Sheet formula: <span class="expr">${esc(v.sheetFormula)}</span></p>`:''}
+        ${(()=>{ if(v.kind!=='formula'||!v.expr) return ''; try{ const d=compile(v.expr).deps||[]; if(!d.length) return ''; return '<p class="eyebrow" style="margin:10px 0 6px">Depends on (formula graph)</p><div class="tokbar">'+d.map(k=>{ const dep=vget(k); return '<span class="tok" title="'+(dep?esc(dep.name):k)+'">'+esc(k)+'</span>'; }).join('')+'</div>'; }catch(e){ return ''; } })()}
       </div>
       <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
         <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
@@ -3945,7 +3981,7 @@ async function doConnect(){
       const tabEl=document.getElementById('cnTab');
       const ing=await ingestFromConnectedSheet({tab:(tabEl&&tabEl.value)||''});
       fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}</div>`;
-      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas');},1100);
+      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:''));},1100);
     }catch(scanErr){
       fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
         <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}. Open Connect and use Scan &amp; load lines.</div>`;
