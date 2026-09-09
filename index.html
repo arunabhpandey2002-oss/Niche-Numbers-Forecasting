@@ -316,6 +316,19 @@
   textarea.inp{height:auto;min-height:40px;padding:9px 11px;line-height:1.5;font-family:var(--mono);font-size:12px}
   .hintbox{background:#f5f7ff;border:1px solid #dbe0fa;border-radius:9px;padding:10px 12px;font-size:11px;color:#3a4763;line-height:1.5}
   .scanbox{margin:10px 0 4px;padding:12px 14px;border:1px dashed var(--indigo-border);border-radius:11px;background:#fafbff}
+
+  .connect-m .conn-step{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid var(--line-2)}
+  .connect-m .conn-step:last-of-type{border-bottom:0;padding-bottom:0}
+  .connect-m .conn-label{font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);margin:0 0 10px}
+  .connect-m .conn-adv{margin:4px 0 8px;border:1px solid var(--line-2);border-radius:10px;background:#fafbff}
+  .connect-m .conn-adv>summary{cursor:pointer;list-style:none;padding:10px 12px;font-size:12px;font-weight:600;color:var(--ink-2)}
+  .connect-m .conn-adv>summary::-webkit-details-marker{display:none}
+  .connect-m .conn-adv>summary::after{content:"▸";float:right;opacity:.55}
+  .connect-m .conn-adv[open]>summary::after{content:"▾"}
+  .connect-m .conn-adv-body{padding:0 12px 12px}
+  .connect-m .conn-actions{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:16px}
+  .connect-m .conn-err{background:#fff0f1;color:#a33d4d;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.45}
+
   .hintbox code{font-family:var(--mono);background:#e6eaff;padding:1px 5px;border-radius:4px}
   .tokbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
   .tok{border:1px solid var(--line);background:#f5f6fa;border-radius:7px;padding:4px 9px;font-family:var(--mono);font-size:11px;cursor:pointer;color:#3a4763}
@@ -2605,36 +2618,73 @@ async function confirmWriteback(){
 }
 
 /* ============================ CONNECT ============================ */
+
+function classifyConnectError(err, kind){
+  const raw=String((err&&err.message)||err||'').trim();
+  const m=raw.toLowerCase();
+  const where=kind==='actuals'?'actuals sheet':(kind==='model'?'model sheet':'Apps Script');
+  if(!raw) return `Couldn’t reach the ${where}. Check the URL and try again.`;
+  if(/invalid|malformed|url/.test(m) && /script|http|exec/.test(m)) return 'That Apps Script URL doesn’t look right. Paste the full /exec web app URL.';
+  if(/401|403|unauthor|forbidden|token|permission|access denied|not allowed/.test(m)) return 'Bad token or no permission. Re-check the secret token and that the script can open this Google Sheet.';
+  if(/404|not found|missing|no spreadsheet|unable to open|does not exist/.test(m)) return `Sheet not found or unreachable (${where}). Check the URL/ID and sharing with the script’s Google account.`;
+  if(/network|failed to fetch|load failed|cors|timeout|unreachable/.test(m)) return `Couldn’t reach Google (${where}). Check the Apps Script deployment (Anyone access) and your network, then retry.`;
+  if(/actuals/.test(kind||'') || kind==='actuals') return `Actuals sheet failed: ${raw}. Nothing was connected — fix actuals or clear that field.`;
+  return `Couldn’t connect: ${raw}`;
+}
+function failClosedDisconnect(keepPrefs){
+  /* Never leave a half-connected session. Optionally keep remembered URLs (no token). */
+  const url=(keepPrefs&&conn.url)||'', ssid=(keepPrefs&&conn.ssid)||'', scale=(keepPrefs&&conn.scale)||1;
+  const act=(keepPrefs&&conn.actualsSsid)||'';
+  conn={connected:false,url,token:'',scale,ssid,sheets:[],actualsSsid:act,actualsSheets:[]};
+  saveConn(); setStatus(url?'Saved URL — reconnect anytime':'No sheet connected', false);
+}
+
 function openConnect(){
   const mappedInputs=inputs().filter(v=>v.range).length, mappedOut=outputs().filter(v=>v.range).length;
-  const s0=(model.sources&&model.sources.forecast)||{};   // reuse last import layout as defaults
-  showModal(`<div class="mhead"><h3>Connect your Google Sheet</h3><button class="x" onclick="closeModal()">×</button></div>
-    <div class="mbody">
-      <p class="mut fz12" style="margin:0 0 12px">Free Google Apps Script backend — no paid tools. Ranges come from the cells you mapped on each variable in Model setup (${mappedInputs} input, ${mappedOut} output mapped).${conn.url&&!conn.connected?' <b>Your Apps Script URL is remembered</b> — re-enter the token and hit Test &amp; connect.':''}</p>
-      <div class="frow"><div class="field"><label>Web app URL (/exec)</label><input class="inp" id="cnUrl" value="${esc(conn.url)}" placeholder="https://script.google.com/macros/s/…/exec" style="font-family:var(--mono);font-size:12px"></div></div>
-      <div class="frow"><div class="field"><label>Model sheet URL or ID <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">— the sheet this whole model reads &amp; writes</span></label><input class="inp" id="cnSheet" value="${esc(conn.ssid?('https://docs.google.com/spreadsheets/d/'+conn.ssid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…  (leave blank to use the script's own sheet)" style="font-family:var(--mono);font-size:11px"></div></div>
-      <div class="scanbox">
-        <p class="eyebrow" style="margin:0 0 4px">Load this sheet's lines into the model</p>
-        <p class="mut fz11" style="margin:0 0 8px">Reads the sheet's P&amp;L layout and <b>replaces</b> the current line list with what's in this sheet. Do this whenever you point at a new sheet.</p>
-        <div class="frow" style="grid-template-columns:1.4fr 1fr .8fr 1fr .8fr;gap:8px;margin-bottom:8px">
-          <div class="field"><label>Tab</label><input class="inp" id="cnTab" value="${esc(s0.tab||'')}" placeholder="(first)"></div>
-          <div class="field"><label>Label col</label><input class="inp" id="cnLabel" value="${esc(s0.labelCol||'A')}" style="text-transform:uppercase"></div>
-          <div class="field"><label>Hdr row</label><input class="inp" id="cnHeader" type="number" value="${s0.headerRow||1}"></div>
-          <div class="field"><label>1st month col</label><input class="inp" id="cnFirst" value="${esc(s0.firstCol||'B')}" style="text-transform:uppercase"></div>
-          <div class="field"><label># months</label><input class="inp" id="cnMonths" type="number" value="${s0.months||12}"></div>
-        </div>
-        <button class="btn indigo sm" onclick="scanModelSheet()">Scan &amp; load lines from this sheet</button>
-        <div id="cnScanFeedback" style="margin-top:8px"></div>
+  const s0=(model.sources&&model.sources.forecast)||{};
+  const reconnect=!!(conn.url&&!conn.connected);
+  showModal(`<div class="mhead"><h3>Connect sheets</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody connect-m">
+      ${reconnect?`<p class="mut fz12" style="margin:0 0 14px">Script URL saved — enter your token and connect again.</p>`:''}
+
+      <div class="conn-step">
+        <p class="conn-label">1 · Model sheet</p>
+        <div class="field"><label>Apps Script URL</label><input class="inp" id="cnUrl" value="${esc(conn.url)}" placeholder="https://script.google.com/macros/s/…/exec" style="font-family:var(--mono);font-size:12px"></div>
+        <div class="field" style="margin-top:10px"><label>Google Sheet URL or ID</label><input class="inp" id="cnSheet" value="${esc(conn.ssid?('https://docs.google.com/spreadsheets/d/'+conn.ssid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…" style="font-family:var(--mono);font-size:12px"></div>
+        <div class="field" style="margin-top:10px"><label>Secret token</label><input class="inp" id="cnToken" value="${esc(conn.token)}" placeholder="${reconnect?'Re-enter token':''}" autocomplete="off"></div>
       </div>
-      <div class="frow two"><div class="field"><label>Secret token</label><input class="inp" id="cnToken" value="${esc(conn.token)}" placeholder="${conn.url&&!conn.token?'Re-enter token to reconnect':''}" autocomplete="off"></div>
-        <div class="field"><label>Unit scale</label><input class="inp" id="cnScale" type="number" step="any" value="${conn.scale}"></div></div>
-      <div class="hintbox">Set <b>Unit scale</b> to <code>0.00001</code> if your sheet is in rupees and you want lakhs, else leave <code>1</code>. Reads every mapped range; write-back only touches mapped <b>input</b> cells.</div>
-      <p class="eyebrow" style="margin:16px 0 6px">Actuals source <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional — a different Google Sheet with your real results)</span></p>
-      <div class="frow"><div class="field"><label>Actuals sheet URL or ID</label><input class="inp" id="cnActuals" value="${esc(conn.actualsSsid?('https://docs.google.com/spreadsheets/d/'+conn.actualsSsid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…  (leave blank to skip)" style="font-family:var(--mono);font-size:11px"></div></div>
-      <div class="hintbox">Your projections stay in the sheet above; your <b>actuals</b> can live in this separate file. Map each line's actuals cell in Model setup, then hit <b>Refresh actuals</b> in the Variance tab. Needs the redeployed Code.gs, and the same Google account must own both sheets.</div>
+
+      <div class="conn-step">
+        <p class="conn-label">2 · Actuals <span class="mut" style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></p>
+        <div class="field"><label>Actuals sheet URL or ID</label><input class="inp" id="cnActuals" value="${esc(conn.actualsSsid?('https://docs.google.com/spreadsheets/d/'+conn.actualsSsid):'')}" placeholder="Leave blank to skip" style="font-family:var(--mono);font-size:12px"></div>
+      </div>
+
+      <details class="conn-adv">
+        <summary>Advanced</summary>
+        <div class="conn-adv-body">
+          <div class="frow two" style="margin-top:10px">
+            <div class="field"><label>Unit scale</label><input class="inp" id="cnScale" type="number" step="any" value="${conn.scale}" title="e.g. 0.00001 for ₹ → lakhs"></div>
+            <div class="field"><label class="mut" style="text-transform:none;font-weight:400">Mapped so far</label><div class="mut fz12" style="padding-top:8px">${mappedInputs} inputs · ${mappedOut} outputs</div></div>
+          </div>
+          <p class="conn-label" style="margin-top:14px">Load lines from sheet</p>
+          <p class="mut fz11" style="margin:0 0 8px">Replaces the current line list with this sheet’s P&amp;L layout.</p>
+          <div class="frow" style="grid-template-columns:1.4fr 1fr .8fr 1fr .8fr;gap:8px;margin-bottom:8px">
+            <div class="field"><label>Tab</label><input class="inp" id="cnTab" value="${esc(s0.tab||'')}" placeholder="(first)"></div>
+            <div class="field"><label>Label col</label><input class="inp" id="cnLabel" value="${esc(s0.labelCol||'A')}" style="text-transform:uppercase"></div>
+            <div class="field"><label>Hdr row</label><input class="inp" id="cnHeader" type="number" value="${s0.headerRow||1}"></div>
+            <div class="field"><label>1st month</label><input class="inp" id="cnFirst" value="${esc(s0.firstCol||'B')}" style="text-transform:uppercase"></div>
+            <div class="field"><label># months</label><input class="inp" id="cnMonths" type="number" value="${s0.months||12}"></div>
+          </div>
+          <button class="btn indigo sm" onclick="scanModelSheet()">Scan &amp; load lines</button>
+          <div id="cnScanFeedback" style="margin-top:8px"></div>
+        </div>
+      </details>
+
       <div id="cnFeedback" style="margin-top:12px"></div>
-      <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px"><div>${conn.connected?'<button class="btn" onclick="disconnectModel()">Disconnect</button>':''}</div>
-        <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Test &amp; connect</button></div></div>
+      <div class="conn-actions">
+        <div>${conn.connected?'<button class="btn" onclick="disconnectModel()">Disconnect</button>':''}</div>
+        <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Connect</button></div>
+      </div>
     </div>`);
 }
 function toNum(x,s){ if(typeof x==='number')return x*s; const n=parseFloat(String(x).replace(/[^0-9.\-]/g,'')); return (isNaN(n)?0:n)*s; }
@@ -2646,7 +2696,9 @@ async function scanModelSheet(){
   const ssid=extractSsid(g('cnSheet').value.trim());
   if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter the Web app URL and token first.</div>`; return; }
   // make sure the connection is set so readSource + later reads/writes hit this sheet
-  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; conn.connected=true;
+  /* Validate with ephemeral creds — only mark connected after a successful scan. */
+  const prevConn=Object.assign({},conn);
+  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; /* not connected yet */
   const manual={ ssid, tab:g('cnTab').value.trim(), labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
     headerRow:Math.max(1,parseInt(g('cnHeader').value)||1), firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
     months:Math.max(1,parseInt(g('cnMonths').value)||12) };
@@ -2709,30 +2761,60 @@ async function scanModelSheet(){
     const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''} auto-mapped`:'';
     const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${formNote}.`:` Loaded ${newLines.length} line(s)${formNote}.`;
     fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
+    conn.connected=true; saveConn();
     setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newLines.length} lines; kept ${keep.length} drivers${formNote}`:`Loaded ${newLines.length} lines${formNote}`); },1100);
-  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Scan failed: ${err.message||err}</div>`; }
+  }catch(err){ Object.assign(conn,prevConn,{connected:false,token:prevConn.token||'',sheets:prevConn.sheets||[]}); if(!prevConn.connected){ conn.token=''; } saveConn(); setStatus(prevConn.connected?(prevConn.ssid||'Connected'):'Not connected', !!prevConn.connected); fb.innerHTML=`<div class="conn-err">${classifyConnectError(err,'model')} Scan didn’t change your model.</div>`; }
 }
 async function doConnect(){
-  const url=document.getElementById('cnUrl').value.trim(), token=document.getElementById('cnToken').value.trim(), scale=parseFloat(document.getElementById('cnScale').value)||1;
-  const ssid=extractSsid(document.getElementById('cnSheet').value.trim());       // the sheet the whole model reads & writes
-  const sq = ssid?`&ssid=${encodeURIComponent(ssid)}`:'';                          // blank → the script's bound sheet
-  const actualsSsid=extractSsid(document.getElementById('cnActuals').value.trim());
+  const url=document.getElementById('cnUrl').value.trim();
+  const token=document.getElementById('cnToken').value.trim();
+  const scale=parseFloat(document.getElementById('cnScale').value)||1;
+  const sheetRaw=(document.getElementById('cnSheet').value||'').trim();
+  const actualsRaw=(document.getElementById('cnActuals').value||'').trim();
+  const ssid=extractSsid(sheetRaw);
+  const actualsSsid=extractSsid(actualsRaw);
+  const sq = ssid?`&ssid=${encodeURIComponent(ssid)}`:'';
   const fb=document.getElementById('cnFeedback');
-  if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter URL and token.</div>`; return; }
-  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Connecting…</div>`;
+  const showErr=msg=>{ fb.innerHTML=`<div class="conn-err">${msg}</div>`; };
+
+  if(!url||!token){ showErr('Enter the Apps Script URL and secret token.'); return; }
+  if(!/script\.google\.com\/macros\/s\//.test(url)){
+    showErr('That Apps Script URL doesn’t look right. Paste the full web app URL ending in /exec.'); return;
+  }
+  if(sheetRaw && !ssid){ showErr('Model sheet URL/ID isn’t valid. Paste a spreadsheets link or the sheet ID.'); return; }
+  if(actualsRaw && !actualsSsid){ showErr('Actuals sheet URL/ID isn’t valid. Fix it or clear the field to skip actuals.'); return; }
+
+  const prev=Object.assign({}, conn);
+  /* Fail closed while validating — no half-connected session. */
+  conn={connected:false,url,token:'',scale,ssid:ssid||'',sheets:[],actualsSsid:'',actualsSheets:[]};
+  saveConn(); setStatus('Validating…', false);
+
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Validating connection…</div>`;
+  let errKind='script';
   try{
-    // 1) list the sheet's tabs (needs the updated Code.gs; degrades gracefully)
     let sheets=[], sheetName="";
-    try{ const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}${sq}`,{redirect:'follow'}).then(r=>r.json()); if(l&&l.ok){ sheets=l.sheets||[]; sheetName=l.spreadsheet||""; } }catch(e){}
-    // 2) read any already-mapped ranges (fine if there are none yet)
+    let listOk=false;
+    try{
+      const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}${sq}`,{redirect:'follow'}).then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      if(l&&l.ok){ sheets=l.sheets||[]; sheetName=l.spreadsheet||""; listOk=true; }
+      else if(l&&l.error){ errKind='model'; throw new Error(l.error); }
+    }catch(e){
+      if(/401|403|token|forbidden|unauthor|HTTP 401|HTTP 403/i.test(String(e&&e.message||e))){ errKind='script'; throw e; }
+      /* older Code.gs may lack list — continue to read probe */
+    }
+
     const mapped=model.vars.filter(v=>v.range);
     let maxN=0;
     if(mapped.length){
+      errKind='model';
       const ranges=[...new Set(mapped.map(v=>v.range))];
       let data;
       try{ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:true}); }
       catch(e){ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:false}); }
-      if(!data.ok) throw new Error(data.error||'read failed');
+      if(!data||!data.ok) throw new Error((data&&data.error)||'Model sheet read failed');
       sheetName=sheetName||data.spreadsheet||"";
       mapped.forEach(v=>{
         const raw=(data.values[v.range]&&data.values[v.range][0])||[];
@@ -2747,19 +2829,43 @@ async function doConnect(){
         maxN=Math.max(maxN,N);
       });
       if(maxN>0 && maxN!==P()){ model.periods=genMonths(maxN,startMonthIdx(),startYear()); }
-    } else {
-      // verify token/access even with nothing mapped yet
-      if(!sheets.length){ const t=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=`,{redirect:'follow'}).then(r=>r.json()); if(!t.ok) throw new Error(t.error||'connection failed'); sheetName=sheetName||t.spreadsheet||""; }
+    } else if(!listOk){
+      errKind='model';
+      const t=await fetch(`${url}?action=read&token=${encodeURIComponent(token)}${sq}&ranges=`,{redirect:'follow'}).then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      if(!t||!t.ok) throw new Error((t&&t.error)||'connection failed');
+      sheetName=sheetName||t.spreadsheet||"";
     }
-    // actuals source: list its tabs so mapping gets a dropdown
-    let actualsSheets=[], actualsName="";
-    if(actualsSsid){ try{ const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}&ssid=${encodeURIComponent(actualsSsid)}`,{redirect:'follow'}).then(r=>r.json()); if(l&&l.ok){ actualsSheets=l.sheets||[]; actualsName=l.spreadsheet||""; } }catch(e){} }
-    conn={connected:true,url,token,scale,ssid,sheets,actualsSsid,actualsSheets}; saveConn(); setStatus(sheetName||'Connected',true);
-    const tabsMsg = sheets.length?` Found ${sheets.length} tab(s) — now pick them from the dropdown when mapping variables.`:` (Tip: redeploy the updated Code.gs to get a tab dropdown.)`;
-    const actMsg = actualsSsid?` Actuals source ${actualsName?`“${actualsName}”`:'linked'} — map each line's actuals cell in Model setup, then Refresh actuals in Variance.`:'';
-    fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”.${mapped.length?` Read ${mapped.length} mapped variable(s).`:' Nothing mapped yet — add variables and map their cells.'}${tabsMsg}${actMsg}</div>`;
-    setTimeout(()=>{closeModal();render();},1600);
-  }catch(err){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Couldn’t connect: ${err.message||err}. Check URL/token and that access is “Anyone”.</div>`; }
+
+    if(actualsRaw){
+      errKind='actuals';
+      const l=await fetch(`${url}?action=list&token=${encodeURIComponent(token)}&ssid=${encodeURIComponent(actualsSsid)}`,{redirect:'follow'}).then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      if(!(l&&l.ok)) throw new Error((l&&l.error)||'Actuals sheet could not be opened');
+      var actualsSheets=l.sheets||[];
+      var actualsName=l.spreadsheet||"";
+    } else {
+      var actualsSheets=[];
+      var actualsName="";
+    }
+
+    conn={connected:true,url,token,scale,ssid,sheets,actualsSsid:actualsRaw?actualsSsid:'',actualsSheets};
+    saveConn(); setStatus(sheetName||'Connected',true);
+    const tabsMsg = sheets.length?` · ${sheets.length} tab(s)`:'';
+    const actMsg = actualsRaw?` · Actuals “${actualsName||'linked'}”`:'';
+    const mapMsg = mapped.length?` · ${mapped.length} mapped line(s)`:'';
+    fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>`;
+    setTimeout(()=>{closeModal();render();},1200);
+  }catch(err){
+    /* Roll back fully — never bind empty actuals or a half session */
+    conn={connected:false,url,token:'',scale,ssid:ssid||'',sheets:[],actualsSsid:'',actualsSheets:[]};
+    saveConn(); setStatus('Not connected', false); render();
+    showErr(classifyConnectError(err, errKind));
+  }
 }
 async function refreshActuals(){
   if(!conn.connected||!conn.actualsSsid){ toast('Add an actuals source first: Connect sheet → Actuals source.'); return; }
