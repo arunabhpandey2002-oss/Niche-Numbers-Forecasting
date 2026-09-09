@@ -814,6 +814,27 @@ function enqueueFormulaDeps(n, nodes, queue, maxNodes){
     nodes.set(id, child); queue.push(child);
   });
 }
+async function hydrateSeedFormulas(seeds){
+  const list=(seeds||[]).filter(s=>s&&s.a1);
+  if(!list.length) return seeds;
+  const ranges=list.map(s=>quoteSheetRange(s.sheet, s.a1));
+  let data=null;
+  try{ data=await gasReadRanges(ranges,{includeFormulas:true}); }
+  catch(e){ data=null; }
+  if(!data||!data.formulas){
+    return {seeds, formulasAvailable:false, hydrated:0};
+  }
+  let hydrated=0;
+  list.forEach((s,i)=>{
+    const rng=ranges[i];
+    const row=lookupGridCell(data.formulas, rng) || (data.formulas[rng]);
+    const f=String((row&&row[0])||'').trim();
+    if(f && f.startsWith('=')){ s.formula=f; hydrated++; }
+    const vrow=lookupGridCell(data.values, rng) || ((data.values||{})[rng]);
+    if(vrow&&vrow[0]!=null&&vrow[0]!=='') s.value=vrow[0];
+  });
+  return {seeds:list, formulasAvailable:hydrated>0 || !!data.formulas, hydrated};
+}
 async function walkFormulaGraph(seeds, opts){
   opts=opts||{};
   const maxNodes=Math.min(200, opts.maxNodes||120);
@@ -910,8 +931,14 @@ async function ingestFormulaGraphFromSheet(opts){
   F.lines.forEach(l=>{
     if(!l.row) return;
     const a1=firstCol+l.row;
-    seeds.push({sheet:sheetName, a1, col:firstCol, row:l.row, label:l.name||'', seed:true, formula:l.formula||''});
+    seeds.push({sheet:sheetName, a1, col:firstCol, row:l.row, label:l.name||'', seed:true, formula:l.formula||'', value:null});
   });
+  /* Always re-read seed cell formulas — scan grid can miss getFormulas; without this P&L lines become false inputs */
+  const hyd=await hydrateSeedFormulas(seeds);
+  const nSeedForm=seeds.filter(s=>String(s.formula||'').startsWith('=')).length;
+  if(!nSeedForm){
+    throw new Error('No formulas returned for P&L lines (got values only). Redeploy Apps Script Code.gs with includeFormulas, then Connect & Scan again — do not Accept inputs that should be formulas.');
+  }
   const walked=await walkFormulaGraph(seeds, {maxNodes:150});
   const byId=new Map(walked.nodes.map(n=>[n.id,n]));
   seeds.forEach(s=>{
@@ -945,7 +972,15 @@ async function ingestFormulaGraphFromSheet(opts){
   });
   /* Build vars: inputs + formulas from the graph; keep non-src manual drivers only if not replaced */
   const graphKeys=new Set(walked.nodes.map(n=>n.key));
-  const keep=model.vars.filter(v=>!(v.srcLine||v.srcGraph||(v.kind==='output'&&v.account!=null)) && !graphKeys.has(v.key));
+  const seedNames=new Set(seeds.map(s=>nrm(s.label||'')));
+  /* Drop stale localStorage graph/P&L lines so an old Input subscription_revenue cannot survive a re-scan */
+  const keep=model.vars.filter(v=>{
+    if(v.srcLine||v.srcGraph) return false;
+    if(v.kind==='output'&&v.account!=null) return false;
+    if(graphKeys.has(v.key)) return false;
+    if(seedNames.has(nrm(v.name||''))||seedNames.has(nrm(v.account||''))) return false;
+    return true;
+  });
   keep.forEach(v=>{ usedK[v.key]=1; });
   let nIn=0,nForm=0,nSug=0;
   const newVars=walked.nodes.map(n=>{
@@ -990,13 +1025,22 @@ async function ingestFormulaGraphFromSheet(opts){
   }
   recompileAll(); saveModel();
   if(!model.uiState.scanCatalog.length) throw new Error('Formula graph produced no mapped cells');
+  const proofVar=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
+  let proofDeps=0;
+  if(proofVar&&proofVar.expr){ try{ proofDeps=(compile(proofVar.expr).deps||[]).length; }catch(e){ proofDeps=0; } }
+  if(proofVar && proofVar.kind!=='formula'){
+    throw new Error('Proof failed: Subscription revenue landed as '+proofVar.kind+' without a sheet formula. Feeders were not walked — check Apps Script includeFormulas and re-scan.');
+  }
+  if(proofVar && proofVar.kind==='formula' && proofDeps<1){
+    throw new Error('Proof failed: Subscription revenue is a formula but has 0 deps — Pricing/Assumptions were not materialized.');
+  }
   return {
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
     name:F.name||sheetName, mode:'formula-graph',
-    proof: (newVars.find(v=>/subscription\s*revenue/i.test(v.name))||{}).key||'',
-    proofKind: (newVars.find(v=>/subscription\s*revenue/i.test(v.name))||{}).kind||'',
-    proofDeps: (function(){ const p=newVars.find(v=>/subscription\s*revenue/i.test(v.name)); if(!p||!p.expr) return 0; try{ return (compile(p.expr).deps||[]).length; }catch(e){ return 0; } })()
+    proof: proofVar?proofVar.key:'',
+    proofKind: proofVar?proofVar.kind:'',
+    proofDeps
   };
 }
 function mapStatusOf(v){
@@ -1740,7 +1784,7 @@ function viewSetup(){
   <div class="hero hero-row">
     <div><p class="eyebrow">Model builder</p>
       <h1>Define your model. The tool drives the inputs.</h1>
-      <p>Use <b>Connect &amp; Scan</b> once — we walk P&amp;L formulas across sheets to inputs and formulas. Confirm is accept only. Forecasting then only changes assumptions unless you add a variable and rewrite a sheet formula. When you plan, the tool changes inputs — never outputs.</p></div>
+      <p>Use <b>Connect &amp; Scan</b> (Clear all first if an old scan left false Inputs). We walk P&amp;L formulas into Pricing/Assumptions. Subscription revenue must land as a formula with feeders — not a plain input. When you plan, the tool changes inputs — never outputs.</p></div>
     <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected · Re-scan':'Connect &amp; Scan'}</button>
   </div>
 
