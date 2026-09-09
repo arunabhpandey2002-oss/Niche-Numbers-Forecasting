@@ -1001,6 +1001,7 @@ function fmtPct(v){ return (v>=0?"+":"")+v.toFixed(1)+"%"; }
 
 /* ============================ PRICING (v1 foundation) ============================ */
 /* Math lock (CFO): line discounts → contract % → promo % → flat amount → named outputs. */
+let pricingUI = { period: 0 };
 let pricing = {
   seeded: true,
   link_revenue: true, /* revenue formula reads revenue_total_net */
@@ -1050,33 +1051,38 @@ function tierListRevenue(qty, tiers){
   }
   return total;
 }
-function computePricing(){
-  const paying = Math.max(0, pricingNum(pricing.paying_seats));
+function computePricing(period){
+  const p = (period==null ? (typeof pricingUI!=='undefined' && pricingUI.period!=null ? pricingUI.period : 0) : period)|0;
+  const seatsVar=vget('paying_seats'), usageVar=vget('usage_units');
+  const paying = Math.max(0, seatsVar && typeof inputVal==='function' ? pricingNum(inputVal(seatsVar,p,true)) : pricingNum(pricing.paying_seats));
+  const usageQty = Math.max(0, usageVar && typeof inputVal==='function' ? pricingNum(inputVal(usageVar,p,true)) : pricingNum(pricing.usage_units));
+  const seatDiscVar=vget('seat_discount_pct'), usageDiscVar=vget('usage_discount_pct');
+  const contractVar=vget('contract_discount_pct'), promoVar=vget('promo_discount_pct'), flatVar=vget('discount_amount');
+  const seat_disc = pricingPct(seatDiscVar && typeof inputVal==='function' ? inputVal(seatDiscVar,p,true) : pricing.seat_discount_pct);
+  const usage_disc = pricingPct(usageDiscVar && typeof inputVal==='function' ? inputVal(usageDiscVar,p,true) : pricing.usage_discount_pct);
+  const contract_discount_pct = pricingPct(contractVar && typeof inputVal==='function' ? inputVal(contractVar,p,true) : pricing.contract_discount_pct);
+  const promo_discount_pct = pricingPct(promoVar && typeof inputVal==='function' ? inputVal(promoVar,p,true) : pricing.promo_discount_pct);
+  const discount_amount = pricingNum(flatVar && typeof inputVal==='function' ? inputVal(flatVar,p,true) : pricing.discount_amount);
+
   const seat_list = tierListRevenue(paying, pricing.seat_tiers);
-  const usage_list = tierListRevenue(pricingNum(pricing.usage_units), pricing.usage_tiers);
+  const usage_list = tierListRevenue(usageQty, pricing.usage_tiers);
   const list_revenue = seat_list + usage_list;
-  const seat_disc = pricingPct(pricing.seat_discount_pct);
-  const usage_disc = pricingPct(pricing.usage_discount_pct);
   const seat_net = seat_list * (1 - seat_disc);
   const usage_net = usage_list * (1 - usage_disc);
-  /* Waterfall on remaining base after line discounts */
   let after = seat_net + usage_net;
-  after = after * (1 - pricingPct(pricing.contract_discount_pct));
-  after = after * (1 - pricingPct(pricing.promo_discount_pct));
-  after = after - pricingNum(pricing.discount_amount);
+  after = after * (1 - contract_discount_pct);
+  after = after * (1 - promo_discount_pct);
+  after = after - discount_amount;
   const revenue_total_net = Math.max(0, after);
   const revenue_seats_net = seat_net;
   const revenue_usage_net = usage_net;
   const arpu = paying > 0 ? (revenue_total_net / paying) : 0;
   const effective_discount_pct = list_revenue > 0 ? (1 - (revenue_total_net / list_revenue)) : 0;
   return {
-    paying_seats: paying,
+    period:p, paying_seats: paying, usage_units: usageQty,
     seat_list, usage_list, list_revenue,
     seat_discount_pct: seat_disc, usage_discount_pct: usage_disc,
-    seat_net, usage_net,
-    contract_discount_pct: pricingPct(pricing.contract_discount_pct),
-    promo_discount_pct: pricingPct(pricing.promo_discount_pct),
-    discount_amount: pricingNum(pricing.discount_amount),
+    seat_net, usage_net, contract_discount_pct, promo_discount_pct, discount_amount,
     revenue_seats_net, revenue_usage_net, revenue_total_net, arpu, effective_discount_pct
   };
 }
@@ -1094,19 +1100,33 @@ function upsertPricingVar(spec){
 }
 /** Keep Pricing drivers first-class in the shared model graph ( forecaster / X-ray / scenarios ). */
 function syncPricingDrivers(){
-  const c = computePricing();
-  /* Tier list revenue stays engine-fed (progressive bands). Waterfall is formula-backed. */
-  upsertPricingVar({key:'paying_seats', name:'Paying seats', unit:'#', kind:'input', base:c.paying_seats, writable:true});
-  upsertPricingVar({key:'seat_list', name:'Seat list revenue', unit:'₹', kind:'input', base:c.seat_list, writable:false});
-  upsertPricingVar({key:'usage_list', name:'Usage list revenue', unit:'₹', kind:'input', base:c.usage_list, writable:false});
-  upsertPricingVar({key:'seat_discount_pct', name:'Seat line discount', unit:'%', kind:'input', base:c.seat_discount_pct, writable:true});
-  upsertPricingVar({key:'usage_discount_pct', name:'Usage line discount', unit:'%', kind:'input', base:c.usage_discount_pct, writable:true});
-  upsertPricingVar({key:'contract_discount_pct', name:'Contract discount', unit:'%', kind:'input', base:c.contract_discount_pct, writable:true});
-  upsertPricingVar({key:'promo_discount_pct', name:'Promo discount', unit:'%', kind:'input', base:c.promo_discount_pct, writable:true});
-  upsertPricingVar({key:'discount_amount', name:'Flat discount amount', unit:'₹', kind:'input', base:c.discount_amount, writable:true});
+  const n=P();
+  const seatSeries=[], usageSeries=[];
+  for(let p=0;p<n;p++){
+    const c=computePricing(p);
+    seatSeries.push(c.seat_list);
+    usageSeries.push(c.usage_list);
+  }
+  const c0=computePricing(pricingUI.period|0);
+
+  upsertPricingVar({key:'paying_seats', name:'Paying seats', unit:'#', kind:'input', base:pricingNum(pricing.paying_seats), writable:true});
+  upsertPricingVar({key:'usage_units', name:'Usage units', unit:'#', kind:'input', base:pricingNum(pricing.usage_units), writable:true});
+  upsertPricingVar({key:'seat_discount_pct', name:'Seat line discount', unit:'%', kind:'input', base:pricingPct(pricing.seat_discount_pct), writable:true});
+  upsertPricingVar({key:'usage_discount_pct', name:'Usage line discount', unit:'%', kind:'input', base:pricingPct(pricing.usage_discount_pct), writable:true});
+  upsertPricingVar({key:'contract_discount_pct', name:'Contract discount', unit:'%', kind:'input', base:pricingPct(pricing.contract_discount_pct), writable:true});
+  upsertPricingVar({key:'promo_discount_pct', name:'Promo discount', unit:'%', kind:'input', base:pricingPct(pricing.promo_discount_pct), writable:true});
+  upsertPricingVar({key:'discount_amount', name:'Flat discount amount', unit:'₹', kind:'input', base:pricingNum(pricing.discount_amount), writable:true});
+
+  /* Tier outputs as scheduled inputs so period seat/usage overrides flow through the graph */
+  const seatList=upsertPricingVar({key:'seat_list', name:'Seat list revenue', unit:'₹', kind:'input', base:seatSeries[0]||0, writable:false});
+  const usageList=upsertPricingVar({key:'usage_list', name:'Usage list revenue', unit:'₹', kind:'input', base:usageSeries[0]||0, writable:false});
+  seatList.steps=[]; usageList.steps=[];
+  for(let p=1;p<n;p++){
+    if(Math.abs((seatSeries[p]||0)-(seatSeries[p-1]||0))>1e-9) seatList.steps.push({from:p,value:seatSeries[p]});
+    if(Math.abs((usageSeries[p]||0)-(usageSeries[p-1]||0))>1e-9) usageList.steps.push({from:p,value:usageSeries[p]});
+  }
 
   upsertPricingVar({key:'list_revenue', name:'List revenue', unit:'₹', kind:'formula', expr:'seat_list + usage_list'});
-  /* Line-level nets — after seat/usage discounts only (CFO lock) */
   upsertPricingVar({key:'revenue_seats_net', name:'Seats net (after line discount)', unit:'₹', kind:'formula', expr:'seat_list * (1 - seat_discount_pct)'});
   upsertPricingVar({key:'revenue_usage_net', name:'Usage net (after line discount)', unit:'₹', kind:'formula', expr:'usage_list * (1 - usage_discount_pct)'});
   upsertPricingVar({key:'pricing_after_contract', name:'After contract discount', unit:'₹', kind:'formula', expr:'(revenue_seats_net + revenue_usage_net) * (1 - contract_discount_pct)'});
@@ -1123,7 +1143,7 @@ function syncPricingDrivers(){
   if(!model.displayVars || !model.displayVars.length) model.displayVars = ['revenue_total_net'];
   else if(!model.displayVars.includes('revenue_total_net') && !model.displayVars.includes('revenue')) model.displayVars = ['revenue_total_net'].concat(model.displayVars);
   recompileAll();
-  return c;
+  return c0;
 }
 function pullPricingFromModelInputs(){
   /* If founder edited drivers in Forecast assumptions, reflect back into Pricing controls. */
@@ -1157,6 +1177,42 @@ function pricingPctField(n){ return +(pricingNum(n)*100).toFixed(4); } /* founde
 function pricingPctFromField(val){ return Math.min(1, Math.max(0, pricingNum(val)/100)); }
 function fmtSeats(n){ return pricingNum(n).toLocaleString(undefined,{maximumFractionDigits:0}); }
 
+
+function hasPricingOvAt(p){
+  const keys=['paying_seats','usage_units','seat_discount_pct','usage_discount_pct','contract_discount_pct','promo_discount_pct','discount_amount'];
+  return keys.some(k=>model.ov&&model.ov[k]&&Object.prototype.hasOwnProperty.call(model.ov[k], p));
+}
+function setPricingPeriod(p){
+  pricingUI.period=Math.max(0,Math.min(P()-1,p|0));
+  render();
+}
+function pricingOvField(key, label, isPct){
+  const p=pricingUI.period|0;
+  const v=vget(key);
+  const live = v && typeof inputVal==='function' ? inputVal(v,p,true) : pricingNum(pricing[key]);
+  const shown = isPct ? pricingPctField(live) : live;
+  const anchored = !!(model.ov&&model.ov[key]&&Object.prototype.hasOwnProperty.call(model.ov[key], p));
+  return `<div class="field"><label>${esc(label)}${anchored?' · override':''}</label>
+    <input class="inp" type="number" step="any" value="${esc(String(shown))}"
+      onchange="setPricingPeriodValue('${key}', this.value, ${isPct?'true':'false'})">
+    ${anchored?`<button class="btn sm" style="margin-top:6px" onclick="clearPricingPeriodValue('${key}')">Clear override</button>`:''}
+  </div>`;
+}
+function setPricingPeriodValue(key, val, isPct){
+  const p=pricingUI.period|0;
+  const num = isPct ? pricingPctFromField(val) : pricingNum(val);
+  setOv(key, p, num);
+  /* Keep plan base in pricing object aligned when editing period 0 with no intent conflict */
+  if(p===0 && key in pricing){ pricing[key]=num; savePricing(); }
+  syncPricingDrivers(); saveModel(); render();
+  toast('Scenario override · '+(model.periods[p]||('P'+(p+1))));
+}
+function clearPricingPeriodValue(key){
+  const p=pricingUI.period|0;
+  delOv(key,p); syncPricingDrivers(); saveModel(); render();
+  toast('Override cleared');
+}
+
 function viewPricing(){
   const c = syncPricingDrivers();
   const seatRows = (pricing.seat_tiers||[]).map((t,i)=>tierRowHtml('seat', i, t, '#')).join('');
@@ -1170,6 +1226,26 @@ function viewPricing(){
         <button class="btn sm" onclick="resetPricingSeed()">Reset seed</button>
       </div>
     </div>
+
+    <div class="pricing-card" style="padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div><p class="eyebrow" style="margin:0 0 2px">Period lens</p>
+          <p class="mut fz12" style="margin:0">KPIs below follow this month. Edit the plan base in the cards, or set a scenario override for the selected month.</p></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;max-width:100%">
+          ${(model.periods||[]).map((lab,i)=>`<button class="tok ${((pricingUI.period|0)===i)?'op':''}" onclick="setPricingPeriod(${i})">${esc((lab||('P'+(i+1))).split(' ')[0])}${hasPricingOvAt(i)?' ·':''}</button>`).join('')}
+        </div>
+      </div>
+      <div class="frow" style="grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px;margin-top:12px">
+        ${pricingOvField('paying_seats','Paying seats', false)}
+        ${pricingOvField('usage_units','Usage units', false)}
+        ${pricingOvField('discount_amount','Flat discount ₹', false)}
+        ${pricingOvField('seat_discount_pct','Seat disc. %', true)}
+        ${pricingOvField('usage_discount_pct','Usage disc. %', true)}
+        ${pricingOvField('contract_discount_pct','Contract %', true)}
+        ${pricingOvField('promo_discount_pct','Promo %', true)}
+      </div>
+    </div>
+
     <div class="pricing-kpis">
       <div class="pricing-kpi"><label>List revenue</label><b>${fmtMoney(c.list_revenue)}</b><span>before discounts</span></div>
       <div class="pricing-kpi"><label>Seats (after line discount)</label><b>${fmtMoney(c.revenue_seats_net)}</b><span>before contract / promo / flat</span></div>
