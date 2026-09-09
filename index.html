@@ -440,6 +440,12 @@
   .cinema-chart svg{width:100%;height:220px;overflow:visible}
   .ghost-fill{opacity:.18}
 
+
+  .confirm-classify .cc-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #eef0f4;font-size:12.5px}
+  .confirm-classify .cc-row:last-child{border-bottom:0}
+  .confirm-classify .cc-k{color:var(--muted);min-width:110px}
+  .confirm-classify .cc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+
 </style>
 </head>
 <body>
@@ -712,12 +718,17 @@ function sheetFormulaToExpr(formula, cellMap, defaultSheet){
   const toks=tokenizeSheetFormula(formula);
   if(!toks.length) return {ok:false, reason:'empty'};
   if(toks.some(t=>t.t==='bad')) return {ok:false, reason:'unsupported token'};
-  if(toks.some(t=>t.t==='ident')) return {ok:false, reason:'function or name'};
-  const parts=[]; const deps=[]; const unresolved=[];
+  const EXCEL_FN={IF:'if', SUM:'sum'};
+  const parts=[]; const deps=[]; const unresolved=[]; const unsupported=[];
   const ds=String(defaultSheet||'').trim();
   for(const t of toks){
     if(t.t==='op'){ parts.push(t.v==='/'?' / ':t.v==='*'?' * ':t.v==='+'?' + ':t.v==='-'?' - ':t.v); continue; }
     if(t.t==='num'){ parts.push(t.v); continue; }
+    if(t.t==='ident'){
+      const mapped=EXCEL_FN[String(t.v||'').toUpperCase()];
+      if(mapped){ parts.push(mapped); continue; }
+      unsupported.push(t.v); parts.push(t.v); continue;
+    }
     if(t.t==='ref'){
       const cr=a1ColRow(t.a1); if(!cr){ unresolved.push(t.a1); parts.push('?'); continue; }
       const sh=(t.sheet||ds||'').trim();
@@ -728,7 +739,6 @@ function sheetFormulaToExpr(formula, cellMap, defaultSheet){
       ].map(k=>k.toUpperCase());
       let key=null;
       for(const k of keys){ if(cellMap[k]){ key=cellMap[k]; break; } }
-      /* also try without sheet on map keys that include sheet */
       if(!key){
         for(const mk of Object.keys(cellMap)){
           const bare=mk.includes('!')?mk.split('!').pop():mk;
@@ -739,9 +749,9 @@ function sheetFormulaToExpr(formula, cellMap, defaultSheet){
       parts.push(key); deps.push(key); continue;
     }
   }
+  if(unsupported.length) return {ok:false, reason:'unsupported fn '+unsupported.join(','), unsupported};
   if(unresolved.length) return {ok:false, reason:'unresolved '+unresolved.join(','), unresolved};
   const expr=parts.join('').replace(/\s+/g,' ').trim();
-  /* sanity: must compile */
   try{ compile(expr); }catch(e){ return {ok:false, reason:String(e.message||e)}; }
   return {ok:true, expr, deps:[...new Set(deps)]};
 }
@@ -1428,7 +1438,7 @@ function viewSetup(){
       : v.kind==="input" ? `<span class="mut fz11">base ${fmtVar(v.base,v.unit)}${(v.steps&&v.steps.length)?` · ${v.steps.length} step${v.steps.length>1?'s':''}`:''}</span>`
       : `<span class="mut fz11">read from sheet</span>`;
     const cell = v.range ? `<span class="cellref">${esc(v.range)}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}` : `<span class="cellref unmapped">— not mapped —</span>`;
-    const confirm = st==='suggested'?` <button class="btn sm" style="height:22px;padding:0 8px;font-size:10px" onclick="confirmMapStatus('${v.key}')">Confirm</button>`:'';
+    const confirm = (st==='suggested'||st==='unmapped')?` <button class="btn sm" style="height:22px;padding:0 8px;font-size:10px" onclick="openConfirmClassify('${v.key}')">Confirm</button>`:'';
     return `<tr>
       <td><strong>${esc(v.name)}</strong> <span class="keychip">${esc(v.key)}</span></td>
       <td><span class="kind-pill ${kindCls}">${v.kind}</span></td>
@@ -1441,7 +1451,8 @@ function viewSetup(){
       </div></td>
     </tr>`;
   }).join('');
-  const banner = reviewN?`<div class="mapbanner"><span><b>${reviewN}</b> line${reviewN===1?'':'s'} need review (suggested / unmapped)</span>
+  const banner = reviewN?`<div class="mapbanner"><span><b>${reviewN}</b> line${reviewN===1?'':'s'} need review — confirm misses, do not rebuild by hand</span>
+    <button class="btn sm" style="margin-left:auto" onclick="confirmAllSuggested()">Confirm all suggested</button>
     <div class="mapfilter">
       <button class="${filt==='all'?'on':''}" onclick="setMapFilter('all')">All</button>
       <button class="${filt==='review'?'on':''}" onclick="setMapFilter('review')">Needs review</button>
@@ -1459,7 +1470,7 @@ function viewSetup(){
   <div class="hero hero-row">
     <div><p class="eyebrow">Model builder</p>
       <h1>Define your model. The tool drives the inputs.</h1>
-      <p>Write the formulas your model uses, break any variable into its drivers, and point each input at the cell it lives in. When you plan, the tool changes those inputs — never the outputs. Scan can auto-map sheet formulas into the driver graph.</p></div>
+      <p>Connect a sheet and <b>Scan</b> to auto-tag variables and formulas into the shared graph. Confirm only what we miss — you should not rebuild the model by hand. When you plan, the tool changes inputs — never outputs.</p></div>
     <button class="btn primary" onclick="openConnect()">${conn.connected?'Sheet connected':'Connect sheet'}</button>
   </div>
 
@@ -1495,8 +1506,52 @@ function viewSetup(){
 }
 function addVarKind(kind){ varModal(null); const k=document.getElementById('vKind'); if(k){ k.value=kind; varKindToggle(); } }
 function setMapFilter(f){ model.uiState=model.uiState||{}; model.uiState.mapFilter=f; saveModel(); render(); }
-function confirmMapStatus(key){ const v=vget(key); if(!v) return; v.mapStatus='manual'; saveModel(); render(); toast('Mapping confirmed for '+v.name); }
-function confirmSuggestedFormula(key){ const v=vget(key); if(!v||!v._suggestedExpr) return; v.kind='formula'; v.expr=v._suggestedExpr; delete v._suggestedExpr; v.mapStatus='manual'; recompileAll(); saveModel(); render(); }
+function confirmMapStatus(key){ const v=vget(key); if(!v) return; v.mapStatus='manual'; v.classifyConfidence='confirmed'; saveModel(); render(); toast('Confirmed '+v.name); }
+function confirmSuggestedFormula(key){ const v=vget(key); if(!v||!v._suggestedExpr) return; v.kind='formula'; v.expr=v._suggestedExpr; delete v._suggestedExpr; v.mapStatus='manual'; v.classifyConfidence='confirmed'; recompileAll(); saveModel(); render(); }
+function openConfirmClassify(key){
+  const v=vget(key); if(!v) return;
+  const st=mapStatusOf(v);
+  const kindOpts=['input','formula','output'].map(k=>`<option value="${k}" ${v.kind===k?'selected':''}>${k}</option>`).join('');
+  showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody confirm-classify">
+      <p class="mut fz12" style="margin:0 0 12px">Quick confirm — change only what is wrong. Full edit stays available if you need it.</p>
+      <div class="cc-row"><span class="cc-k">Line</span><span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span></div>
+      <div class="cc-row"><span class="cc-k">Status</span><span class="mapchip ${st}">${st}</span>${v.classifyConfidence?` · ${esc(v.classifyConfidence)}`:''}</div>
+      <div class="cc-row"><span class="cc-k">Sheet</span><span class="cellref">${v.range?esc(v.range):'— not mapped —'}</span></div>
+      ${v.sheetFormula?`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="expr">${esc(v.sheetFormula)}</span></div>`:''}
+      ${v.classifyNote?`<div class="cc-row"><span class="cc-k">Note</span><span class="mut">${esc(v.classifyNote)}</span></div>`:''}
+      <div class="field" style="margin-top:12px"><label>Type</label><select class="inp" id="ccKind">${kindOpts}</select></div>
+      <div class="field" id="ccExprRow" style="margin-top:10px;${v.kind==='formula'?'':'display:none'}"><label>Formula</label>
+        <input class="inp" id="ccExpr" value="${esc(v.expr||'')}" placeholder="price * volume"></div>
+      <div class="cc-actions">
+        <button class="btn" onclick="closeModal();editVar(model.vars.indexOf(vget('${jesc(key)}')))">Full edit</button>
+        <button class="btn primary" onclick="commitConfirmClassify('${jesc(key)}')">Confirm</button>
+      </div>
+    </div>`);
+  const kindEl=document.getElementById('ccKind');
+  if(kindEl) kindEl.onchange=()=>{ const row=document.getElementById('ccExprRow'); if(row) row.style.display=kindEl.value==='formula'?'':'none'; };
+}
+function commitConfirmClassify(key){
+  const v=vget(key); if(!v) return;
+  const kind=(document.getElementById('ccKind')||{}).value||v.kind;
+  v.kind=kind;
+  if(kind==='formula'){
+    const expr=((document.getElementById('ccExpr')||{}).value||'').trim();
+    if(!expr){ toast('Enter a formula or pick another type'); return; }
+    try{ compile(expr); }catch(e){ toast(String(e.message||e)); return; }
+    v.expr=expr;
+  }
+  if(kind==='input'){ v.writable=true; if(v.base==null) v.base=0; }
+  v.mapStatus='manual'; v.classifyConfidence='confirmed';
+  applyRollupHeuristic(v);
+  recompileAll(); saveModel(); closeModal(); render(); toast('Confirmed '+v.name);
+}
+function confirmAllSuggested(){
+  let n=0;
+  model.vars.forEach(v=>{ if(mapStatusOf(v)==='suggested'){ v.mapStatus='manual'; v.classifyConfidence='confirmed'; n++; } });
+  if(!n){ toast('Nothing suggested to confirm'); return; }
+  saveModel(); render(); toast('Confirmed '+n+' suggested line'+(n===1?'':'s'));
+}
 
 const CANW=2600, CANH=1500;
 let _pan={x:0,y:0};
@@ -2341,7 +2396,13 @@ function openVersions(){
 /* sum a variable over the active period window */
 /* how a line rolls up over a period: flows sum, rates/stocks average (default by kind) */
 const AGG_LABEL={sum:'Sum',avg:'Average',last:'Period-end'};
-function aggMethod(v){ if(v&&v.agg) return v.agg; if(v){ if(v.unit==='%') return 'avg'; if(v.kind==='input') return 'avg'; } return 'sum'; }
+function aggMethod(v){
+  if(v&&v.agg) return v.agg;
+  if(!v) return 'sum';
+  if(v.unit==='%' || isPriceLike(v)) return 'avg';
+  if(v.kind==='input') return 'avg';
+  return 'sum'; /* currency / volume outputs */
+}
 function aggArr(arr,method){
   if(!arr||!arr.length) return 0;
   if(method==='avg'){ const f=arr.filter(x=>x!=null); return f.length?f.reduce((a,b)=>a+b,0)/f.length:0; }
@@ -3371,15 +3432,16 @@ async function scanModelSheet(){
     let nForm=0, nIn=0, nOut=0;
     const newLines=provisional.map((p,idx)=>{
       const series=periods.map((_,pi)=> (p.l.series[pi]===undefined?null:p.l.series[pi]));
-      const cls=classes[idx]||{kind:'output',mapStatus:'auto'};
+      const cls=classes[idx]||{kind:'output',mapStatus:'unmapped',confidence:'low'};
       const range=p.row?buildRange(sheetName, src.firstCol||'B', p.row, periods.length):'';
-      const v={key:p.key,name:p.name,metric:p.metric,account:p.name,kind:cls.kind,unit:inferUnit(p.metric+' '+p.name),forecast:series,read:series,srcLine:true,mapStatus:cls.mapStatus||'auto',range:range||''};
-      if(cls.kind==='formula'){ v.expr=cls.expr; v.sheetFormula=cls.sheetFormula||''; nForm++; }
+      const v={key:p.key,name:p.name,metric:p.metric,account:p.name,forecast:series,read:series,srcLine:true,range:range||''};
+      applyClassifyToVar(v, cls);
+      if(cls.kind==='formula'){ nForm++; }
       else if(cls.kind==='input'){
-        v.writable=true; v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
+        v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
         if(series.length){ for(let i=1;i<series.length;i++) if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]}); }
         nIn++;
-      } else { nOut++; if(cls.sheetFormula) v.sheetFormula=cls.sheetFormula; }
+      } else { nOut++; }
       const prev=p.prev||{};
       ['good','favOverride','agg','group','actuals','actualRange','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
       /* upsert: if prev was formula/input with manual map, keep kind/expr unless we auto-parsed */
@@ -3394,8 +3456,12 @@ async function scanModelSheet(){
     model.sources=Object.assign({}, model.sources, {forecast:src});
     conn.sheets=conn.sheets||[]; saveConn();
     recompileAll(); saveModel();
-    const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''} auto-mapped`:'';
-    const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${formNote}.`:` Loaded ${newLines.length} line(s)${formNote}.`;
+    const nAuto=newLines.filter(v=>v.mapStatus==='auto').length;
+    const nSug=newLines.filter(v=>v.mapStatus==='suggested').length;
+    const nUn=newLines.filter(v=>v.mapStatus==='unmapped').length;
+    const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''}`:'';
+    const tagNote=` · ${nAuto} auto-tagged${nSug?`, ${nSug} need confirm`:''}${nUn?`, ${nUn} unmapped`:''}`;
+    const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${formNote}${tagNote}.`:` Loaded ${newLines.length} line(s)${formNote}${tagNote}.`;
     fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
     conn.connected=true; saveConn();
     setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newLines.length} lines; kept ${keep.length} drivers${formNote}`:`Loaded ${newLines.length} lines${formNote}`); },1100);
@@ -3526,35 +3592,23 @@ function disconnectModel(){
 /* ============================ TWO-FILE IMPORT (forecast file + actuals file) ============================ */
 function slugKey(name){ let k=String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); if(!k)k='line'; if(!/^[a-z_]/.test(k))k='x_'+k; return k; }
 function inferUnit(name){ const s=String(name).toLowerCase();
-  if(/%/.test(s) || /\brate\b|\bratio\b|margin\s*%|gm\s*%|growth\s*%/.test(s)) return '%';   // only explicit %/rate — a ₹ "gross margin" line stays ₹
-  if(/\bunits?\b|\bqty\b|\bcount\b|\bnos?\b|volume|headcount|\bfte\b|employees|customers|distributors|orders/.test(s)) return '#';
+  if(/%/.test(s) || /\b(rate|ratio|pct|percent|take[\s_-]?rate|conversion|ctr|cvr|discount)\b/.test(s)) return '%';
+  if(/\b(price|asp|arpu|ticket|fee|cpc|cpm)\b|per\s*unit|per\s*seat/.test(s)) return '₹'; /* price still currency, but flagged for avg roll-up */
+  if(/\b(units?|qty|count|nos?|volume|headcount|fte|employees|customers|distributors|orders|seats?|visits?|impressions)\b/.test(s)) return '#';
   return '₹'; }
-/* clean a header cell into a period label — dates become "Nov '26", plain text passes through */
-function fmtPeriodLabel(h){ if(h==null) return ''; const s=String(h).trim();
-  if(/^\d{4}-\d{2}-\d{2}([T ]|$)/.test(s)){ const d=new Date(s); if(!isNaN(d)) return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]+" '"+String(d.getFullYear()).slice(2); }
-  return s; }
-function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/\s+/g,' ').trim(); }
-function srcFeedback(msg,kind){ const el=document.getElementById('srcFeedback'); if(!el)return; const c=kind==='err'?'background:#fff0f1;color:#a33d4d':kind==='ok'?'':'background:#eef0fa;color:#3a4680'; el.innerHTML=`<div class="write-feedback ${kind==='ok'?'success':''}" style="${c}">${msg}</div>`; }
-function openSources(){
-  const s=model.sources||{}, f=s.forecast||{}, a=s.actual||{};
-  const grp=(pfx,src,label,hint)=>`<div class="srcgrp"><p class="eyebrow" style="margin:0 0 8px">${label}</p>
-    <div class="field"><label>Sheet URL or ID</label><input class="inp" id="${pfx}Sheet" value="${esc(src.ssid?('https://docs.google.com/spreadsheets/d/'+src.ssid):'')}" placeholder="https://docs.google.com/spreadsheets/d/…" style="font-family:var(--mono);font-size:11px"></div>
-    <div class="frow two" style="margin-top:8px"><div class="field"><label>Tab name</label><input class="inp" id="${pfx}Tab" value="${esc(src.tab||'')}" placeholder="(first tab)"></div>
-      <div class="field"><label>Label column</label><input class="inp" id="${pfx}Label" value="${esc(src.labelCol||'A')}" style="text-transform:uppercase"></div></div>
-    <div class="frow three" style="margin-top:8px"><div class="field"><label>Header row</label><input class="inp" id="${pfx}Header" type="number" value="${src.headerRow||1}"></div>
-      <div class="field"><label>First month col</label><input class="inp" id="${pfx}First" value="${esc(src.firstCol||'B')}" style="text-transform:uppercase"></div>
-      <div class="field"><label># months</label><input class="inp" id="${pfx}Months" type="number" value="${src.months||12}"></div></div>
-    <p class="mut fz11" style="margin:6px 0 0">${hint}</p></div>`;
-  showModal(`<div class="mhead"><h3>Import forecast + actuals</h3><button class="x" onclick="closeModal()">×</button></div>
-    <div class="mbody">
-      <p class="mut fz12" style="margin:0 0 12px">Two separate Google Sheets — one with your <b>forecast</b>, one with your <b>actuals</b>. Each laid out as a P&amp;L: line items down a column, months across the top. The tool reads both and matches lines by their label automatically.</p>
-      <div class="frow two"><div class="field"><label>Apps Script URL (/exec)</label><input class="inp" id="srcUrl" value="${esc(conn.url)}" placeholder="https://script.google.com/…/exec" style="font-family:var(--mono);font-size:11px"></div>
-        <div class="field"><label>Token</label><input class="inp" id="srcToken" value="${esc(conn.token)}"></div></div>
-      <div class="frow two" style="margin-top:8px"><div class="field"><label>Unit scale</label><input class="inp" id="srcScale" type="number" step="any" value="${conn.scale||1}"></div><div class="field"></div></div>
-      <div class="srcrow">${grp('f',f,'① Forecast file','e.g. labels in A, months from B across. Sets your timeline.')}${grp('a',a,'② Actuals file','Same layout. Blank months mean not actual yet — that is your history cutoff.')}</div>
-      <div id="srcFeedback" style="margin-top:12px"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="importSources()">Read both &amp; match lines</button></div>
-    </div>`);
+function isPriceLike(v){
+  const s=((v&&v.name)||'')+' '+((v&&v.key)||'')+' '+((v&&v.metric)||'');
+  return /\b(price|asp|ticket|fee|cpc|cpm)\b|per\s*unit|per\s*seat/i.test(s);
+}
+function isVolumeLike(v){
+  const s=((v&&v.name)||'')+' '+((v&&v.key)||'');
+  return (v&&v.unit==='#') || /\b(units?|qty|volume|seats?|customers|orders|visits?)\b/i.test(s);
+}
+function applyRollupHeuristic(v){
+  if(!v || v.agg) return; /* founder override wins */
+  if(v.unit==='%' || isPriceLike(v) || (v.kind==='input' && v.unit!=='₹')) v.agg='avg';
+  else if(v.kind==='input') v.agg='avg';
+  else v.agg='sum'; /* currency & volume outputs / formulas */
 }
 /* a cell is a real number only if it isn't blank, a dash, or text (month headers like "Jan-26") */
 function isRealNum(cell){ if(typeof cell==='number') return true; if(cell==null) return false; const s=String(cell).trim();
@@ -3640,21 +3694,43 @@ async function gasReadRanges(ranges, opts){
 function classifyLinesFromFormulas(lines, cellMap, defaultSheet, asForecast){
   return (lines||[]).map((l,idx)=>{
     const f=String(l.formula||'').trim();
+    const hasVal=(l.series||[]).some(x=>x!=null && x!=='');
+    const label=String((l.metric?l.metric+' ':'')+(l.name||'')).trim();
     if(f && f.startsWith('=')){
       const parsed=sheetFormulaToExpr(f, cellMap, defaultSheet);
       if(parsed.ok){
-        return {kind:'formula', expr:parsed.expr, mapStatus:'auto', sheetFormula:f, deps:parsed.deps};
+        return {kind:'formula', expr:parsed.expr, mapStatus:'auto', confidence:'high', sheetFormula:f, deps:parsed.deps};
       }
-      /* formula present but not recoverable → keep as output (values-only) */
-      return {kind:'output', mapStatus:'auto', sheetFormula:f, parseNote:parsed.reason};
+      /* formula present but not fully recoverable — suggest, do not silently treat as final output */
+      return {
+        kind:'output', mapStatus:'suggested', confidence:'low', sheetFormula:f,
+        parseNote:parsed.reason, _suggestedKind:'formula', _suggestedExpr:null
+      };
     }
-    /* empty formula + numeric values */
-    const hasVal=(l.series||[]).some(x=>x!=null && x!=='');
     if(hasVal && asForecast){
-      return {kind:'input', mapStatus:'auto', writable:true};
+      const unit=inferUnit(label);
+      const price=isPriceLike({name:label,key:''});
+      return {kind:'input', mapStatus:'auto', confidence:'high', writable:true, unitHint:unit, priceLike:price};
     }
-    return {kind:'output', mapStatus:'auto'};
+    if(hasVal){
+      return {kind:'output', mapStatus:'auto', confidence:'medium'};
+    }
+    return {kind:'output', mapStatus:'unmapped', confidence:'low'};
   });
+}
+function applyClassifyToVar(v, cls){
+  if(!v||!cls) return v;
+  v.kind=cls.kind;
+  v.mapStatus=cls.mapStatus||'auto';
+  v.classifyConfidence=cls.confidence||'medium';
+  if(cls.sheetFormula) v.sheetFormula=cls.sheetFormula;
+  if(cls.kind==='formula' && cls.expr){ v.expr=cls.expr; }
+  if(cls.kind==='input'){ v.writable=cls.writable!==false; }
+  if(cls.parseNote) v.classifyNote=cls.parseNote;
+  if(cls.unitHint) v.unit=cls.unitHint;
+  else v.unit=inferUnit((v.metric?v.metric+' ':'')+(v.name||''));
+  applyRollupHeuristic(v);
+  return v;
 }
 /* Read a broad block, detect the layout, and parse the lines — the "just works" path. */
 async function autoDetectAndRead(src){
@@ -3781,11 +3857,12 @@ async function doImport(fSrc,aSrc){
     const fser=fs?periods.map((_,pi)=>fs[pi]===undefined?null:fs[pi]):null;
     const aser=as||null;
     if(fs&&as&&as.some(x=>x!=null)) matched++;
-    const cls=Object.assign({}, classes[idx]||{kind:'output',mapStatus:'auto'});
+    const cls=Object.assign({}, classes[idx]||{kind:'output',mapStatus:'unmapped',confidence:'low'});
     /* actuals-only lines stay output */
     if(!fs && as){ cls.kind='output'; }
     const range=p.row?buildRange(fSrc.tab||'', fSrc.firstCol||'B', p.row, periods.length):'';
-    const v={key:p.key,name:p.name,metric:p.metric,account:p.name,kind:cls.kind,unit:inferUnit(p.metric+' '+p.name),forecast:fser,actuals:aser,read:fser,srcLine:true,mapStatus:cls.mapStatus||'auto',range:range||''};
+    const v={key:p.key,name:p.name,metric:p.metric,account:p.name,forecast:fser,actuals:aser,read:fser,srcLine:true,range:range||''};
+    applyClassifyToVar(v, cls);
     if(cls.kind==='formula'){ v.expr=cls.expr; v.sheetFormula=cls.sheetFormula||''; nForm++; }
     else if(cls.kind==='input'){
       v.writable=true; const series=fser||[]; v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
