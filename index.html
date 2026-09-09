@@ -1557,6 +1557,18 @@ function confirmSuggestedFormula(key){
 }
 function openConfirmClassify(key){
   const v=vget(key); if(!v) return;
+  /* North star: never dump founders into typing if we can Scan */
+  if(!hasScanCatalog() && conn.connected){
+    showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
+      <div class="mbody confirm-classify"><p class="mut fz12">Scanning your sheet to place cells — one moment…</p></div>`);
+    ensureScanCatalog().then(()=>{ closeModal(); openConfirmClassify(key); render(); }).catch(err=>{
+      showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
+        <div class="mbody confirm-classify"><p class="negv fz12">${esc(String(err.message||err))}</p>
+        <p class="mut fz12">Connect → Scan must succeed once. Typing cells is only an escape hatch.</p>
+        <div class="cc-actions"><button class="btn" onclick="closeModal();openConnect()">Open Connect</button></div></div>`);
+    });
+    return;
+  }
   const st=mapStatusOf(v);
   const preferFormula=!!(v.sheetFormula && (st==='suggested' || v._suggestedKind==='formula'));
   const kindSel=preferFormula?'formula':v.kind;
@@ -1599,7 +1611,7 @@ function openConfirmClassify(key){
              </div>
              <div class="rangeprev" id="ccRangePrevAdv"></div>
            </details>`
-        : `<p class="mut fz12">No Scan catalog yet — Connect sheet and Scan first. Fallback:</p>
+        : `<p class="mut fz12">Not connected — Connect &amp; Scan first. Escape hatch only:</p>
            <div class="frow three">
              <div class="field"><label>Sheet</label><input class="inp" id="ccFSheet" value="${esc(parseRange(v.range||'').sheet)}" oninput="updCcRangePrev()"></div>
              <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(parseRange(v.range||'').col)}" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
@@ -3591,7 +3603,7 @@ function openConnect(){
       <div id="cnFeedback" style="margin-top:12px"></div>
       <div class="conn-actions">
         <div>${conn.connected?'<button class="btn" onclick="disconnectModel()">Disconnect</button>':''}</div>
-        <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Connect</button></div>
+        <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doConnect()">Connect &amp; Scan</button></div>
       </div>
     </div>`);
 }
@@ -3603,133 +3615,33 @@ async function scanModelSheet(){
   const url=g('cnUrl').value.trim(), token=g('cnToken').value.trim(), scale=parseFloat(g('cnScale').value)||1;
   const ssid=extractSsid(g('cnSheet').value.trim());
   if(!url||!token){ fb.innerHTML=`<div class="write-feedback" style="background:#fff0f1;color:#a33d4d">Enter the Web app URL and token first.</div>`; return; }
-  // make sure the connection is set so readSource + later reads/writes hit this sheet
-  /* Validate with ephemeral creds — only mark connected after a successful scan. */
   const prevConn=Object.assign({},conn);
-  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid; /* not connected yet */
-  const manual={ ssid, tab:g('cnTab').value.trim(), labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
-    headerRow:Math.max(1,parseInt(g('cnHeader').value)||1), firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
-    months:Math.max(1,parseInt(g('cnMonths').value)||12) };
-  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Scanning the sheet &amp; detecting its layout…</div>`;
+  conn.url=url; conn.token=token; conn.scale=scale; conn.ssid=ssid;
+  fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Scanning the sheet &amp; placing cells…</div>`;
   try{
-    let F=null, src=manual, note='';
-    try{ const auto=await autoDetectAndRead({ssid, tab:manual.tab});
-      if(auto && auto.lines.length){ F=auto; src=Object.assign({}, manual, auto.detected);
-        note=`Auto-detected layout — labels in column ${auto.detected.labelCol}, ${auto.detected.months} periods from column ${auto.detected.firstCol} (header row ${auto.detected.headerRow}). `;
-        g('cnLabel').value=auto.detected.labelCol; g('cnHeader').value=String(auto.detected.headerRow); g('cnFirst').value=auto.detected.firstCol; g('cnMonths').value=String(auto.detected.months);
-      } }catch(e){}
-    if(!F){ F=await readSource(manual); src=manual; note='Used the layout you entered. '; }
-    if(!F.lines.length) throw new Error('No line items found. Set the Label column, Header row and First-month column manually below, then Scan again.');
-    const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
-    const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
-    /* P0 merge: preserve non-srcLine drivers (manual formula graph) */
-    const keep=model.vars.filter(v=>!(v.srcLine||(v.kind==='output'&&v.account!=null)));
-    const usedK={}; keep.forEach(v=>{ usedK[v.key]=1; });
-    const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
-    const lastCol=numToCol(colToNum(src.firstCol)+periods.length-1);
-    const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
-    const sheetName=src.tab||'';
-    /* provisional keys + cell map for formula parse */
-    /* Match keep (Pricing / formula drivers) to sheet lines first so Scan places their cells */
-    const consumedIds=new Set();
-    const keepMatchedKeys=[];
-    keep.forEach(v=>{
-      const hit=bestLabelMatch(v, F.lines, consumedIds);
-      if(!hit) return;
-      consumedIds.add(hit.id);
-      applySheetLineToVar(v, hit.line, sheetName, src.firstCol||'B', periods.length, false);
-      if(v.range){ v.mapStatus='auto'; v.classifyConfidence=hit.score>=90?'high':'medium'; demoteConfirmedWithoutRange(v); keepMatchedKeys.push(v.key); }
-    });
-
-    const provisional=F.lines.map((l)=>{
-      const name=l.name, metric=l.metric||'';
-      const id=nrm(metric)+'|'+nrm(name);
-      const prev=oldByAcct[id];
-      const key=(prev&&prev.key&&!usedK[prev.key])?prev.key:uk((metric?metric+'_':'')+name);
-      usedK[key]=1;
-      return {l, name, metric, key, id, prev, row:l.row};
-    }).filter(p=>!consumedIds.has(p.id));
-    const cellMap=buildCellMapFromScan({sheet:sheetName, firstCol:src.firstCol||'B', lines:provisional.map(p=>({key:p.key,row:p.row,name:p.name,metric:p.metric})).concat(keep.filter(v=>v.range).map(v=>{ const rp=parseRange(v.range); return {key:v.key,row:+rp.row||0,name:v.name,metric:v.metric||''}; }))});
-    const classes=classifyLinesFromFormulas(provisional.map(p=>p.l), cellMap, sheetName, true);
-    let nForm=0, nIn=0, nOut=0;
-    const newLines=provisional.map((p,idx)=>{
-      const series=periods.map((_,pi)=> (p.l.series[pi]===undefined?null:p.l.series[pi]));
-      const cls=classes[idx]||{kind:'output',mapStatus:'unmapped',confidence:'low'};
-      const range=p.row?buildRange(sheetName, src.firstCol||'B', p.row, periods.length):'';
-      const v={key:p.key,name:p.name,metric:p.metric,account:p.name,forecast:series,read:series,srcLine:true,range:range||''};
-      applyClassifyToVar(v, cls);
-      demoteConfirmedWithoutRange(v);
-      if(cls.kind==='formula'){ nForm++; }
-      else if(cls.kind==='input'){
-        v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
-        if(series.length){ for(let i=1;i<series.length;i++) if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]}); }
-        nIn++;
-      } else { nOut++; }
-      const prev=p.prev||{};
-      ['good','favOverride','agg','group','actuals','actualRange','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
-      if(prev.kind==='formula' && prev.expr && cls.kind!=='formula'){ v.kind='formula'; v.expr=prev.expr; v.mapStatus=prev.mapStatus||'manual'; }
-      if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
-      demoteConfirmedWithoutRange(v);
-      return v;
-    });
-    /* Persist scan catalogs so Confirm/Edit pick a line instead of typing col/row */
-    model.uiState=model.uiState||{};
-    model.uiState.scanCatalog=(F.lines||[]).filter(l=>l&&l.row).map(l=>({
-      name:l.name, metric:l.metric||'', row:l.row, sheet:sheetName, firstCol:src.firstCol||'B',
-      range:buildRange(sheetName, src.firstCol||'B', l.row, periods.length),
-      id:nrm(l.metric||'')+'|'+nrm(l.name||'')
-    }));
-    model.uiState.scanMeta={sheet:sheetName, firstCol:src.firstCol||'B', months:periods.length};
-
-    /* Auto-fill actualRange when actuals workbook is connected and labels match */
-    try{
-      if(conn.actualsSsid){
-        const aSrc=Object.assign({}, src, {ssid:conn.actualsSsid}, (model.sources&&model.sources.actual)||{});
-        aSrc.ssid=conn.actualsSsid;
-        const A=await readSource(aSrc);
-        const idOf=l=>nrm(l.metric||'')+'|'+nrm(l.name);
-        const aById={}; (A.lines||[]).forEach(l=>{ aById[idOf(l)]=l; });
-        const aUsed=new Set();
-        const placeAct=(v)=>{
-          if(!v||v.actualRange) return;
-          const id=nrm(v.metric||'')+'|'+nrm(v.account||v.name||'');
-          let al=aById[id];
-          if(!al){ const hit=bestLabelMatch(v, A.lines||[], aUsed); if(hit){ al=hit.line; aUsed.add(hit.id); } }
-          else aUsed.add(id);
-          if(al&&al.row){ v.actualRange=buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', al.row, periods.length); if(al.series) v.actuals=periods.map((_,pi)=>al.series[pi]===undefined?null:al.series[pi]); }
-        };
-        newLines.forEach(placeAct);
-        keep.forEach(placeAct);
-        model.uiState=model.uiState||{};
-        model.uiState.scanActualsCatalog=(A.lines||[]).filter(l=>l&&l.row).map(l=>({
-          name:l.name, metric:l.metric||'', row:l.row, sheet:aSrc.tab||'', firstCol:aSrc.firstCol||src.firstCol||'B',
-          range:buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', l.row, periods.length),
-          id:idOf(l)
-        }));
-      } else {
-        model.uiState=model.uiState||{};
-        model.uiState.scanActualsCatalog=[];
-      }
-    }catch(e){ /* actuals optional — leave explicit no-actuals */ }
-    model.vars=keep.concat(newLines); model.periods=periods;
-    if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newLines.find(v=>v.kind==='formula')||newLines[newLines.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
-    if(!vget(_vState.line)) _vState.line=null; if(_cState&&!vget(_cState.line)) _cState.line=null;
-    _vState.userVer=false; _vState.winUser=false;
-    model.sources=Object.assign({}, model.sources, {forecast:src});
-    conn.sheets=conn.sheets||[]; saveConn();
-    recompileAll(); saveModel();
-    const nAuto=newLines.filter(v=>v.mapStatus==='auto').length;
-    const nSug=newLines.filter(v=>v.mapStatus==='suggested').length;
-    const nUn=newLines.filter(v=>v.mapStatus==='unmapped').length;
-    const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''}`:'';
-    const tagNote=` · ${nAuto} auto-tagged${nSug?`, ${nSug} need confirm`:''}${nUn?`, ${nUn} unmapped`:''}`;
-    const nKeepMap=(typeof keepMatchedKeys!=='undefined'?keepMatchedKeys.length:keep.filter(v=>v.range).length);
-    const keepNote=nKeepMap?` · auto-placed ${nKeepMap} existing driver${nKeepMap>1?'s':''}`:'';
-    const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${keepNote}${formNote}${tagNote}.`:` Loaded ${newLines.length} line(s)${formNote}${tagNote}.`;
-    fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
+    const opts={
+      tab:g('cnTab').value.trim(),
+      labelCol:(g('cnLabel').value.trim()||'A').toUpperCase(),
+      headerRow:Math.max(1,parseInt(g('cnHeader').value)||1),
+      firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
+      months:Math.max(1,parseInt(g('cnMonths').value)||12)
+    };
+    /* mark connected for ingest; full connect flags set after success */
     conn.connected=true; saveConn();
-    setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newLines.length} lines; kept ${keep.length} drivers${formNote}`:`Loaded ${newLines.length} lines${formNote}`); },1100);
-  }catch(err){ Object.assign(conn,prevConn,{connected:false,token:prevConn.token||'',sheets:prevConn.sheets||[]}); if(!prevConn.connected){ conn.token=''; } saveConn(); setStatus(prevConn.connected?(prevConn.ssid||'Connected'):'Not connected', !!prevConn.connected); fb.innerHTML=`<div class="conn-err">${classifyConnectError(err,'model')} Scan didn’t change your model.</div>`; }
+    const ing=await ingestFromConnectedSheet(opts);
+    if(g('cnLabel')&&ing){ /* sync detected layout into form when auto path used */
+      const meta=model.uiState&&model.uiState.scanMeta; const src=model.sources&&model.sources.forecast;
+      if(src){ if(src.labelCol) g('cnLabel').value=src.labelCol; if(src.headerRow) g('cnHeader').value=String(src.headerRow); if(src.firstCol) g('cnFirst').value=src.firstCol; if(src.months) g('cnMonths').value=String(src.months); }
+    }
+    fb.innerHTML=`<div class="write-feedback success">✓ Placed ${ing.catalog} lines${ing.keepMatched?` · matched ${ing.keepMatched} existing drivers`:''}${ing.formulas?` · ${ing.formulas} formulas`:''} from “${ing.name||'your sheet'}”. Closing…</div>`;
+    setStatus(ing.name||'Connected',true);
+    setTimeout(()=>{ closeModal(); render(); toast(`Scan placed ${ing.catalog} lines — Confirm to accept`); },1100);
+  }catch(err){
+    Object.assign(conn,prevConn,{connected:!!prevConn.connected,token:prevConn.token||'',sheets:prevConn.sheets||[]});
+    if(!prevConn.connected){ conn.token=''; conn.connected=false; }
+    saveConn(); setStatus(prevConn.connected?(prevConn.ssid||'Connected'):'Not connected', !!prevConn.connected);
+    fb.innerHTML=`<div class="conn-err">${classifyConnectError(err,'model')} Scan didn’t change your model.</div>`;
+  }
 }
 async function doConnect(){
   const url=document.getElementById('cnUrl').value.trim();
@@ -3824,8 +3736,17 @@ async function doConnect(){
     const tabsMsg = sheets.length?` · ${sheets.length} tab(s)`:'';
     const actMsg = actualsRaw?` · Actuals “${actualsName||'linked'}”`:'';
     const mapMsg = mapped.length?` · ${mapped.length} mapped line(s)`:'';
-    fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>`;
-    setTimeout(()=>{closeModal();render();},1200);
+    fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Connected — scanning to place cells automatically…</div>`;
+    try{
+      const tabEl=document.getElementById('cnTab');
+      const ing=await ingestFromConnectedSheet({tab:(tabEl&&tabEl.value)||''});
+      fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}</div>`;
+      setTimeout(()=>{closeModal();render(); toast('Scan placed '+ing.catalog+' lines — Confirm is accept only');},1100);
+    }catch(scanErr){
+      fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
+        <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}. Open Connect and use Scan &amp; load lines.</div>`;
+      setTimeout(()=>{closeModal();render();},1800);
+    }
   }catch(err){
     /* Roll back fully — never bind empty actuals or a half session */
     conn={connected:false,url,token:'',scale,ssid:ssid||'',sheets:[],actualsSsid:'',actualsSheets:[]};
@@ -3908,6 +3829,124 @@ function bestLabelMatch(v, lines, usedIds){
 }
 function scanCatalog(){ return (model.uiState&&model.uiState.scanCatalog)||[]; }
 function scanActualsCatalog(){ return (model.uiState&&model.uiState.scanActualsCatalog)||[]; }
+function hasScanCatalog(){ return scanCatalog().length>0; }
+/** Rebuild catalog (+ place unmatched drivers) from the live connected sheet. No modal DOM required. */
+async function ingestFromConnectedSheet(opts){
+  opts=opts||{};
+  if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
+  const scale=conn.scale||1;
+  const ssid=conn.ssid||'';
+  const srcPref=(model.sources&&model.sources.forecast)||{};
+  const manual={
+    ssid,
+    tab:opts.tab||srcPref.tab||'',
+    labelCol:(opts.labelCol||srcPref.labelCol||'A').toUpperCase(),
+    headerRow:Math.max(1,parseInt(opts.headerRow||srcPref.headerRow)||1),
+    firstCol:(opts.firstCol||srcPref.firstCol||'B').toUpperCase(),
+    months:Math.max(1,parseInt(opts.months||srcPref.months)||Math.max(12,P()||12))
+  };
+  let F=null, src=manual;
+  try{
+    const auto=await autoDetectAndRead({ssid, tab:manual.tab});
+    if(auto && auto.lines.length){
+      F=auto; src=Object.assign({}, manual, auto.detected);
+    }
+  }catch(e){}
+  if(!F){ F=await readSource(manual); src=manual; }
+  if(!F.lines.length) throw new Error('No line items found on the sheet');
+  const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
+  const oldByAcct={}; model.vars.forEach(v=>{ if(v.account!=null) oldByAcct[nrm(v.metric||'')+'|'+nrm(v.account)]=v; });
+  const keep=model.vars.filter(v=>!(v.srcLine||(v.kind==='output'&&v.account!=null)));
+  const usedK={}; keep.forEach(v=>{ usedK[v.key]=1; });
+  const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
+  const sheetName=src.tab||'';
+  const consumedIds=new Set();
+  const keepMatchedKeys=[];
+  keep.forEach(v=>{
+    const hit=bestLabelMatch(v, F.lines, consumedIds);
+    if(!hit) return;
+    consumedIds.add(hit.id);
+    applySheetLineToVar(v, hit.line, sheetName, src.firstCol||'B', periods.length, false);
+    if(v.range){ v.mapStatus='auto'; v.classifyConfidence=hit.score>=90?'high':'medium'; demoteConfirmedWithoutRange(v); keepMatchedKeys.push(v.key); }
+  });
+  const provisional=F.lines.map((l)=>{
+    const name=l.name, metric=l.metric||'';
+    const id=nrm(metric)+'|'+nrm(name);
+    const prev=oldByAcct[id];
+    const key=(prev&&prev.key&&!usedK[prev.key])?prev.key:uk((metric?metric+'_':'')+name);
+    usedK[key]=1;
+    return {l, name, metric, key, id, prev, row:l.row};
+  }).filter(p=>!consumedIds.has(p.id));
+  const cellMap=buildCellMapFromScan({sheet:sheetName, firstCol:src.firstCol||'B', lines:provisional.map(p=>({key:p.key,row:p.row,name:p.name,metric:p.metric})).concat(keep.filter(v=>v.range).map(v=>{ const rp=parseRange(v.range); return {key:v.key,row:+rp.row||0,name:v.name,metric:v.metric||''}; }))});
+  const classes=classifyLinesFromFormulas(provisional.map(p=>p.l), cellMap, sheetName, true);
+  let nForm=0, nIn=0, nOut=0;
+  const newLines=provisional.map((p,idx)=>{
+    const series=periods.map((_,pi)=> (p.l.series[pi]===undefined?null:p.l.series[pi]));
+    const cls=classes[idx]||{kind:'output',mapStatus:'unmapped',confidence:'low'};
+    const range=p.row?buildRange(sheetName, src.firstCol||'B', p.row, periods.length):'';
+    const v={key:p.key,name:p.name,metric:p.metric,account:p.name,forecast:series,read:series,srcLine:true,range:range||''};
+    applyClassifyToVar(v, cls);
+    demoteConfirmedWithoutRange(v);
+    if(cls.kind==='formula'){ nForm++; }
+    else if(cls.kind==='input'){
+      v.base=(series.find(x=>x!=null)!=null?Number(series.find(x=>x!=null)):0); v.steps=[]; v.delta=0;
+      if(series.length){ for(let i=1;i<series.length;i++) if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]}); }
+      nIn++;
+    } else { nOut++; }
+    const prev=p.prev||{};
+    ['good','favOverride','agg','group','actuals','actualRange','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
+    if(prev.kind==='formula' && prev.expr && cls.kind!=='formula'){ v.kind='formula'; v.expr=prev.expr; v.mapStatus=prev.mapStatus||'manual'; }
+    if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
+    demoteConfirmedWithoutRange(v);
+    return v;
+  });
+  model.uiState=model.uiState||{};
+  model.uiState.scanCatalog=(F.lines||[]).filter(l=>l&&l.row).map(l=>({
+    name:l.name, metric:l.metric||'', row:l.row, sheet:sheetName, firstCol:src.firstCol||'B',
+    range:buildRange(sheetName, src.firstCol||'B', l.row, periods.length),
+    id:nrm(l.metric||'')+'|'+nrm(l.name||'')
+  }));
+  model.uiState.scanMeta={sheet:sheetName, firstCol:src.firstCol||'B', months:periods.length};
+  try{
+    if(conn.actualsSsid){
+      const aSrc=Object.assign({}, src, {ssid:conn.actualsSsid}, (model.sources&&model.sources.actual)||{});
+      aSrc.ssid=conn.actualsSsid;
+      const A=await readSource(aSrc);
+      const idOf=l=>nrm(l.metric||'')+'|'+nrm(l.name);
+      const aById={}; (A.lines||[]).forEach(l=>{ aById[idOf(l)]=l; });
+      const aUsed=new Set();
+      const placeAct=(v)=>{
+        if(!v||v.actualRange) return;
+        const id=nrm(v.metric||'')+'|'+nrm(v.account||v.name||'');
+        let al=aById[id];
+        if(!al){ const hit=bestLabelMatch(v, A.lines||[], aUsed); if(hit){ al=hit.line; aUsed.add(hit.id); } }
+        else aUsed.add(id);
+        if(al&&al.row){ v.actualRange=buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', al.row, periods.length); if(al.series) v.actuals=periods.map((_,pi)=>al.series[pi]===undefined?null:al.series[pi]); }
+      };
+      newLines.forEach(placeAct);
+      keep.forEach(placeAct);
+      model.uiState.scanActualsCatalog=(A.lines||[]).filter(l=>l&&l.row).map(l=>({
+        name:l.name, metric:l.metric||'', row:l.row, sheet:aSrc.tab||'', firstCol:aSrc.firstCol||src.firstCol||'B',
+        range:buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', l.row, periods.length),
+        id:idOf(l)
+      }));
+    } else {
+      model.uiState.scanActualsCatalog=[];
+    }
+  }catch(e){ model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[]; }
+  model.vars=keep.concat(newLines); model.periods=periods;
+  model.sources=Object.assign({}, model.sources, {forecast:src});
+  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length) model.displayVars=[(newLines.find(v=>v.kind==='formula')||newLines[newLines.length-1]||keep[keep.length-1]||{}).key].filter(Boolean);
+  recompileAll(); saveModel();
+  if(!model.uiState.scanCatalog.length) throw new Error('Scan found lines but could not place sheet rows — check header/label layout');
+  return {newLines:newLines.length, keep:keep.length, keepMatched:keepMatchedKeys.length, catalog:model.uiState.scanCatalog.length, formulas:nForm, name:F.name||''};
+}
+async function ensureScanCatalog(){
+  if(hasScanCatalog()) return scanCatalog();
+  if(!conn.connected) throw new Error('Connect a sheet first');
+  await ingestFromConnectedSheet({});
+  return scanCatalog();
+}
 function rescaleMappedRanges(newN){
   const n=Math.max(1, newN|0);
   (model.vars||[]).forEach(v=>{
@@ -4258,6 +4297,7 @@ function persistUiState(){
   try{
     model.uiState.v={A:_vState.A,B:_vState.B,line:_vState.line,win:_vState.win?_vState.win.slice():null,priorN:_vState.priorN,userVer:!!_vState.userVer,winUser:!!_vState.winUser};
     model.uiState.c={line:_cState.line,base:_cState.base,cmp:_cState.cmp,win:_cState.win?_cState.win.slice():null,cinema:!!_cState.cinema,scrub:_cState.scrub|0};
+    /* scanCatalog / scanActualsCatalog / scanMeta intentionally preserved on uiState */
   }catch(e){}
 }
 function saveModel(){ persistUiState(); try{ localStorage.setItem('nn_model',JSON.stringify(model)); }catch(e){} }
