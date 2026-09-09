@@ -1018,6 +1018,7 @@ async function ingestFormulaGraphFromSheet(opts){
     return {name:v.name, metric:v.metric||'', row:+rp.row||0, sheet:rp.sheet||'', firstCol:rp.col||firstCol, range:v.range, id:nrm(v.metric||'')+'|'+nrm(v.name||'')};
   });
   model.uiState.scanMeta={sheet:sheetName, firstCol, months:periods.length, mode:'formula-graph'};
+  model.uiState.graphIngestVersion=GRAPH_INGEST_VERSION;
   model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[];
   if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length){
     const sub=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
@@ -1758,6 +1759,8 @@ function viewSetup(){
   const startLbl=model.periods[0]||"", endLbl=model.periods[P()-1]||"";
   const filt=(model.uiState&&model.uiState.mapFilter)||'all';
   const reviewN=model.vars.filter(needsMapReview).length;
+  const staleInfo=staleGraphModel();
+  const staleBanner=(staleInfo.fakes&&staleInfo.fakes.length)?`<div class="mapbanner" style="background:#fff0f1;border-color:#f0cdd2"><span><b>Stale local model</b> — hard refresh is not enough. Click <b>Clear all</b>, then <b>Connect &amp; Scan</b>. Fake Inputs: ${esc(staleInfo.fakes.slice(0,6).map(v=>v.name).join(', '))}${staleInfo.fakes.length>6?'…':''}</span></div>`:'';
   const rows=model.vars.map((v,i)=>{
     const st=mapStatusOf(v);
     if(filt==='review' && !needsMapReview(v)) return '';
@@ -1816,7 +1819,7 @@ function viewSetup(){
   <div class="panel" style="margin-top:16px">
     <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Variables &amp; formulas</p><h2>What each number is, and where it lives</h2></div>
       <div style="display:flex;gap:8px">${model.vars.length?`<button class="btn sm" onclick="clearModel()" title="Remove every line and start blank">Clear all</button>`:''}<button class="btn sm indigo" onclick="addVar()">+ Add variable</button></div></div>
-    <div class="panel-pad" style="padding-bottom:0">${banner}</div>
+    ${staleBanner}<div class="panel-pad" style="padding-bottom:0">${banner}</div>
     <div style="overflow-x:auto"><table class="vtbl">
       <thead><tr><th>Variable</th><th>Type</th><th>Definition</th><th>Sheet cell(s)</th><th>Mapping</th><th></th></tr></thead>
       <tbody>${rows||`<tr><td colspan="6" class="mut fz12">No lines in this filter.</td></tr>`}</tbody>
@@ -4670,6 +4673,29 @@ function ensureModelShape(){
   // scenarios migration no-op if missing (legacy field reserved)
   if(model.scenarios===undefined){ /* no-op */ }
   recompileAll();
+}
+const GRAPH_INGEST_VERSION=3;
+function isStaleFakePnLInput(v){
+  if(!v) return false;
+  if(v.kind==='formula' && v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
+  /* P&L revenue/COGS-looking lines stored as Input with only a P&L range and no sheet formula = pre-walk localStorage */
+  const nm=String(v.name||'');
+  if(!/revenue|cogs|gross|cost|margin|subscription|usage|discount|credit|refund|ebitda|opex|cash/i.test(nm)) return false;
+  if(v.kind!=='input') return false;
+  if(v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
+  const rng=String(v.range||'');
+  return /p\s*&\s*l|pnl/i.test(rng) || !!v.srcLine || !!v.srcGraph;
+}
+function staleGraphModel(){
+  const fakes=(model.vars||[]).filter(isStaleFakePnLInput);
+  const ver=(model.uiState&&model.uiState.graphIngestVersion)|0;
+  return {stale: fakes.length>0 || (fakes.length===0 && ver>0 && ver<GRAPH_INGEST_VERSION && (model.sources&&model.sources.graph)), fakes};
+}
+function warnIfStaleGraph(){
+  const s=staleGraphModel();
+  if(!s.stale && !(s.fakes&&s.fakes.length)) return;
+  const names=s.fakes.slice(0,5).map(v=>v.name).join(', ');
+  toast('Stale model — Clear all, then Connect & Scan (hard refresh alone keeps old Inputs'+(names?': '+names:'')+')');
 }
 function loadLocal(){
   try{ const m=localStorage.getItem('nn_model'); if(m){ const p=JSON.parse(m); if(p&&p.vars&&p.vars.length) model=p; } }catch(e){}
