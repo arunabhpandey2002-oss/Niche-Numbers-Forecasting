@@ -467,7 +467,7 @@ const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec
 function genMonths(n,startM=8,startY=26){ let m=startM,y=startY,out=[]; for(let i=0;i<n;i++){ out.push(MN[m]+" ’"+y); m++; if(m>11){m=0;y++;} } return out; }
 
 /* ---- expression compiler (shunting-yard → RPN) + FP&A helpers ---- */
-const NN_FN_ARITY={lag:2, if:3, sum_periods:1, sum:1, pct:2};
+const NN_FN_ARITY={lag:2, if:3, sum_periods:1, sum:1, pct:2, max:2, min:2};
 const NN_FN_VREF=new Set(['lag','sum_periods','sum']); /* first arg is a variable reference */
 function compile(expr){
   const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[(),+\-*/]/g))||[];
@@ -573,6 +573,14 @@ function evalRPN(rpn,scope,ctx){
         const cond=args[0], a=args[1], b=args[2];
         if(!Number.isFinite(cond)) st.push(NaN);
         else st.push(cond!==0 ? a : b);
+      } else if(x.fn==='max'){
+        const a=args[0], b=args[1];
+        if(!Number.isFinite(a) || !Number.isFinite(b)) st.push(NaN);
+        else st.push(Math.max(a,b));
+      } else if(x.fn==='min'){
+        const a=args[0], b=args[1];
+        if(!Number.isFinite(a) || !Number.isFinite(b)) st.push(NaN);
+        else st.push(Math.min(a,b));
       } else if(x.fn==='pct'){
         const a=args[0], b=args[1];
         if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
@@ -1087,21 +1095,26 @@ function upsertPricingVar(spec){
 /** Keep Pricing drivers first-class in the shared model graph ( forecaster / X-ray / scenarios ). */
 function syncPricingDrivers(){
   const c = computePricing();
+  /* Tier list revenue stays engine-fed (progressive bands). Waterfall is formula-backed. */
   upsertPricingVar({key:'paying_seats', name:'Paying seats', unit:'#', kind:'input', base:c.paying_seats, writable:true});
+  upsertPricingVar({key:'seat_list', name:'Seat list revenue', unit:'₹', kind:'input', base:c.seat_list, writable:false});
+  upsertPricingVar({key:'usage_list', name:'Usage list revenue', unit:'₹', kind:'input', base:c.usage_list, writable:false});
   upsertPricingVar({key:'seat_discount_pct', name:'Seat line discount', unit:'%', kind:'input', base:c.seat_discount_pct, writable:true});
   upsertPricingVar({key:'usage_discount_pct', name:'Usage line discount', unit:'%', kind:'input', base:c.usage_discount_pct, writable:true});
   upsertPricingVar({key:'contract_discount_pct', name:'Contract discount', unit:'%', kind:'input', base:c.contract_discount_pct, writable:true});
   upsertPricingVar({key:'promo_discount_pct', name:'Promo discount', unit:'%', kind:'input', base:c.promo_discount_pct, writable:true});
   upsertPricingVar({key:'discount_amount', name:'Flat discount amount', unit:'₹', kind:'input', base:c.discount_amount, writable:true});
-  /* Snapshot list / net figures as formula constants via inputs updated each sync — X-ray sees them as drivers */
-  upsertPricingVar({key:'seat_list', name:'Seat list revenue', unit:'₹', kind:'input', base:c.seat_list, writable:false});
-  upsertPricingVar({key:'usage_list', name:'Usage list revenue', unit:'₹', kind:'input', base:c.usage_list, writable:false});
+
   upsertPricingVar({key:'list_revenue', name:'List revenue', unit:'₹', kind:'formula', expr:'seat_list + usage_list'});
-  upsertPricingVar({key:'revenue_seats_net', name:'Seats net revenue', unit:'₹', kind:'input', base:c.revenue_seats_net, writable:false});
-  upsertPricingVar({key:'revenue_usage_net', name:'Usage net revenue', unit:'₹', kind:'input', base:c.revenue_usage_net, writable:false});
-  upsertPricingVar({key:'revenue_total_net', name:'Total net revenue', unit:'₹', kind:'input', base:c.revenue_total_net, writable:false});
-  upsertPricingVar({key:'arpu', name:'ARPU', unit:'₹', kind:'input', base:c.arpu, writable:false});
-  upsertPricingVar({key:'effective_discount_pct', name:'Effective discount', unit:'%', kind:'input', base:c.effective_discount_pct, writable:false});
+  /* Line-level nets — after seat/usage discounts only (CFO lock) */
+  upsertPricingVar({key:'revenue_seats_net', name:'Seats net (after line discount)', unit:'₹', kind:'formula', expr:'seat_list * (1 - seat_discount_pct)'});
+  upsertPricingVar({key:'revenue_usage_net', name:'Usage net (after line discount)', unit:'₹', kind:'formula', expr:'usage_list * (1 - usage_discount_pct)'});
+  upsertPricingVar({key:'pricing_after_contract', name:'After contract discount', unit:'₹', kind:'formula', expr:'(revenue_seats_net + revenue_usage_net) * (1 - contract_discount_pct)'});
+  upsertPricingVar({key:'pricing_after_promo', name:'After promo discount', unit:'₹', kind:'formula', expr:'pricing_after_contract * (1 - promo_discount_pct)'});
+  upsertPricingVar({key:'revenue_total_net', name:'Net after waterfall', unit:'₹', kind:'formula', expr:'max(0, pricing_after_promo - discount_amount)'});
+  upsertPricingVar({key:'arpu', name:'ARPU', unit:'₹', kind:'formula', expr:'if(paying_seats, revenue_total_net / paying_seats, 0)'});
+  upsertPricingVar({key:'effective_discount_pct', name:'Effective discount', unit:'%', kind:'formula', expr:'if(list_revenue, 1 - revenue_total_net / list_revenue, 0)'});
+
   if(pricing.link_revenue){
     const rev = vget('revenue');
     if(rev){ rev.kind='formula'; rev.expr='revenue_total_net'; rev.name = rev.name||'Net revenue'; rev.unit = rev.unit||'₹'; }
@@ -1139,7 +1152,9 @@ function loadPricing(){
   }catch(e){}
 }
 function fmtMoney(n){ const x=pricingNum(n); if(Math.abs(x)>=1e7) return '₹'+(x/1e7).toFixed(2)+' Cr'; if(Math.abs(x)>=1e5) return '₹'+(x/1e5).toFixed(2)+' L'; return '₹'+x.toLocaleString(undefined,{maximumFractionDigits:0}); }
-function fmtPct(n){ return (pricingNum(n)*100).toFixed(1)+'%'; }
+function pricingFmtPct(n){ return (pricingNum(n)*100).toFixed(1)+'%'; }
+function pricingPctField(n){ return +(pricingNum(n)*100).toFixed(4); } /* founder-facing 10 for 10% */
+function pricingPctFromField(val){ return Math.min(1, Math.max(0, pricingNum(val)/100)); }
 function fmtSeats(n){ return pricingNum(n).toLocaleString(undefined,{maximumFractionDigits:0}); }
 
 function viewPricing(){
@@ -1149,7 +1164,7 @@ function viewPricing(){
   return `<div class="pricing-wrap">
     <div class="pricing-hero">
       <div><p class="eyebrow">Pricing</p><h1 style="font-size:22px;letter-spacing:-.02em;margin:0 0 6px">Design the offer. Watch net revenue move.</h1>
-        <p class="mut fz13" style="margin:0;max-width:520px">AI hybrid reference: seats + usage, progressive tiers, then the discount waterfall. Every control is a model driver.</p></div>
+        <p class="mut fz13" style="margin:0;max-width:560px">AI hybrid reference: seats + usage, progressive tiers, then the discount waterfall. Controls set the plan base; period overrides belong in Forecasting (same drivers), so X-ray and scenarios stay consistent.</p></div>
       <div class="pricing-actions">
         <label class="mut fz12" style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${pricing.link_revenue?'checked':''} onchange="setPricingLinkRevenue(this.checked)"> Drive model <code>revenue</code></label>
         <button class="btn sm" onclick="resetPricingSeed()">Reset seed</button>
@@ -1157,10 +1172,10 @@ function viewPricing(){
     </div>
     <div class="pricing-kpis">
       <div class="pricing-kpi"><label>List revenue</label><b>${fmtMoney(c.list_revenue)}</b><span>before discounts</span></div>
-      <div class="pricing-kpi"><label>Seats net</label><b>${fmtMoney(c.revenue_seats_net)}</b><span>after line discount</span></div>
-      <div class="pricing-kpi"><label>Usage net</label><b>${fmtMoney(c.revenue_usage_net)}</b><span>after line discount</span></div>
-      <div class="pricing-kpi"><label>Total net</label><b>${fmtMoney(c.revenue_total_net)}</b><span>after waterfall</span></div>
-      <div class="pricing-kpi"><label>ARPU / Eff. disc.</label><b>${fmtMoney(c.arpu)}</b><span>${fmtPct(c.effective_discount_pct)} effective</span></div>
+      <div class="pricing-kpi"><label>Seats (after line discount)</label><b>${fmtMoney(c.revenue_seats_net)}</b><span>before contract / promo / flat</span></div>
+      <div class="pricing-kpi"><label>Usage (after line discount)</label><b>${fmtMoney(c.revenue_usage_net)}</b><span>before contract / promo / flat</span></div>
+      <div class="pricing-kpi"><label>Net after waterfall</label><b>${fmtMoney(c.revenue_total_net)}</b><span>contract → promo → flat</span></div>
+      <div class="pricing-kpi"><label>ARPU / Eff. disc.</label><b>${fmtMoney(c.arpu)}</b><span>${pricingFmtPct(c.effective_discount_pct)} effective</span></div>
     </div>
     <div class="pricing-grid">
       <div class="pricing-card">
@@ -1170,8 +1185,8 @@ function viewPricing(){
           <input class="inp" type="number" min="0" step="1" value="${esc(String(pricing.paying_seats))}" onchange="setPricingField('paying_seats', this.value)"></div>
         <table class="tier-table"><thead><tr><th>Tier</th><th>Up to</th><th>Price / seat</th><th></th></tr></thead><tbody>${seatRows}</tbody></table>
         <button class="btn sm" style="margin-top:8px" onclick="addPricingTier('seat')">+ Tier</button>
-        <div class="field" style="max-width:220px;margin-top:14px"><label>Seat line discount</label>
-          <input class="inp" type="number" min="0" max="1" step="0.01" value="${esc(String(pricing.seat_discount_pct))}" onchange="setPricingField('seat_discount_pct', this.value)"><span class="mut fz11">0–1 (e.g. 0.1 = 10%)</span></div>
+        <div class="field" style="max-width:220px;margin-top:14px"><label>Seat line discount (%)</label>
+          <input class="inp" type="number" min="0" max="100" step="0.1" value="${esc(String(pricingPctField(pricing.seat_discount_pct)))}" onchange="setPricingPctField('seat_discount_pct', this.value)"></div>
       </div>
       <div class="pricing-card">
         <h2>Usage</h2>
@@ -1184,27 +1199,27 @@ function viewPricing(){
         </div>
         <table class="tier-table"><thead><tr><th>Tier</th><th>Up to</th><th>Price / unit</th><th></th></tr></thead><tbody>${usageRows}</tbody></table>
         <button class="btn sm" style="margin-top:8px" onclick="addPricingTier('usage')">+ Tier</button>
-        <div class="field" style="max-width:220px;margin-top:14px"><label>Usage line discount</label>
-          <input class="inp" type="number" min="0" max="1" step="0.01" value="${esc(String(pricing.usage_discount_pct))}" onchange="setPricingField('usage_discount_pct', this.value)"></div>
+        <div class="field" style="max-width:220px;margin-top:14px"><label>Usage line discount (%)</label>
+          <input class="inp" type="number" min="0" max="100" step="0.1" value="${esc(String(pricingPctField(pricing.usage_discount_pct)))}" onchange="setPricingPctField('usage_discount_pct', this.value)"></div>
       </div>
     </div>
     <div class="pricing-card">
       <h2>Discount waterfall</h2>
-      <p class="lead">Applied in order on the remaining base. No silent stacking outside this sequence.</p>
+      <p class="lead">Line discounts stay on seats and usage. Contract, promo, and flat apply only to the combined base and land in net after waterfall — not allocated back to seats vs usage.</p>
       <div class="frow three" style="margin-bottom:12px">
-        <div class="field"><label>Contract discount</label>
-          <input class="inp" type="number" min="0" max="1" step="0.01" value="${esc(String(pricing.contract_discount_pct))}" onchange="setPricingField('contract_discount_pct', this.value)"></div>
-        <div class="field"><label>Promo discount</label>
-          <input class="inp" type="number" min="0" max="1" step="0.01" value="${esc(String(pricing.promo_discount_pct))}" onchange="setPricingField('promo_discount_pct', this.value)"></div>
+        <div class="field"><label>Contract discount (%)</label>
+          <input class="inp" type="number" min="0" max="100" step="0.1" value="${esc(String(pricingPctField(pricing.contract_discount_pct)))}" onchange="setPricingPctField('contract_discount_pct', this.value)"></div>
+        <div class="field"><label>Promo discount (%)</label>
+          <input class="inp" type="number" min="0" max="100" step="0.1" value="${esc(String(pricingPctField(pricing.promo_discount_pct)))}" onchange="setPricingPctField('promo_discount_pct', this.value)"></div>
         <div class="field"><label>Flat amount</label>
           <input class="inp" type="number" min="0" step="100" value="${esc(String(pricing.discount_amount))}" onchange="setPricingField('discount_amount', this.value)"></div>
       </div>
       <div class="waterfall">
         <div class="wf-row"><span>1 · List (seats + usage)</span><b>${fmtMoney(c.list_revenue)}</b></div>
         <div class="wf-row"><span>2 · After line discounts</span><b>${fmtMoney(c.seat_net + c.usage_net)}</b></div>
-        <div class="wf-row"><span>3 · After contract ${fmtPct(c.contract_discount_pct)}</span><b>${fmtMoney((c.seat_net + c.usage_net) * (1 - c.contract_discount_pct))}</b></div>
-        <div class="wf-row"><span>4 · After promo ${fmtPct(c.promo_discount_pct)}</span><b>${fmtMoney((c.seat_net + c.usage_net) * (1 - c.contract_discount_pct) * (1 - c.promo_discount_pct))}</b></div>
-        <div class="wf-row total"><span>5 · Total net (flat ${fmtMoney(c.discount_amount)} off)</span><b>${fmtMoney(c.revenue_total_net)}</b></div>
+        <div class="wf-row"><span>3 · After contract ${pricingFmtPct(c.contract_discount_pct)}</span><b>${fmtMoney((c.seat_net + c.usage_net) * (1 - c.contract_discount_pct))}</b></div>
+        <div class="wf-row"><span>4 · After promo ${pricingFmtPct(c.promo_discount_pct)}</span><b>${fmtMoney((c.seat_net + c.usage_net) * (1 - c.contract_discount_pct) * (1 - c.promo_discount_pct))}</b></div>
+        <div class="wf-row total"><span>5 · Net after waterfall (flat ${fmtMoney(c.discount_amount)} off)</span><b>${fmtMoney(c.revenue_total_net)}</b></div>
       </div>
     </div>
   </div>`;
@@ -1222,8 +1237,20 @@ function pricingTierKey(kind){ return kind==='seat' ? 'seat_tiers' : 'usage_tier
 function setPricingField(k, val){
   if(k==='usage_unit_label'){ pricing[k]=String(val||'tokens'); }
   else { pricing[k]=pricingNum(val); }
-  savePricing(); syncPricingDrivers(); saveModel(); if(uiTab==='pricing') render(); else render();
+  /* Plan base — period overrides live on the model input (Forecast drag / ov). */
+  savePricing(); syncPricingDrivers(); saveModel(); render();
   toast('Pricing updated');
+}
+function setPricingPctField(k, val){
+  pricing[k]=pricingPctFromField(val);
+  savePricing(); syncPricingDrivers(); saveModel(); render();
+  toast('Pricing updated');
+}
+/** Read period override from model if present; Pricing tab edits the plan base. */
+function pricingInputAt(key, period){
+  const v=vget(key); if(!v) return pricingNum(pricing[key]);
+  if(typeof inputVal==='function') return inputVal(v, period, true);
+  return pricingNum(v.base);
 }
 function setPricingTier(kind, i, field, val){
   const key=pricingTierKey(kind); const rows=pricing[key]||[]; if(!rows[i]) return;
@@ -1270,9 +1297,9 @@ function pricingPromoteRows(){
   push('contract_discount_pct','Contract discount','%',c.contract_discount_pct);
   push('promo_discount_pct','Promo discount','%',c.promo_discount_pct);
   push('discount_amount','Flat discount amount','₹',c.discount_amount);
-  push('revenue_seats_net','Seats net revenue','₹',c.revenue_seats_net);
-  push('revenue_usage_net','Usage net revenue','₹',c.revenue_usage_net);
-  push('revenue_total_net','Total net revenue','₹',c.revenue_total_net);
+  push('revenue_seats_net','Seats net (after line discount)','₹',c.revenue_seats_net);
+  push('revenue_usage_net','Usage net (after line discount)','₹',c.revenue_usage_net);
+  push('revenue_total_net','Net after waterfall','₹',c.revenue_total_net);
   push('arpu','ARPU','₹',c.arpu);
   push('effective_discount_pct','Effective discount','%',c.effective_discount_pct);
   return rows;
