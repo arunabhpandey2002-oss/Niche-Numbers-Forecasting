@@ -1563,44 +1563,56 @@ function openConfirmClassify(key){
   const kindOpts=['input','formula','output'].map(k=>`<option value="${k}" ${kindSel===k?'selected':''}>${k}</option>`).join('');
   const suggested=(v._suggestedExpr!=null&&v._suggestedExpr!=='')?v._suggestedExpr:(v.expr||'');
   const showFormula = !!(v.sheetFormula || st==='suggested' || v.kind==='formula');
-  const rp=parseRange(v.range||'');
-  const ra=parseRange(v.actualRange||'');
-  const knownSheets=[...new Set([...(conn.sheets||[]).map(s=>s.name), rp.sheet, ...model.vars.map(x=>parseRange(x.range).sheet)].filter(Boolean))];
-  const knownActSheets=[...new Set([...(conn.actualsSheets||[]).map(s=>s.name), ra.sheet].filter(Boolean))];
-  const fSheetField = (conn.sheets&&conn.sheets.length)
-    ? `<select id="ccFSheet" oninput="updCcRangePrev()">${['',...conn.sheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===rp.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
-    : `<input class="inp" id="ccFSheet" value="${esc(rp.sheet)}" placeholder="Assumptions" oninput="updCcRangePrev()">`;
-  const aSheetField = (conn.actualsSheets&&conn.actualsSheets.length)
-    ? `<select id="ccASheet" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}>${['',...conn.actualsSheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===ra.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
-    : `<input class="inp" id="ccASheet" value="${esc(ra.sheet)}" placeholder="Actuals" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}>`;
-  const actHint = conn.actualsSsid
-    ? (v.actualRange?'':'Leave blank for explicit “no actuals” on this line.')
-    : 'No actuals workbook connected — Connect sheet → Actuals to map, or leave blank.';
+  const cat=scanCatalog();
+  const aCat=scanActualsCatalog();
+  const curId=(cat.find(c=>c.range===v.range)||{}).id||'';
+  const curAId=(aCat.find(c=>c.range===v.actualRange)||{}).id||'';
+  const fOpts=['<option value="">— pick a sheet line —</option>'].concat(cat.map(c=>{
+    const lab=(c.metric?c.metric+' · ':'')+c.name;
+    return `<option value="${esc(c.id)}" ${c.id===curId||c.range===v.range?'selected':''}>${esc(lab)} · ${esc(c.range)}</option>`;
+  })).join('');
+  const aOpts=['<option value="">— no actuals —</option>'].concat(aCat.map(c=>{
+    const lab=(c.metric?c.metric+' · ':'')+c.name;
+    return `<option value="${esc(c.id)}" ${c.id===curAId||c.range===v.actualRange?'selected':''}>${esc(lab)} · ${esc(c.range)}</option>`;
+  })).join('');
+  const hasCat=cat.length>0;
+  const hasACat=aCat.length>0;
   showModal(`<div class="mhead"><h3>Confirm classification</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody confirm-classify">
-      <p class="mut fz12" style="margin:0 0 12px">Confirm type and <b>where it lives</b>. Forecast cell is required for Confirmed. Actuals are optional.</p>
+      <p class="mut fz12" style="margin:0 0 12px">Accept what Scan found. Pick a sheet line — you should not type column and row.</p>
       <div class="cc-row"><span class="cc-k">Line</span><span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span></div>
       <div class="cc-row"><span class="cc-k">Status</span><span class="mapchip ${st}">${mapStatusLabel(st)}</span>${v.classifyConfidence?` · ${esc(v.classifyConfidence)}`:''}</div>
-      ${v.sheetFormula?`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="expr">${esc(v.sheetFormula)}</span></div>`:`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="mut">None (values only)</span></div>`}
+      ${v.sheetFormula?`<div class="cc-row"><span class="cc-k">Sheet formula</span><span class="expr">${esc(v.sheetFormula)}</span></div>`:''}
       ${v.classifyNote?`<div class="cc-row"><span class="cc-k">Note</span><span class="mut">${esc(v.classifyNote)}</span></div>`:''}
       <div class="field" style="margin-top:12px"><label>Type</label><select class="inp" id="ccKind">${kindOpts}</select></div>
       <div class="field" id="ccExprRow" style="margin-top:10px;${showFormula?'':'display:none'}"><label>Model formula ${v.sheetFormula?'(accept / edit from sheet)':''}</label>
         <input class="inp" id="ccExpr" value="${esc(suggested)}" placeholder="e.g. price * new_customers"></div>
-      <p class="eyebrow" style="margin:16px 0 6px">Forecast cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required)</span></p>
-      <div class="frow three">
-        <div class="field"><label>Sheet / tab</label>${fSheetField}</div>
-        <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
-        <div class="field"><label>Start row</label><input class="inp" id="ccFRow" type="number" value="${esc(rp.row)}" placeholder="11" oninput="updCcRangePrev()"></div>
-      </div>
-      <div class="rangeprev" id="ccRangePrev"></div>
-      <p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>
-      <p class="mut fz11" style="margin:0 0 8px">${actHint}</p>
-      <div class="frow three">
-        <div class="field"><label>Tab</label>${aSheetField}</div>
-        <div class="field"><label>Column</label><input class="inp" id="ccACol" value="${esc(ra.col)}" placeholder="K" style="text-transform:uppercase" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}></div>
-        <div class="field"><label>Start row</label><input class="inp" id="ccARow" type="number" value="${esc(ra.row)}" placeholder="11" oninput="updCcActualPrev()" ${conn.actualsSsid?'':'disabled'}></div>
-      </div>
-      <div class="rangeprev" id="ccActualPrev">${conn.actualsSsid?(v.actualRange?'':''):'Actuals · not connected'}</div>
+      <p class="eyebrow" style="margin:16px 0 6px">Forecast line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required)</span></p>
+      ${hasCat
+        ? `<div class="field"><label>Sheet line</label><select class="inp" id="ccPickLine" onchange="onCcPickForecast()">${fOpts}</select></div>
+           <div class="rangeprev" id="ccRangePrev">${v.range?`→ forecast <b>${esc(v.range)}</b>`:'<span class="mut">Pick the matching sheet line</span>'}</div>
+           <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Advanced — type cells only if Scan missed</summary>
+             <div class="frow three" style="margin-top:8px">
+               <div class="field"><label>Sheet</label><input class="inp" id="ccFSheet" value="${esc(parseRange(v.range||'').sheet)}" oninput="updCcRangePrev()"></div>
+               <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(parseRange(v.range||'').col)}" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
+               <div class="field"><label>Start row</label><input class="inp" id="ccFRow" type="number" value="${esc(parseRange(v.range||'').row)}" oninput="updCcRangePrev()"></div>
+             </div>
+             <div class="rangeprev" id="ccRangePrevAdv"></div>
+           </details>`
+        : `<p class="mut fz12">No Scan catalog yet — Connect sheet and Scan first. Fallback:</p>
+           <div class="frow three">
+             <div class="field"><label>Sheet</label><input class="inp" id="ccFSheet" value="${esc(parseRange(v.range||'').sheet)}" oninput="updCcRangePrev()"></div>
+             <div class="field"><label>Column</label><input class="inp" id="ccFCol" value="${esc(parseRange(v.range||'').col)}" style="text-transform:uppercase" oninput="updCcRangePrev()"></div>
+             <div class="field"><label>Start row</label><input class="inp" id="ccFRow" type="number" value="${esc(parseRange(v.range||'').row)}" oninput="updCcRangePrev()"></div>
+           </div>
+           <div class="rangeprev" id="ccRangePrev"></div>`}
+      <p class="eyebrow" style="margin:16px 0 6px">Actuals line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>
+      ${!conn.actualsSsid
+        ? `<p class="mut fz11">Actuals · not connected</p>`
+        : (hasACat
+          ? `<div class="field"><label>Actuals sheet line</label><select class="inp" id="ccPickActual" onchange="onCcPickActual()">${aOpts}</select></div>
+             <div class="rangeprev" id="ccActualPrev">${v.actualRange?`→ actuals <b>${esc(v.actualRange)}</b>`:'<span class="mut">Actuals · no actuals (optional)</span>'}</div>`
+          : `<p class="mut fz11">Actuals connected but no catalog — leave as no actuals, or Scan again.</p><div class="rangeprev" id="ccActualPrev">Actuals · no actuals</div>`)}
       <div class="cc-actions">
         <button class="btn" onclick="closeModal();editVar(model.vars.indexOf(vget('${jesc(key)}')))">Full edit</button>
         <button class="btn primary" onclick="commitConfirmClassify('${jesc(key)}')">Confirm</button>
@@ -1610,16 +1622,42 @@ function openConfirmClassify(key){
   if(kindEl) kindEl.onchange=()=>{ const row=document.getElementById('ccExprRow'); if(row) row.style.display=(kindEl.value==='formula' || (document.getElementById('ccExpr')||{}).value)?'':'none'; };
   updCcRangePrev(); updCcActualPrev();
 }
-function updCcRangePrev(){ const el=document.getElementById('ccRangePrev'); if(!el)return;
+function onCcPickForecast(){
+  const id=(document.getElementById('ccPickLine')||{}).value||'';
+  const c=scanCatalog().find(x=>x.id===id);
+  const prev=document.getElementById('ccRangePrev');
+  if(c){
+    const sh=document.getElementById('ccFSheet'), col=document.getElementById('ccFCol'), row=document.getElementById('ccFRow');
+    const rp=parseRange(c.range||'');
+    if(sh) sh.value=rp.sheet||c.sheet||'';
+    if(col) col.value=rp.col||c.firstCol||'';
+    if(row) row.value=rp.row||c.row||'';
+    if(prev) prev.innerHTML=`→ forecast <b>${esc(c.range)}</b>`;
+  } else if(prev) prev.innerHTML=`<span class="mut">Pick the matching sheet line</span>`;
+  updCcRangePrev();
+}
+function onCcPickActual(){
+  const id=(document.getElementById('ccPickActual')||{}).value||'';
+  const c=scanActualsCatalog().find(x=>x.id===id);
+  const prev=document.getElementById('ccActualPrev');
+  if(c){ if(prev) prev.innerHTML=`→ actuals <b>${esc(c.range)}</b>`; }
+  else if(prev) prev.innerHTML=`<span class="mut">Actuals · no actuals (optional)</span>`;
+}
+function updCcRangePrev(){ const el=document.getElementById('ccRangePrevAdv')||document.getElementById('ccRangePrev'); if(!el)return;
+  if(document.getElementById('ccPickLine') && document.getElementById('ccPickLine').value){
+    const c=scanCatalog().find(x=>x.id===document.getElementById('ccPickLine').value);
+    if(c && document.getElementById('ccRangePrev')) document.getElementById('ccRangePrev').innerHTML=`→ forecast <b>${esc(c.range)}</b>`;
+  }
   const sh=(document.getElementById('ccFSheet')||{}).value||'', col=(document.getElementById('ccFCol')||{}).value||'', row=(document.getElementById('ccFRow')||{}).value||'';
   const r=buildRange(sh,col,row,P());
-  el.innerHTML = r ? `→ forecast <b>${r}</b> · ${P()} cells` : `<span class="mut">pick sheet, column &amp; row (required for Confirmed)</span>`;
+  const adv=document.getElementById('ccRangePrevAdv');
+  if(adv) adv.innerHTML = r ? `→ forecast <b>${r}</b> · ${P()} cells` : `<span class="mut">optional override</span>`;
+  else if(!document.getElementById('ccPickLine')) el.innerHTML = r ? `→ forecast <b>${r}</b> · ${P()} cells` : `<span class="mut">pick sheet, column &amp; row (required for Confirmed)</span>`;
 }
 function updCcActualPrev(){ const el=document.getElementById('ccActualPrev'); if(!el)return;
   if(!conn.actualsSsid){ el.innerHTML=`<span class="mut">Actuals · not connected</span>`; return; }
-  const sh=(document.getElementById('ccASheet')||{}).value||'', col=(document.getElementById('ccACol')||{}).value||'', row=(document.getElementById('ccARow')||{}).value||'';
-  const r=buildRange(sh,col,row,P());
-  el.innerHTML = r ? `→ actuals <b>${r}</b>` : `<span class="mut">Actuals · no actuals (optional)</span>`;
+  if(document.getElementById('ccPickActual')) return; /* picker owns the label */
+  el.innerHTML=`<span class="mut">Actuals · no actuals (optional)</span>`;
 }
 function commitConfirmClassify(key){
   const v=vget(key); if(!v) return;
@@ -1634,12 +1672,19 @@ function commitConfirmClassify(key){
   }
   if(kind==='input'){ v.writable=true; if(v.base==null) v.base=0; }
   if(kind==='output'){ v.writable=false; }
-  const fr=buildRange((document.getElementById('ccFSheet')||{}).value||'', (document.getElementById('ccFCol')||{}).value||'', (document.getElementById('ccFRow')||{}).value||'', P());
-  if(!fr){ toast('Map a forecast cell before Confirm'); return; }
+  let fr='';
+  const pick=(document.getElementById('ccPickLine')||{}).value||'';
+  if(pick){ const c=scanCatalog().find(x=>x.id===pick); if(c) fr=c.range||''; }
+  if(!fr) fr=buildRange((document.getElementById('ccFSheet')||{}).value||'', (document.getElementById('ccFCol')||{}).value||'', (document.getElementById('ccFRow')||{}).value||'', P());
+  if(!fr){ toast('Pick a forecast sheet line before Confirm'); return; }
   v.range=fr;
-  if(conn.actualsSsid && document.getElementById('ccASheet')){
-    const ar=buildRange((document.getElementById('ccASheet')||{}).value||'', (document.getElementById('ccACol')||{}).value||'', (document.getElementById('ccARow')||{}).value||'', P());
-    if(ar) v.actualRange=ar; else delete v.actualRange;
+  if(conn.actualsSsid){
+    const ap=(document.getElementById('ccPickActual')||{}).value||'';
+    if(ap){ const c=scanActualsCatalog().find(x=>x.id===ap); if(c&&c.range) v.actualRange=c.range; else delete v.actualRange; }
+    else if(!document.getElementById('ccPickActual')){
+      const ar=buildRange((document.getElementById('ccASheet')||{}).value||'', (document.getElementById('ccACol')||{}).value||'', (document.getElementById('ccARow')||{}).value||'', P());
+      if(ar) v.actualRange=ar; else delete v.actualRange;
+    } else delete v.actualRange;
   }
   v.mapStatus='confirmed'; v.classifyConfidence='confirmed';
   applyRollupHeuristic(v);
@@ -1652,9 +1697,9 @@ function confirmAllSuggested(){
     if(!canConfirmMap(v)){ skipped++; return; }
     v.mapStatus='confirmed'; v.classifyConfidence='confirmed'; n++;
   });
-  if(!n && skipped){ toast(skipped+' suggested line'+(skipped===1?'':'s')+' still need a forecast cell'); return; }
+  if(!n && skipped){ toast(skipped+' suggested line'+(skipped===1?'':'s')+' still need a forecast cell — Scan or pick a sheet line'); return; }
   if(!n){ toast('Nothing suggested to confirm'); return; }
-  saveModel(); render(); toast('Confirmed '+n+(skipped?` · ${skipped} still need a forecast cell`:''));
+  saveModel(); render(); toast('Confirmed '+n+(skipped?` · ${skipped} still need a forecast line`:''));
 }
 
 const CANW=2600, CANH=1500;
@@ -1844,7 +1889,10 @@ function setTimeline(){
   const sm=+document.getElementById('tlStart').value, sy=+document.getElementById('tlYear').value;
   const n=Math.max(1,Math.min(60,+document.getElementById('tlN').value||12));
   const cl=Math.max(0,Math.min(n,+document.getElementById('tlClosed').value||0));
-  model.periods=genMonths(n,sm,sy); model.closed=cl; render();
+  model.periods=genMonths(n,sm,sy); model.closed=cl;
+  /* Period lens is view-only — respan existing maps, never clear them */
+  rescaleMappedRanges(n);
+  saveModel(); render();
 }
 
 /* ---- add / edit variable ---- */
@@ -1890,24 +1938,52 @@ function varModal(idx){
       <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
         <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
       </div>
-      <p class="eyebrow" style="margin:16px 0 6px">Forecast cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
-      <div class="frow three">
+      <p class="eyebrow" style="margin:16px 0 6px">Forecast line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
+      ${scanCatalog().length?`<div class="field"><label>Sheet line</label><select class="inp" id="vPickLine" onchange="onEditPickForecast()">${['<option value="">— pick a sheet line —</option>'].concat(scanCatalog().map(c=>{ const lab=(c.metric?c.metric+' · ':'')+c.name; const sel=(c.range===v.range)?'selected':''; return `<option value="${esc(c.id)}" ${sel}>${esc(lab)} · ${esc(c.range)}</option>`; })).join('')}</select></div>
+      <div class="rangeprev" id="rangePrev">${v.range?`→ maps to <b>${esc(v.range)}</b>`:'<span class="mut">Pick a sheet line from Scan</span>'}</div>
+      <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Advanced — type cells only if Scan missed</summary>
+      <div class="frow three" style="margin-top:8px">
+        <div class="field"><label>Sheet / tab</label>${sheetField}</div>
+        <div class="field"><label>Column</label><input class="inp" id="vCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updRangePrev()"></div>
+        <div class="field"><label>Start row</label><input class="inp" id="vRow" type="number" value="${esc(rp.row)}" placeholder="11" oninput="updRangePrev()"></div>
+      </div>
+      <div class="rangeprev" id="rangePrevAdv"></div></details>`
+      :`<div class="frow three">
         <div class="field"><label>Sheet / tab</label>${sheetField}</div>
         <div class="field"><label>Column</label><input class="inp" id="vCol" value="${esc(rp.col)}" placeholder="K" style="text-transform:uppercase" oninput="updRangePrev()"></div>
         <div class="field"><label>Start row</label><input class="inp" id="vRow" type="number" value="${esc(rp.row)}" placeholder="11" oninput="updRangePrev()"></div>
       </div>
       <div class="rangeprev" id="rangePrev"></div>
+      <p class="mut fz11" style="margin-top:6px">Tip: Connect → Scan to pick sheet lines instead of typing column and row.</p>`}
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-2);margin-top:10px" id="vWritableRow"><input type="checkbox" id="vWritable" ${v.writable?'checked':''}> This is an input cell — write my plan back here</label>
-      ${(()=>{ const ra=parseRange(v.actualRange||''); const linked=!!conn.actualsSsid;
+      ${(()=>{
+        const ra=parseRange(v.actualRange||'');
+        const linked=!!conn.actualsSsid;
+        const aCat=scanActualsCatalog();
+        if(!linked){
+          return '<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p><p class="mut fz11">Actuals · not connected — add an actuals workbook in Connect to map.</p>';
+        }
+        if(aCat.length){
+          const opts=['<option value="">— no actuals —</option>'].concat(aCat.map(c=>{
+            const lab=(c.metric?c.metric+' · ':'')+c.name;
+            const sel=c.range===v.actualRange?' selected':'';
+            return '<option value="'+esc(c.id)+'"'+sel+'>'+esc(lab)+' · '+esc(c.range)+'</option>';
+          })).join('');
+          const prev=v.actualRange?('→ actuals <b>'+esc(v.actualRange)+'</b>'):'<span class="mut">Actuals · no actuals (optional)</span>';
+          return '<p class="eyebrow" style="margin:16px 0 6px">Actuals line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>'
+            +'<div class="field"><label>Actuals sheet line</label><select class="inp" id="vPickActual" onchange="onEditPickActual()">'+opts+'</select></div>'
+            +'<div class="rangeprev" id="actualPrev">'+prev+'</div>';
+        }
         const asheet=(conn.actualsSheets&&conn.actualsSheets.length)
-          ? `<select id="vaSheet" oninput="updActualPrev()" ${linked?'':'disabled'}>${['',...conn.actualsSheets.map(s=>s.name)].map(n=>`<option value="${esc(n)}" ${n===ra.sheet?'selected':''}>${n||'— pick a tab —'}</option>`).join('')}</select>`
-          : `<input class="inp" id="vaSheet" value="${esc(ra.sheet)}" placeholder="Actuals" oninput="updActualPrev()" ${linked?'':'disabled'}>`;
-        return `<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>
-        <p class="mut fz11" style="margin:0 0 8px">${linked?(v.actualRange?'':'Leave blank for explicit “no actuals” on this line.'):'Actuals · not connected — add an actuals workbook in Connect to map.'}</p>
-        <div class="frow three"><div class="field"><label>Tab</label>${asheet}</div>
-          <div class="field"><label>Column</label><input class="inp" id="vaCol" value="${esc(ra.col)}" placeholder="K" style="text-transform:uppercase" oninput="updActualPrev()" ${linked?'':'disabled'}></div>
-          <div class="field"><label>Start row</label><input class="inp" id="vaRow" type="number" value="${esc(ra.row)}" placeholder="11" oninput="updActualPrev()" ${linked?'':'disabled'}></div></div>
-        <div class="rangeprev" id="actualPrev"></div>`; })()}
+          ? ('<select id="vaSheet" oninput="updActualPrev()">'+([''].concat(conn.actualsSheets.map(s=>s.name))).map(n=>'<option value="'+esc(n)+'"'+(n===ra.sheet?' selected':'')+'>'+(n||'— pick a tab —')+'</option>').join('')+'</select>')
+          : ('<input class="inp" id="vaSheet" value="'+esc(ra.sheet)+'" placeholder="Actuals" oninput="updActualPrev()">');
+        return '<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>'
+          +'<p class="mut fz11" style="margin:0 0 8px">'+(v.actualRange?'':'Leave blank for explicit “no actuals” on this line.')+'</p>'
+          +'<div class="frow three"><div class="field"><label>Tab</label>'+asheet+'</div>'
+          +'<div class="field"><label>Column</label><input class="inp" id="vaCol" value="'+esc(ra.col)+'" placeholder="K" style="text-transform:uppercase" oninput="updActualPrev()"></div>'
+          +'<div class="field"><label>Start row</label><input class="inp" id="vaRow" type="number" value="'+esc(ra.row)+'" placeholder="11" oninput="updActualPrev()"></div></div>'
+          +'<div class="rangeprev" id="actualPrev"></div>';
+      })()}
       <div id="vErr" class="negv fz11" style="margin-top:8px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save'}</button></div>
     </div>`);
@@ -1928,9 +2004,29 @@ function updRangePrev(){ const el=document.getElementById('rangePrev'); if(!el)r
 }
 function updActualPrev(){ const el=document.getElementById('actualPrev'); if(!el)return;
   if(!conn.actualsSsid){ el.innerHTML=`<span class="mut">Actuals · not connected</span>`; return; }
+  if(document.getElementById('vPickActual')) return;
   const sh=(document.getElementById('vaSheet')||{}).value||'', col=(document.getElementById('vaCol')||{}).value||'', row=(document.getElementById('vaRow')||{}).value||'';
   const r=buildRange(sh,col,row,P());
   el.innerHTML = r ? `→ actuals from <b>${r}</b> in your actuals sheet` : `<span class="mut">Actuals · no actuals (optional)</span>`;
+}
+function onEditPickForecast(){
+  const id=(document.getElementById('vPickLine')||{}).value||'';
+  const c=scanCatalog().find(x=>x.id===id);
+  const prev=document.getElementById('rangePrev');
+  if(!c){ if(prev) prev.innerHTML=`<span class="mut">Pick a sheet line from Scan</span>`; return; }
+  const rp=parseRange(c.range||'');
+  const sh=document.getElementById('vSheet'), col=document.getElementById('vCol'), row=document.getElementById('vRow');
+  if(sh) sh.value=rp.sheet||c.sheet||'';
+  if(col) col.value=rp.col||c.firstCol||'';
+  if(row) row.value=rp.row||c.row||'';
+  if(prev) prev.innerHTML=`→ maps to <b>${esc(c.range)}</b> · ${P()} cells across your timeline`;
+}
+function onEditPickActual(){
+  const id=(document.getElementById('vPickActual')||{}).value||'';
+  const c=scanActualsCatalog().find(x=>x.id===id);
+  const prev=document.getElementById('actualPrev');
+  if(c){ if(prev) prev.innerHTML=`→ actuals <b>${esc(c.range)}</b>`; }
+  else if(prev) prev.innerHTML=`<span class="mut">Actuals · no actuals (optional)</span>`;
 }
 function addVar(){ varModal(null); }
 function editVar(i){ varModal(i); }
@@ -1943,12 +2039,19 @@ function saveVar(idx){
   if(!name||!key){ err.textContent="Name and key are required."; return; }
   if(!/^[A-Za-z_]/.test(key)){ err.textContent="Key must start with a letter."; return; }
   if(model.vars.some((v,i)=>v.key.toLowerCase()===key.toLowerCase() && i!==(idx==null?-1:idx))){ err.textContent="That key is already used."; return; }
-  const range=buildRange((document.getElementById('vSheet')||{}).value||'', (document.getElementById('vCol')||{}).value||'', (document.getElementById('vRow')||{}).value||'', P());
+  let range='';
+  const vPick=(document.getElementById('vPickLine')||{}).value||'';
+  if(vPick){ const c=scanCatalog().find(x=>x.id===vPick); if(c) range=c.range||''; }
+  if(!range) range=buildRange((document.getElementById('vSheet')||{}).value||'', (document.getElementById('vCol')||{}).value||'', (document.getElementById('vRow')||{}).value||'', P());
   const prev = idx!=null ? model.vars[idx] : {};
   const v={key,name,unit,kind,range};
   ['phase','ramp','good','favOverride','actuals','actualRange','forecast','read','metric','account','group','srcLine','mapStatus','solveMode','solveDriver','pins','sheetFormula'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
   const aggSel=(document.getElementById('vAgg')||{}).value; if(aggSel) v.agg=aggSel; else delete v.agg;
-  if(document.getElementById('vaSheet')){ const ar=buildRange(document.getElementById('vaSheet').value||'', (document.getElementById('vaCol')||{}).value||'', (document.getElementById('vaRow')||{}).value||'', P()); if(ar) v.actualRange=ar; else delete v.actualRange; }
+  const aPick=(document.getElementById('vPickActual')||{}).value;
+  if(aPick!=null && document.getElementById('vPickActual')){
+    if(aPick){ const c=scanActualsCatalog().find(x=>x.id===aPick); if(c&&c.range) v.actualRange=c.range; else delete v.actualRange; }
+    else delete v.actualRange;
+  } else if(document.getElementById('vaSheet')){ const ar=buildRange(document.getElementById('vaSheet').value||'', (document.getElementById('vaCol')||{}).value||'', (document.getElementById('vaRow')||{}).value||'', P()); if(ar) v.actualRange=ar; else delete v.actualRange; }
   if(kind==='input'){ v.base=parseFloat(document.getElementById('vBase').value)||0; v.steps=(idx!=null&&model.vars[idx].kind==='input')?model.vars[idx].steps:[]; v.delta=(idx!=null&&model.vars[idx].delta)||0; v.writable=document.getElementById('vWritable').checked; }
   else if(kind==='formula'){ v.expr=document.getElementById('vExpr').value.trim(); const c=compile(v.expr);
       const known=model.vars.filter((_,i)=>i!==(idx==null?-1:idx)).map(x=>x.key.toLowerCase()); const missing=c.deps.filter(d=>!known.includes(d.toLowerCase()));
@@ -3527,6 +3630,17 @@ async function scanModelSheet(){
     const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
     const sheetName=src.tab||'';
     /* provisional keys + cell map for formula parse */
+    /* Match keep (Pricing / formula drivers) to sheet lines first so Scan places their cells */
+    const consumedIds=new Set();
+    const keepMatchedKeys=[];
+    keep.forEach(v=>{
+      const hit=bestLabelMatch(v, F.lines, consumedIds);
+      if(!hit) return;
+      consumedIds.add(hit.id);
+      applySheetLineToVar(v, hit.line, sheetName, src.firstCol||'B', periods.length, false);
+      if(v.range){ v.mapStatus='auto'; v.classifyConfidence=hit.score>=90?'high':'medium'; demoteConfirmedWithoutRange(v); keepMatchedKeys.push(v.key); }
+    });
+
     const provisional=F.lines.map((l)=>{
       const name=l.name, metric=l.metric||'';
       const id=nrm(metric)+'|'+nrm(name);
@@ -3534,9 +3648,9 @@ async function scanModelSheet(){
       const key=(prev&&prev.key&&!usedK[prev.key])?prev.key:uk((metric?metric+'_':'')+name);
       usedK[key]=1;
       return {l, name, metric, key, id, prev, row:l.row};
-    });
-    const cellMap=buildCellMapFromScan({sheet:sheetName, firstCol:src.firstCol||'B', lines:provisional.map(p=>({key:p.key,row:p.row,name:p.name,metric:p.metric}))});
-    const classes=classifyLinesFromFormulas(F.lines, cellMap, sheetName, true);
+    }).filter(p=>!consumedIds.has(p.id));
+    const cellMap=buildCellMapFromScan({sheet:sheetName, firstCol:src.firstCol||'B', lines:provisional.map(p=>({key:p.key,row:p.row,name:p.name,metric:p.metric})).concat(keep.filter(v=>v.range).map(v=>{ const rp=parseRange(v.range); return {key:v.key,row:+rp.row||0,name:v.name,metric:v.metric||''}; }))});
+    const classes=classifyLinesFromFormulas(provisional.map(p=>p.l), cellMap, sheetName, true);
     let nForm=0, nIn=0, nOut=0;
     const newLines=provisional.map((p,idx)=>{
       const series=periods.map((_,pi)=> (p.l.series[pi]===undefined?null:p.l.series[pi]));
@@ -3553,11 +3667,20 @@ async function scanModelSheet(){
       } else { nOut++; }
       const prev=p.prev||{};
       ['good','favOverride','agg','group','actuals','actualRange','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
-      /* upsert: if prev was formula/input with manual map, keep kind/expr unless we auto-parsed */
       if(prev.kind==='formula' && prev.expr && cls.kind!=='formula'){ v.kind='formula'; v.expr=prev.expr; v.mapStatus=prev.mapStatus||'manual'; }
       if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
+      demoteConfirmedWithoutRange(v);
       return v;
     });
+    /* Persist scan catalogs so Confirm/Edit pick a line instead of typing col/row */
+    model.uiState=model.uiState||{};
+    model.uiState.scanCatalog=(F.lines||[]).filter(l=>l&&l.row).map(l=>({
+      name:l.name, metric:l.metric||'', row:l.row, sheet:sheetName, firstCol:src.firstCol||'B',
+      range:buildRange(sheetName, src.firstCol||'B', l.row, periods.length),
+      id:nrm(l.metric||'')+'|'+nrm(l.name||'')
+    }));
+    model.uiState.scanMeta={sheet:sheetName, firstCol:src.firstCol||'B', months:periods.length};
+
     /* Auto-fill actualRange when actuals workbook is connected and labels match */
     try{
       if(conn.actualsSsid){
@@ -3566,12 +3689,26 @@ async function scanModelSheet(){
         const A=await readSource(aSrc);
         const idOf=l=>nrm(l.metric||'')+'|'+nrm(l.name);
         const aById={}; (A.lines||[]).forEach(l=>{ aById[idOf(l)]=l; });
-        newLines.forEach(v=>{
-          if(v.actualRange) return;
+        const aUsed=new Set();
+        const placeAct=(v)=>{
+          if(!v||v.actualRange) return;
           const id=nrm(v.metric||'')+'|'+nrm(v.account||v.name||'');
-          const al=aById[id];
+          let al=aById[id];
+          if(!al){ const hit=bestLabelMatch(v, A.lines||[], aUsed); if(hit){ al=hit.line; aUsed.add(hit.id); } }
+          else aUsed.add(id);
           if(al&&al.row){ v.actualRange=buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', al.row, periods.length); if(al.series) v.actuals=periods.map((_,pi)=>al.series[pi]===undefined?null:al.series[pi]); }
-        });
+        };
+        newLines.forEach(placeAct);
+        keep.forEach(placeAct);
+        model.uiState=model.uiState||{};
+        model.uiState.scanActualsCatalog=(A.lines||[]).filter(l=>l&&l.row).map(l=>({
+          name:l.name, metric:l.metric||'', row:l.row, sheet:aSrc.tab||'', firstCol:aSrc.firstCol||src.firstCol||'B',
+          range:buildRange(aSrc.tab||'', aSrc.firstCol||src.firstCol||'B', l.row, periods.length),
+          id:idOf(l)
+        }));
+      } else {
+        model.uiState=model.uiState||{};
+        model.uiState.scanActualsCatalog=[];
       }
     }catch(e){ /* actuals optional — leave explicit no-actuals */ }
     model.vars=keep.concat(newLines); model.periods=periods;
@@ -3586,7 +3723,9 @@ async function scanModelSheet(){
     const nUn=newLines.filter(v=>v.mapStatus==='unmapped').length;
     const formNote=nForm?` · ${nForm} formula${nForm>1?'s':''}`:'';
     const tagNote=` · ${nAuto} auto-tagged${nSug?`, ${nSug} need confirm`:''}${nUn?`, ${nUn} unmapped`:''}`;
-    const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${formNote}${tagNote}.`:` Loaded ${newLines.length} line(s)${formNote}${tagNote}.`;
+    const nKeepMap=(typeof keepMatchedKeys!=='undefined'?keepMatchedKeys.length:keep.filter(v=>v.range).length);
+    const keepNote=nKeepMap?` · auto-placed ${nKeepMap} existing driver${nKeepMap>1?'s':''}`:'';
+    const mergeNote=keep.length?` Merged ${newLines.length} lines; kept ${keep.length} driver line(s)${keepNote}${formNote}${tagNote}.`:` Loaded ${newLines.length} line(s)${formNote}${tagNote}.`;
     fb.innerHTML=`<div class="write-feedback success">✓ ${note}${mergeNote.trim()} from “${F.name||'your sheet'}”. Closing…</div>`;
     conn.connected=true; saveConn();
     setTimeout(()=>{ closeModal(); setStatus(F.name||'Connected',true); render(); toast(keep.length?`Merged ${newLines.length} lines; kept ${keep.length} drivers${formNote}`:`Loaded ${newLines.length} lines${formNote}`); },1100);
@@ -3715,6 +3854,80 @@ function disconnectModel(){
 }
 
 /* ============================ TWO-FILE IMPORT (forecast file + actuals file) ============================ */
+function nrm(s){ return String(s==null?'':s).toLowerCase().trim().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim(); }
+function labelTokens(s){ return nrm(s).split(' ').filter(Boolean); }
+/* Score how well a model var matches a scanned sheet line (higher = better). */
+function labelMatchScore(v, line){
+  if(!v||!line) return 0;
+  const vn=nrm(v.name||''), vk=nrm((v.key||'').replace(/_/g,' ')), vm=nrm(v.metric||'');
+  const ln=nrm(line.name||''), lm=nrm(line.metric||'');
+  if(!ln && !lm) return 0;
+  let score=0;
+  if(vn && vn===ln) score+=100;
+  if(vk && vk===ln) score+=95;
+  if(vn && lm && vn===lm) score+=70;
+  if(vm && lm && vm===lm) score+=40;
+  if(vn && ln && (ln.includes(vn)||vn.includes(ln))) score+=55;
+  if(vk && ln && (ln.includes(vk)||vk.includes(ln))) score+=50;
+  const vt=new Set(labelTokens(v.name||'').concat(labelTokens(v.key||''.replace(/_/g,' '))));
+  const lt=labelTokens(line.name||'');
+  let overlap=0; lt.forEach(t=>{ if(vt.has(t) && t.length>2) overlap++; });
+  score+=overlap*12;
+  /* light key synonyms for Pricing drivers */
+  const syn={
+    paying_seats:[/paying seats|paid seats|\bseats\b|subscribers|customers/],
+    usage_units:[/usage units|\busage\b|\bunits\b|consumption/],
+    price:[/\bprice\b|asp|arpu|price per/],
+    seat_discount_pct:[/seat.*discount|discount.*seat/],
+    usage_discount_pct:[/usage.*discount|discount.*usage/],
+    contract_discount_pct:[/contract.*discount|discount.*contract/],
+    promo_discount_pct:[/promo.*discount|discount.*promo/],
+    discount_amount:[/flat discount|discount amount|\bdiscount\b/],
+    list_revenue:[/list revenue|gross revenue|\brevenue\b/],
+    revenue_total_net:[/net revenue|revenue total|net after/],
+    gross_revenue:[/gross revenue|list revenue/],
+    net_revenue:[/net revenue/],
+    direct_costs:[/direct cost|cogs|cost of/],
+    gross_profit:[/gross profit/],
+    gross_margin_pct:[/gross margin/]
+  };
+  const rules=syn[String(v.key||'').toLowerCase()];
+  if(rules && rules.some(r=>r.test(ln)||r.test(lm+' '+ln))) score+=80;
+  return score;
+}
+function bestLabelMatch(v, lines, usedIds){
+  let best=null, bestScore=0;
+  (lines||[]).forEach(line=>{
+    const id=nrm(line.metric||'')+'|'+nrm(line.name||'');
+    if(usedIds && usedIds.has(id)) return;
+    const sc=labelMatchScore(v, line);
+    if(sc>bestScore){ bestScore=sc; best=line; }
+  });
+  if(bestScore<55) return null; /* threshold — avoid weak false matches */
+  return {line:best, score:bestScore, id:nrm(best.metric||'')+'|'+nrm(best.name||'')};
+}
+function scanCatalog(){ return (model.uiState&&model.uiState.scanCatalog)||[]; }
+function scanActualsCatalog(){ return (model.uiState&&model.uiState.scanActualsCatalog)||[]; }
+function rescaleMappedRanges(newN){
+  const n=Math.max(1, newN|0);
+  (model.vars||[]).forEach(v=>{
+    if(v.range){ const rp=parseRange(v.range); if(rp.sheet&&rp.col&&rp.row) v.range=buildRange(rp.sheet,rp.col,rp.row,n); }
+    if(v.actualRange){ const ra=parseRange(v.actualRange); if(ra.sheet&&ra.col&&ra.row) v.actualRange=buildRange(ra.sheet,ra.col,ra.row,n); }
+  });
+}
+function applySheetLineToVar(v, line, sheetName, firstCol, periodsLen, asActual){
+  if(!v||!line||!line.row) return false;
+  const rng=buildRange(sheetName||'', firstCol||'B', line.row, periodsLen||P());
+  if(!rng) return false;
+  if(asActual){ v.actualRange=rng; if(line.series) v.actuals=(line.series||[]).slice(); }
+  else {
+    v.range=rng;
+    if(line.series){ v.forecast=periodsLen? (line.series||[]).slice(0,periodsLen) : (line.series||[]).slice(); v.read=v.forecast; }
+    if(v.mapStatus==='unmapped'||!v.mapStatus||v.mapStatus==='suggested') v.mapStatus='auto';
+    if(v.kind==='input' && v.base==null && line.series){ const s=line.series.find(x=>x!=null); if(s!=null) v.base=Number(s)||0; }
+  }
+  return true;
+}
 function slugKey(name){ let k=String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); if(!k)k='line'; if(!/^[a-z_]/.test(k))k='x_'+k; return k; }
 function inferUnit(name){ const s=String(name).toLowerCase();
   if(/%/.test(s) || /\b(rate|ratio|pct|percent|take[\s_-]?rate|conversion|ctr|cvr|discount)\b/.test(s)) return '%';
