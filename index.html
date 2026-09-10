@@ -1893,20 +1893,33 @@ function modelExprToSheetFormulaAt(expr, p, targetSheet){
 function buildFormulaWriteRow(v){
   if(!v||v.kind!=='formula'||!v.expr||!v.range) return {ok:false, reason:'need formula + mapped range'};
   const rp=parseRange(v.range);
-  const n=P();
+  if(!rp.col||!rp.row) return {ok:false, reason:'mapped range is incomplete'};
+  const n=Math.max(1, P());
   const row=[];
   for(let p=0;p<n;p++){
     const got=modelExprToSheetFormulaAt(v.expr, p, rp.sheet);
     if(!got.ok) return got;
     row.push(got.formula);
   }
-  return {ok:true, range:v.range, formulas:[row], human:exprToHuman(v.expr)};
+  /* Rebuild A1 from start cell + period count so Apps Script can expand columns if needed */
+  const range=buildRange(rp.sheet, rp.col, rp.row, n) || v.range;
+  return {ok:true, range, formulas:[row], human:exprToHuman(v.expr)};
 }
 async function writeFormulaLogicToSheet(v){
   const built=buildFormulaWriteRow(v);
   if(!built.ok) throw new Error(built.reason||'cannot build sheet formulas');
   if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
-  const data=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'write',ssid:conn.ssid||'',writes:[{range:built.range, formulas:built.formulas}]})}).then(r=>r.json());
+  let res, text='';
+  try{
+    res=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'write',ssid:conn.ssid||'',writes:[{range:built.range, formulas:built.formulas}]})});
+    text=await res.text();
+  }catch(e){
+    throw new Error('Could not reach Apps Script (network). Redeploy Code.gs as New version, then try again.');
+  }
+  let data=null;
+  try{ data=JSON.parse(text); }catch(e){
+    throw new Error('Apps Script returned a non-JSON response. Redeploy latest Code.gs (New version) with formula write support.');
+  }
   if(!data||data.ok===false) throw new Error((data&&data.error)||'Sheet write failed');
   v.sheetFormula=built.formulas[0][0];
   return built;
@@ -1925,9 +1938,9 @@ function openDeepDive(key){
   const human=(v.kind==='formula'&&v.expr)?exprToHuman(v.expr):'';
   const idx=model.vars.indexOf(v);
   const canWrite=v.kind==='formula'&&v.expr&&v.range&&conn.connected;
-  showModal(`<div class="mhead"><h3>Deep dive</h3><button class="x" onclick="closeModal()">×</button></div>
+  showModal(`<div class="mhead"><h3>Line connections</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
-      <p class="mut fz11" style="margin:0 0 10px">First-level edges from the compiled model graph only — click a name to drill in.</p>
+      <p class="mut fz11" style="margin:0 0 10px">What feeds this line, and what it feeds — first level only. Click a name to go deeper.</p>
       <div class="dive-grid">
         <div class="dive-col"><h4>Drivers</h4>${upHtml}</div>
         <div class="dive-col center">
@@ -1979,7 +1992,7 @@ function viewSetup(){
     }
     const cell = sheetCellsHtml(v);
     const confirm = (st==='suggested'||st==='unmapped')?` <button class="btn sm" style="height:22px;padding:0 8px;font-size:10px" onclick="event.stopPropagation();openConfirmClassify('${v.key}')">Confirm</button>`:'';
-    return `<tr class="row-click" onclick="openDeepDive('${jesc(v.key)}')" title="Deep dive — drivers &amp; feeds into">
+    return `<tr class="row-click" onclick="openDeepDive('${jesc(v.key)}')" title="See drivers and what this feeds into">
       <td><strong>${esc(v.name)}</strong> <span class="keychip">${esc(v.key)}</span></td>
       <td><span class="kind-pill ${kindCls}">${v.kind}</span></td>
       <td>${def}</td>
@@ -2443,7 +2456,8 @@ function varModal(idx){
         </select></div>
         <div class="field"><label>Unit</label><select id="vUnit"><option ${v.unit==='₹'?'selected':''}>₹</option><option ${v.unit==='#'?'selected':''}>#</option><option ${v.unit==='%'?'selected':''}>%</option></select></div>
       </div>
-      <div class="frow two">
+      <details style="margin:4px 0 8px"><summary class="mut fz11" style="cursor:pointer">More options</summary>
+      <div class="frow two" style="margin-top:8px">
         <div class="field"><label>Over a period, roll up as</label><select id="vAgg">
           <option value="" ${!v.agg?'selected':''}>Auto — ${v.kind==='input'?'Average':'Sum'} for this type</option>
           <option value="sum" ${v.agg==='sum'?'selected':''}>Sum — flows (revenue, units sold)</option>
@@ -2451,17 +2465,22 @@ function varModal(idx){
           <option value="last" ${v.agg==='last'?'selected':''}>Period-end — stocks (headcount, balance)</option>
         </select></div>
         <div class="field"><label>Canvas page</label><select id="vPage">${(model.pages||['Page 1']).map((nm,i)=>`<option value="${i}" ${i===nodePg?'selected':''}>${esc(nm)}</option>`).join('')}</select></div>
-      </div>
-      <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
-        ${(()=>{ const human=(v.expr&&exprToHuman(v.expr))||''; if(human) return '<p class="eyebrow" style="margin:0 0 6px">In plain terms</p><div class="human-expr" style="margin-bottom:10px;padding:10px 12px;background:#f7f8fc;border-radius:8px">'+esc(human)+'</div>'; return '<p class="mut fz12">No model formula yet.</p>'; })()}
-        ${(()=>{ if(v.kind!=='formula'||!v.expr) return '<p class="mut fz12">No first-level drivers yet.</p>'; try{ const d=driversOf(v); if(!d.length) return '<p class="mut fz12">Drivers: (none)</p>'; return '<p class="eyebrow" style="margin:10px 0 4px">Drivers (first level)</p><div class="tokbar drivers">'+d.map(k=>{ const dep=vget(k); const lab=dep?esc(dep.name):esc(k); return '<button type="button" class="tok" title="Deep dive" onclick="openDeepDive(\''+jesc(k)+'\')">'+lab+'</button>'; }).join('')+'</div>'; }catch(e){ return ''; } })()}
-        <p class="mut fz11" style="margin:8px 0 0"><a href="#" onclick="event.preventDefault();openDeepDive('${jesc(v.key)}')">Bloomberg deep dive — Drivers | this line | Feeds into</a></p>
-        ${v.sheetFormula?`<details style="margin-top:10px"><summary class="mut fz11" style="cursor:pointer">Sheet formula (under the hood)</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:80px;overflow:auto">${esc(v.sheetFormula)}</div></details>`:''}
-        <details style="margin-top:12px"><summary class="mut fz11" style="cursor:pointer">Edit formula</summary>
+      </div></details>
+            <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
+        ${(()=>{ const human=(v.expr&&exprToHuman(v.expr))||''; const d=(v.expr?driversOf(v):[]); const n=d.length;
+          let html='';
+          if(human) html+='<p class="eyebrow" style="margin:0 0 6px">In plain terms</p><div class="human-expr" style="margin-bottom:8px;padding:10px 12px;background:#f7f8fc;border-radius:8px">'+esc(human)+'</div>';
+          else html+='<p class="mut fz12">No model formula yet.</p>';
+          html+='<p class="mut fz12" style="margin:0 0 8px">'+esc(driverCountLabel(n))+' · <a href="#" onclick="event.preventDefault();openDeepDive(\''+jesc(v.key)+'\')">See what drives this / what it feeds</a></p>';
+          if(n) html+='<details style="margin-top:4px"><summary class="mut fz11" style="cursor:pointer">Show drivers</summary><div class="tokbar drivers" style="margin-top:8px">'+d.map(k=>{ const dep=vget(k); const lab=dep?esc(dep.name):esc(k); return '<button type="button" class="tok" onclick="openDeepDive(\''+jesc(k)+'\')">'+lab+'</button>'; }).join('')+'</div></details>';
+          return html;
+        })()}
+        <details style="margin-top:10px"><summary class="mut fz11" style="cursor:pointer">Edit formula</summary>
           <div class="field" style="margin-top:8px"><label>Model formula</label><textarea class="inp" id="vExpr" rows="3" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
-          <div class="tokbar" style="margin-top:8px">${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}<button type="button" class="tok op" title="lag(var,n)" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" title="if(cond,a,b)" onclick="insFn('if')">if(</button><button type="button" class="tok op" title="sum_periods(var)" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" title="pct(a,b)" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
+          <div class="tokbar" style="margin-top:8px">${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}<button type="button" class="tok op" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" onclick="insFn('if')">if(</button><button type="button" class="tok op" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
           <input class="inp" id="vInsertFilter" type="search" placeholder="Filter variables to insert…" oninput="filterInsertChips(this.value)">
           <div class="insert-wrap tokbar" id="vInsertChips">${chips||'<span class="mut fz11">add other variables first</span>'}</div>
+          ${v.sheetFormula?`<details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Sheet formula (under the hood)</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:72px;overflow:auto">${esc(v.sheetFormula)}</div></details>`:''}
         </details>
       </div>
       <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
