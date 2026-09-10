@@ -1050,16 +1050,22 @@ async function placeActualsOntoGraphModel(){
   const candidates=(model.vars||[]).filter(v=>v && (v.srcLine || v.srcGraph));
   /* Prefer seed P&L lines first so drivers don't steal Commission's actuals row */
   candidates.sort((a,b)=>(b.srcLine?1:0)-(a.srcLine?1:0));
+  const misses=[];
   candidates.forEach(v=>{
     if(v.actualRange) return; /* preserve manual */
     const id=nrm(v.metric||'')+'|'+nrm(v.account||v.name||'');
-    let al=aById[id];
+    let al=aById[id], how='exact';
     if(al) aUsed.add(id);
     else {
+      /* Fail closed: only exact name (score>=100), never fuzzy — wrong green range is worse than empty */
       const hit=bestLabelMatch(v, A.lines||[], aUsed);
-      if(hit){ al=hit.line; aUsed.add(hit.id); }
+      if(hit && hit.score>=100){ al=hit.line; aUsed.add(hit.id); how='exact-name'; }
+      else {
+        if(v.srcLine) misses.push(v.name||v.key);
+        return;
+      }
     }
-    if(!(al&&al.row)) return;
+    if(!(al&&al.row)){ if(v.srcLine) misses.push(v.name||v.key); return; }
     const tab=aSrc.tab||'';
     const firstCol=aSrc.firstCol||'B';
     v.actualRange=buildRange(tab, firstCol, al.row, periods.length);
@@ -1077,7 +1083,7 @@ async function placeActualsOntoGraphModel(){
   }));
   model.sources=Object.assign({}, model.sources, {actual:aSrc});
   try{ model.closed=Math.max(model.closed|0, lastActualIdx()+1); }catch(e){}
-  return {placed, catalog:model.uiState.scanActualsCatalog.length, withSeries, name:A.name||''};
+  return {placed, catalog:model.uiState.scanActualsCatalog.length, withSeries, name:A.name||'', misses:misses.slice(0,12), missCount:misses.length};
 }
 
 async function ingestFormulaGraphFromSheet(opts){
@@ -1259,6 +1265,10 @@ async function ingestFormulaGraphFromSheet(opts){
     model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[];
     actInfo={placed:0, catalog:0, withSeries:0, warn:String((actErr&&actErr.message)||actErr)};
   }
+  if(actInfo.missCount){
+    const sample=(actInfo.misses||[]).slice(0,4).join(', ');
+    actInfo.warn=(actInfo.warn?actInfo.warn+' · ':'')+actInfo.missCount+' P&L line(s) left unmapped (fail-closed)'+(sample?': '+sample:'');
+  }
   saveModel();
   return {
     newLines:newVars.length, keep:keep.length, keepMatched:0,
@@ -1271,7 +1281,8 @@ async function ingestFormulaGraphFromSheet(opts){
     actualsPlaced: actInfo.placed|0,
     actualsCatalog: actInfo.catalog|0,
     actualsSeries: actInfo.withSeries|0,
-    actualsWarn: actInfo.warn||''
+    actualsWarn: actInfo.warn||'',
+    actualsMisses: actInfo.missCount|0
   };
 }
 function mapStatusOf(v){
@@ -2348,10 +2359,12 @@ function viewSetup(){
   const staleBanner=(staleInfo.fakes&&staleInfo.fakes.length)?`<div class="mapbanner" style="background:#fff0f1;border-color:#f0cdd2"><span><b>Stale local model</b> — hard refresh is not enough. Click <b>Clear all</b>, then <b>Connect &amp; Scan</b>. Fake Inputs: ${esc(staleInfo.fakes.slice(0,6).map(v=>v.name).join(', '))}${staleInfo.fakes.length>6?'…':''}</span></div>`:'';
   const actMapped=(model.vars||[]).filter(v=>v&&v.actualRange).length;
   const actLoaded=hasActuals()? (model.vars||[]).filter(v=>v.actuals&&v.actuals.some(x=>x!=null&&x!=='')).length : 0;
+  const seedN=(model.vars||[]).filter(v=>v&&v.srcLine).length;
+  const actMiss=Math.max(0, seedN-actMapped);
   const actBanner=(!conn.actualsSsid)?'':(
     actMapped
-      ? `<div class="act-banner"><b>Actuals workbook linked</b> · ${actMapped} line(s) mapped (green) · plan stays blue.${actLoaded?` · ${actLoaded} with values`:' · hit <b>Refresh actuals</b> on Variance if series look empty'} · edit Actuals mapping separately from Plan cells.</div>`
-      : `<div class="act-banner warn"><b>Actuals workbook linked, but no lines mapped yet</b> — Clear all → Connect &amp; Scan (with Actuals URL), or open a line and set <b>Actuals cell</b> (separate from Plan). Variance needs mapped + refreshed actuals.</div>`
+      ? `<div class="act-banner"><b>Actuals workbook linked</b> · ${actMapped} line(s) mapped (green) · plan stays blue.${actMiss?` · <b>${actMiss} left empty</b> (fail-closed — map manually if needed)`:''}${actLoaded?` · ${actLoaded} with values`:' · hit <b>Refresh actuals</b> on Variance if series look empty'}.</div>`
+      : `<div class="act-banner warn"><b>Actuals workbook linked, but no lines mapped yet</b> — Clear all → Connect &amp; Scan (with Actuals URL), or open a line and set <b>Actuals cell</b> (separate from Plan). Name-match is fail-closed: we never guess a wrong range.</div>`
   );
   const rows=model.vars.map((v,i)=>{
     const st=mapStatusOf(v);
