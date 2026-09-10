@@ -700,10 +700,43 @@ function a1ColRow(ref){
   if(!m) return null;
   return {col:m[1].toUpperCase(), row:+m[2], colNum:colToNum(m[1])};
 }
+/**
+ * Expand Excel SUM over a simple A1:A1 range into (A1+A2+…) so totals like
+ * Total COGS =SUM(C12:C15) become first-level Drivers (the summed lines).
+ * Same-column vertical or same-row horizontal only; rectangular → leave unchanged.
+ */
+function expandExcelSumRanges(formula){
+  let s=String(formula||'');
+  const re=/SUM\(\s*(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))?!?(\$?[A-Za-z]+)\$?(\d+)\s*:\s*(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))!)?(\$?[A-Za-z]+)\$?(\d+)\s*\)/gi;
+  return s.replace(re, (full, qs1, uq1, c1, r1, qs2, uq2, c2, r2)=>{
+    const sh1=(qs1||uq1||'').trim();
+    const sh2=(qs2||uq2||'').trim();
+    if(sh2 && sh1 && sh1.toLowerCase()!==sh2.toLowerCase()) return full;
+    const col1=String(c1).replace(/\$/g,'').toUpperCase();
+    const col2=String(c2).replace(/\$/g,'').toUpperCase();
+    const row1=+String(r1).replace(/\$/g,'');
+    const row2=+String(r2).replace(/\$/g,'');
+    const n1=colToNum(col1), n2=colToNum(col2);
+    if(!n1||!n2||!row1||!row2) return full;
+    const cells=[];
+    if(n1===n2){
+      const lo=Math.min(row1,row2), hi=Math.max(row1,row2);
+      if(hi-lo>80) return full;
+      for(let r=lo;r<=hi;r++) cells.push(col1+r);
+    } else if(row1===row2){
+      const lo=Math.min(n1,n2), hi=Math.max(n1,n2);
+      if(hi-lo>40) return full;
+      for(let c=lo;c<=hi;c++) cells.push(numToCol(c)+row1);
+    } else return full;
+    const pref=sh1?( (/[^A-Za-z0-9_]/.test(sh1)?("'"+sh1.replace(/'/g,"''")+"'"):sh1)+'!' ):'';
+    return '('+cells.map(a=>pref+a).join('+')+')';
+  });
+}
 /** Tokenize simple Excel-ish formulas: + - * / ( ) , cell refs, Sheet!A1, $A$1, numbers. */
 function tokenizeSheetFormula(src){
   let s=String(src||'').trim();
   if(s.startsWith('=')) s=s.slice(1);
+  s=expandExcelSumRanges(s);
   const toks=[]; let i=0;
   while(i<s.length){
     const ch=s[i];
@@ -5018,7 +5051,7 @@ function ensureModelShape(){
   if(model.scenarios===undefined){ /* no-op */ }
   recompileAll();
 }
-const GRAPH_INGEST_VERSION=7;
+const GRAPH_INGEST_VERSION=8;
 function isStaleFakePnLInput(v){
   if(!v) return false;
   if(v.srcPricing) return false; /* Pricing controls are not P&L walk fakes */
