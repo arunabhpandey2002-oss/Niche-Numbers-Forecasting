@@ -41,6 +41,23 @@ function readRanges_(spreadsheet, ranges, includeFormulas) {
   return { values: values };
 }
 
+
+/** Write a 1×N formulas row; expand sheet columns if the A1 span is past maxColumns. */
+function writeFormulasClamped_(spreadsheet, a1Range, formulas) {
+  const anchor = spreadsheet.getRange(a1Range);
+  const sheet = anchor.getSheet();
+  const row = anchor.getRow();
+  const col = anchor.getColumn();
+  const want = (formulas && formulas[0]) ? formulas[0].length : 0;
+  if (want < 1) throw new Error('formulas row is empty');
+  const needLast = col + want - 1;
+  const maxCols = sheet.getMaxColumns();
+  if (needLast > maxCols) {
+    sheet.insertColumnsAfter(maxCols, needLast - maxCols);
+  }
+  sheet.getRange(row, col, 1, want).setFormulas(formulas);
+}
+
 function doGet(event) {
   try {
     const params = event.parameter || {};
@@ -112,7 +129,7 @@ function doPost(event) {
         }
         /* Prefer formulas (logic writeback) over values — never confuse the two */
         if (Array.isArray(write.formulas)) {
-          spreadsheet.getRange(write.range).setFormulas(write.formulas);
+          writeFormulasClamped_(spreadsheet, write.range, write.formulas);
         } else if (Array.isArray(write.values)) {
           spreadsheet.getRange(write.range).setValues(write.values);
         } else {
