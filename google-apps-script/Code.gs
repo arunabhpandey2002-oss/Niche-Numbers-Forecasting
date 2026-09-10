@@ -32,13 +32,21 @@ function truthy_(v) {
 function readRanges_(spreadsheet, ranges, includeFormulas) {
   const values = {};
   const formulas = includeFormulas ? {} : null;
+  const skipped = [];
   (ranges || []).forEach(function (range) {
-    const rng = spreadsheet.getRange(range);
-    values[range] = rng.getValues();
-    if (includeFormulas) formulas[range] = rng.getFormulas();
+    try {
+      const rng = spreadsheet.getRange(range);
+      values[range] = rng.getValues();
+      if (includeFormulas) formulas[range] = rng.getFormulas();
+    } catch (e) {
+      /* One bad A1 must not kill the whole Scan — return empty cell and continue */
+      skipped.push(String(range) + ': ' + String(e));
+      values[range] = [['']];
+      if (includeFormulas) formulas[range] = [['']];
+    }
   });
-  if (includeFormulas) return { values: values, formulas: formulas };
-  return { values: values };
+  if (includeFormulas) return { values: values, formulas: formulas, skipped: skipped };
+  return { values: values, skipped: skipped };
 }
 
 
@@ -93,6 +101,7 @@ function doGet(event) {
         values: packed.values
       };
       if (includeFormulas) out.formulas = packed.formulas;
+      if (packed.skipped && packed.skipped.length) out.skipped = packed.skipped;
       return json_(out);
     }
 
@@ -118,6 +127,7 @@ function doPost(event) {
         values: packed.values
       };
       if (includeFormulas) out.formulas = packed.formulas;
+      if (packed.skipped && packed.skipped.length) out.skipped = packed.skipped;
       return json_(out);
     }
 
