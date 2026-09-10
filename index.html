@@ -2795,7 +2795,10 @@ function renderCanvas(){
   if(model.vars.some(v=>!model.nodePos[v.key])) autoLayout();
   refreshPageBar();
   let inner=cv.querySelector('.canvas-inner');
-  if(!inner){ inner=document.createElement('div'); inner.className='canvas-inner'; const svg=cv.querySelector('#lineLinks'); if(svg) inner.appendChild(svg); cv.appendChild(inner); }
+  if(!inner){ inner=document.createElement('div'); inner.className='canvas-inner'; cv.appendChild(inner); }
+  /* Edges must live inside the transformed inner — otherwise pan/scroll leaves lines stuck while nodes move */
+  const svgEl=cv.querySelector('#lineLinks')||document.getElementById('lineLinks');
+  if(svgEl && svgEl.parentElement!==inner) inner.appendChild(svgEl);
   inner.style.transform=`translate(${_pan.x}px,${_pan.y}px) scale(${_zoom})`;
   inner.style.transformOrigin='0 0';
   const lab=document.getElementById('zoomLabel'); if(lab) lab.textContent=Math.round(_zoom*100)+'%';
@@ -2917,6 +2920,7 @@ function attachCanvas(cv){
     if(mode==='pan'){
       cv.style.cursor='';
       if(!moved) clearSetupSelection(); /* empty canvas click clears focus */
+      else { try{ redrawLinks(); }catch(e){} }
     }
     mode=null;cur=null;from=null;panS=null;
   });
@@ -3893,7 +3897,8 @@ function inferGoodDir(v){
   const s=(((v&&v.name)||'')+' '+((v&&v.key)||'')+' '+((v&&v.account)||'')+' '+((v&&v.metric)||'')).toLowerCase();
   if(!s.trim()) return null;
   /* Costs / spend / deductions — lower is better */
-  if(/\b(cost|costs|expense|expenses|opex|spend|spending|cogs|cac|burn|churn|refund|cashback|incentive|incentives|write[\s_-]?off|impairment|depreciat|amorti|interest\s+expense|tax\s+expense|payroll|salary|salaries|wage|wages|headcount\s+cost|people\s+cost|marketing\s+spend|performance\s+marketing)\b/.test(s)) return 'down';
+  if(/\b(cost|costs|expense|expenses|opex|spend|spending|cogs|cac|burn|churn|refund|cashback|incentive|incentives|write[\s_-]?off|impairment|depreciat|amorti|interest\s+expense|tax\s+expense|payroll|salary|salaries|wage|wages|headcount|people\s+cost|total\s+people|operating\s+expense|marketing\s+spend|performance\s+marketing|software\s*&\s*tooling|office\s*&\s*co-?working)\b/.test(s)) return 'down';
+  if(/\b(cost|expense|spend)\b/.test(s) && !/\b(revenue|profit|margin|income|gmv)\b/.test(s)) return 'down';
   if(/\bless\s*:/.test(s) || /^less\b/.test(s.trim()) || /\b(deduction|deductions)\b/.test(s)) return 'down';
   /* Revenue / profit — higher is better */
   if(/\b(revenue|gmv|gross\s+merchandise|profit|ebitda|ebit|income|margin|contribution|take[\s_-]?rate|arpu|aov)\b/.test(s)) return 'up';
@@ -3905,11 +3910,19 @@ function goodDir(v){
   return inf||'up';
 }
 function ensurePolarity(v){
-  if(!v || v.favOverride) return v;
-  if(v.good) return v;
+  if(!v || v.favOverride || v.polarityManual) return v;
   const inf=inferGoodDir(v);
   if(inf) v.good=inf;
   return v;
+}
+/** Color a signed variance by Fav/Unfav — never raw +green/−red for costs. */
+function varDeltaClass(v, d){
+  if(d==null || !Number.isFinite(Number(d)) || Math.abs(d)<1e-9) return '';
+  ensurePolarity(v);
+  const fav=isFav(v, d);
+  if(fav===true) return 'pos';
+  if(fav===false) return 'negv';
+  return d>0?'pos':d<0?'negv':'';
 }
 function isFav(v,variance){
   if(v.favOverride==='fav') return true;
@@ -3921,8 +3934,9 @@ function isFav(v,variance){
 /* one control for both: direction (auto) + manual override */
 function fuMode(v){ if(v.favOverride==='fav') return 'force_fav'; if(v.favOverride==='unf') return 'force_unf'; const g=goodDir(v); return g==='down'?'lower':g==='neutral'?'neutral':'higher'; }
 function setFU(k,mode){ const v=vget(k); if(!v) return;
-  if(mode==='force_fav'){ v.favOverride='fav'; } else if(mode==='force_unf'){ v.favOverride='unf'; }
-  else { delete v.favOverride; v.good = mode==='lower'?'down':mode==='neutral'?'neutral':'up'; }
+  if(mode==='force_fav'){ v.favOverride='fav'; v.polarityManual=true; }
+  else if(mode==='force_unf'){ v.favOverride='unf'; v.polarityManual=true; }
+  else { delete v.favOverride; v.good = mode==='lower'?'down':mode==='neutral'?'neutral':'up'; v.polarityManual=true; }
   saveModel(); renderVariance(); }
 const FU_OPTS=[['higher','Higher is better'],['lower','Lower is better'],['neutral','Neutral (no F/U)'],['force_fav','Force favourable'],['force_unf','Force unfavourable']];
 
@@ -4120,7 +4134,7 @@ function renderXray(){
     <div class="mut fz11" style="text-transform:uppercase;letter-spacing:.06em">${esc(labelA)} · ${esc(perLbl)}</div>
     <div class="xray-val xclick" title="Value">${aVal==null?'—':fmtVar(aVal,v.unit)}</div>
     <div class="mut fz12" style="margin-bottom:10px">${labelB}: ${bVal==null?'—':fmtVar(bVal,v.unit)}
-      ${aVal!=null&&bVal!=null?` · Δ <span class="${tot>0?'pos':tot<0?'negv':''}">${fmtDelta(tot,v.unit)}</span>${fav!=null?` · <span class="fu ${fav?'fav':'unf'}">${fav?'Fav':'Unfav'}</span>`:''}`:''}</div>
+      ${aVal!=null&&bVal!=null?` · Δ <span class="${varDeltaClass(v,tot)}">${fmtDelta(tot,v.unit)}</span>${fav!=null?` · <span class="fu ${fav?'fav':'unf'}">${fav?'Fav':'Unfav'}</span>`:''}`:''}</div>
     ${formulaHtml}
     <div class="xray-section">
       <p class="eyebrow">Contributing drivers · this period</p>
@@ -4229,9 +4243,11 @@ function collectRollForwardSuggestions(win){
     const plan_value=planVals.reduce((a,b)=>a+b,0)/planVals.length;
     const gap=Math.abs(plan_value-obs_mid);
     const floor=rfAbsFloor(v.unit||'');
-    /* Trust bar: never suggest when both sides are ~0 / below absolute floor */
+    /* Trust bar: never suggest identical / near-zero junk — fail closed */
+    if(gap<1e-12) return;
     if(Math.abs(plan_value)<floor && Math.abs(obs_mid)<floor) return;
     if(gap<floor) return;
+    if(Math.abs(obs_min)<floor && Math.abs(obs_max)<floor && Math.abs(plan_value)<floor) return;
     const outside=plan_value<obs_min-floor*0.25 || plan_value>obs_max+floor*0.25;
     const denom=Math.max(Math.abs(plan_value), Math.abs(obs_mid), floor);
     const material=gap/denom >= matPct;
@@ -4450,7 +4466,7 @@ function renderVariance(){
     return `<tr class="vrow ${sel?'sel':''} ${immat?'immaterial':''} ${r.noData?'nodata':''}" data-k="${r.v.key}" onclick="pickVLine('${r.v.key}')" ondblclick="event.stopPropagation();openAccount('${jesc(r.v.account||r.v.name)}')">
       <td title="Double-click for the account view"><span class="rag ${rag}" title="${r.noData?'No actual recorded':RAG_TITLE[rag]}"></span><span class="vk ${r.v.kind}"></span><b>${r.v.name}</b>${r.v.metric?` <span class="metchip">${esc(r.v.metric)}</span>`:''} <button class="agglabel" title="Rolls up as ${AGG_LABEL[aggMethod(r.v)]} — click to change" onclick="event.stopPropagation();cycleAgg('${r.v.key}')">${AGG_LABEL[aggMethod(r.v)].toLowerCase()}</button></td>
       <td class="num xclick" title="X-ray" onclick="event.stopPropagation();openXray({key:'${r.v.key}',period:${win[0]===win[1]?win[0]:win[1]},whichA:'${_vState.A}',whichB:'${_vState.B}'})">${r.b==null?'<span class="mut">—</span>':fmtVar(r.b,r.v.unit)}</td><td class="num xclick" title="X-ray" onclick="event.stopPropagation();openXray({key:'${r.v.key}',period:${win[0]===win[1]?win[0]:win[1]},whichA:'${_vState.A}',whichB:'${_vState.B}'})">${r.a==null?'<span class="mut">—</span>':fmtVar(r.a,r.v.unit)}</td>
-      <td class="num xclick ${r.d>0?'pos':r.d<0?'negv':''}" title="X-ray" onclick="event.stopPropagation();openXray({key:'${r.v.key}',period:${win[0]===win[1]?win[0]:win[1]},whichA:'${_vState.A}',whichB:'${_vState.B}'})">${r.d==null?'<span class="mut" title="No actual recorded for this line">no actual</span>':r.d===0?'—':fmtDelta(r.d,r.v.unit)}</td>
+      <td class="num xclick ${varDeltaClass(r.v,r.d)}" title="X-ray" onclick="event.stopPropagation();openXray({key:'${r.v.key}',period:${win[0]===win[1]?win[0]:win[1]},whichA:'${_vState.A}',whichB:'${_vState.B}'})">${r.d==null?'<span class="mut" title="No actual recorded for this line">no actual</span>':r.d===0?'—':fmtDelta(r.d,r.v.unit)}</td>
       <td class="num mut">${r.pct!=null&&r.b?(r.pct>=0?'+':'')+r.pct.toFixed(1)+'%':'—'}</td>
       <td class="fucell"><span class="fu ${fu==null?'na':fu?'fav':'unf'}">${fu==null?'—':fu?'Fav':'Unfav'}</span><select class="minisel" onclick="event.stopPropagation()" onchange="setFU('${r.v.key}',this.value)">${FU_OPTS.map(([val,lab])=>`<option value="${val}" ${fuMode(r.v)===val?'selected':''}>${lab}</option>`).join('')}</select></td>
       <td><select class="minisel wide ${nt.reason?'set':''}" onclick="event.stopPropagation()" onchange="setReason('${r.v.key}',this.value)"><option value="">— reason —</option>${allReasons().map(rr=>`<option ${nt.reason===rr?'selected':''}>${esc(rr)}</option>`).join('')}<option value="__add__">＋ Add…</option></select></td>
@@ -4506,7 +4522,8 @@ function varSpark(key,A,B,win){
 }
 function renderBridge(A,B,win,winLabel){
   const el=document.getElementById('vBridge'); if(!el) return;
-  const v=vget(_vState.line); if(!v){ el.innerHTML='<p class="mut">Pick a line on the left.</p>'; return; }
+  const v=vget(_vState.line);
+  if(v) ensurePolarity(v); if(!v){ el.innerHTML='<p class="mut">Pick a line on the left.</p>'; return; }
   if(!versionHasData(_vState.A,_vState.line,win)||!versionHasData(_vState.B,_vState.line,win)){
     const missing = !versionHasData(_vState.A,_vState.line,win)?verShort(_vState.A):verShort(_vState.B);
     el.innerHTML=`<div class="results-head"><div><p class="eyebrow">Driver bridge · ${winLabel}</p><h2 style="font-size:16px">${v.name}</h2></div></div><p class="mut fz13" style="margin:10px 0 0">No <b>${missing}</b> figures recorded for ${v.name} in this period, so there's nothing to bridge. Pick a line that has actuals, or map this line's actuals cell.</p>`;
@@ -4546,7 +4563,7 @@ function renderBridge(A,B,win,winLabel){
     <div class="kpi-row" style="margin:10px 0 14px">
       <div class="xclick" ${xrayBtn('B')} title="X-ray this number"><span>${verShort(_vState.B)}</span><strong>${fmtVar(br.start,v.unit)}</strong></div>
       <div class="xclick" ${xrayBtn('A')} title="X-ray this number"><span>${verShort(_vState.A)}</span><strong>${fmtVar(br.end,v.unit)}</strong></div>
-      <div class="xclick" ${xrayBtn('D')} title="X-ray variance drivers"><span>Variance</span><strong class="${totVar>0?'pos':totVar<0?'negv':''}">${fmtDelta(totVar,v.unit)}</strong>${fav!=null?`<small class="${fav?'pos':'negv'}">${fav?'Fav':'Unfav'}</small>`:''}</div>
+      <div class="xclick" ${xrayBtn('D')} title="X-ray variance drivers"><span>Variance</span><strong class="${varDeltaClass(v,totVar)}">${fmtDelta(totVar,v.unit)}</strong>${fav!=null?`<small class="${fav?'pos':'negv'}">${fav?'Fav':'Unfav'}</small>`:''}</div>
     </div>
     ${varSpark(_vState.line,A,B,win)}
     ${isFlat?`<p class="mut fz12" style="margin:8px 0 10px">${v.name} ${v.kind==='input'?'is an input':'is read straight from your sheet'}, so its variance is the change in the line itself — no drivers to decompose. ${v.kind==='input'?'':'Add a formula to break it into drivers, or '}pick a formula line below to see a driver bridge.</p>`:''}
@@ -4579,7 +4596,7 @@ function renderDrawer(){
   const b=vAgg(B,_drawerKey,win), a=vAgg(A,_drawerKey,win), d=a-b, fav=isFav(v,d);
   el.innerHTML=`
     <div class="dwhead"><div><p class="eyebrow">Commentary</p><h3>${v.name}</h3></div><button class="x" onclick="closeCommentary()">×</button></div>
-    <div class="dwkpi"><div><span>${verShort(_vState.B)}</span><b>${fmtVar(b,v.unit)}</b></div><div><span>${verShort(_vState.A)}</span><b>${fmtVar(a,v.unit)}</b></div><div><span>Variance</span><b class="${d>0?'pos':d<0?'negv':''}">${d===0?'—':fmtDelta(d,v.unit)}</b>${fav!=null?`<i class="fu ${fav?'fav':'unf'}">${fav?'Fav':'Unfav'}</i>`:''}</div></div>
+    <div class="dwkpi"><div><span>${verShort(_vState.B)}</span><b>${fmtVar(b,v.unit)}</b></div><div><span>${verShort(_vState.A)}</span><b>${fmtVar(a,v.unit)}</b></div><div><span>Variance</span><b class="${varDeltaClass(v,d)}">${d===0?'—':fmtDelta(d,v.unit)}</b>${fav!=null?`<i class="fu ${fav?'fav':'unf'}">${fav?'Fav':'Unfav'}</i>`:''}</div></div>
     <div class="field" style="margin-top:16px"><label>Reason</label>
       <select class="inp" onchange="setReason('${_drawerKey}',this.value)"><option value="">— tag a reason —</option>${allReasons().map(r=>`<option value="${esc(r)}" ${nt.reason===r?'selected':''}>${esc(r)}</option>`).join('')}<option value="__add__">＋ Add reason…</option></select></div>
     <div class="field" style="margin-top:12px"><label>Commentary / remarks</label>
@@ -5906,7 +5923,7 @@ function openAccount(acct){
       <div class="acctkpis">
         <div class="akpi"><label>Forecast</label><b>${fmtVar(fT,v.unit)}</b></div>
         <div class="akpi"><label>Actual</label><b>${aT==null?'<span class=&quot;mut&quot;>—</span>':fmtVar(aT,v.unit)}</b></div>
-        <div class="akpi"><label>Variance</label><b class="${d>0?'pos':d<0?'negv':''}">${d==null?'<span class=&quot;mut&quot;>—</span>':d===0?'—':fmtDelta(d,v.unit)}${pct!=null&&d!==0?` <span class="mut fz11">${pct>=0?'+':''}${pct.toFixed(1)}%</span>`:''}</b></div>
+        <div class="akpi"><label>Variance</label><b class="${varDeltaClass(v,d)}">${d==null?'<span class=&quot;mut&quot;>—</span>':d===0?'—':fmtDelta(d,v.unit)}${pct!=null&&d!==0?` <span class="mut fz11">${pct>=0?'+':''}${pct.toFixed(1)}%</span>`:''}</b></div>
       </div>
       ${acctChart(v,F,A,la)}
     </div>`;
