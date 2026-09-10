@@ -1851,8 +1851,8 @@ function driverCountLabel(n){
 /** Show model expr with business names (longest keys first). Keys stay the source of truth. */
 function exprToHuman(expr){
   const raw=String(expr||'').trim(); if(!raw) return '';
-  /* Convert math ops BEFORE name swap — names often contain "/" (e.g. price / account) */
-  let out=raw.replace(/\*/g,' × ').replace(/\//g,' ÷ ');
+  /* Display-only: * → ×. Never rewrite "/" — names like "price / account / month" must keep slashes. */
+  let out=raw.replace(/\*/g,' × ');
   const keys=(model.vars||[]).map(v=>v.key).filter(Boolean).sort((a,b)=>b.length-a.length);
   keys.forEach(k=>{
     const v=vget(k); if(!v||!v.name) return;
