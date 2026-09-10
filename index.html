@@ -527,7 +527,6 @@
   <button class="tab" data-tab="variance" onclick="switchTab('variance')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Variance analysis</button>
   <button class="tab" data-tab="pricing" onclick="switchTab('pricing')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Pricing</button>
   <button class="tab" data-tab="compare" onclick="switchTab('compare')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Compare scenarios</button>
-  <button class="tab" data-tab="treasury" disabled title="After forecasting">Treasury<span class="badge">Later</span></button>
 </div></nav>
 <main class="page" id="main"></main>
 <div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
@@ -1906,7 +1905,7 @@ function pricingPromoteRows(){
   return rows;
 }
 
-function switchTab(t){ if(t==="treasury")return; uiTab=t; if(t==="pricing") enablePricingSeed();
+function switchTab(t){ uiTab=t; if(t==="pricing") enablePricingSeed();
   if(t==="forecast"){
     try{
       const sk=_setupSel||(model.uiState&&model.uiState.selKey);
