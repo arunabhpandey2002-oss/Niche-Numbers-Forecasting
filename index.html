@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+<!-- NN_BUILD:rf-trust-20260910c -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -4192,9 +4193,10 @@ function rfAbsFloor(unit){
   if(unit==='#') return 0.5;
   return 1; /* ₹ — ignore sub-rupee noise / false zeros */
 }
+function rfNormTok(s){ return String(s||'').toLowerCase().replace(/[_\-]+/g,' '); }
 function rfIsGrowthLike(v){
-  const s=(((v&&v.name)||'')+' '+((v&&v.key)||'')).toLowerCase();
-  return /\b(growth|mom|yoy|qoq|cagr)\b/.test(s);
+  const s=rfNormTok(((v&&v.name)||'')+' '+((v&&v.key)||''));
+  return /(?:^|\s)(growth|mom|yoy|qoq|cagr)(?:\s|$)/.test(s) || /growth\s*\(?\s*mom/.test(s);
 }
 function rfOutcomeKeys(){
   const keys=[];
@@ -4225,11 +4227,25 @@ function rfPriorityLeafKeys(){
   }catch(e){}
   return leaves;
 }
+function rfBridgeMostlyUnexplained(win){
+  try{
+    if(!_vState.line || !vget(_vState.line)) return false;
+    const w=win||(_vState.win||[0,Math.max(0,P()-1)]);
+    const A=versionData(_vState.A||'actual'), B=versionData(_vState.B||'plan',A);
+    const br=periodContributions(_vState.line,A,B,w[1]);
+    const tot=Math.abs((br.end||0)-(br.start||0));
+    if(tot<1e-9) return false;
+    const resid=Math.abs(br.residual||0);
+    return resid/tot >= 0.6;
+  }catch(e){ return false; }
+}
 function collectRollForwardSuggestions(win){
   const w=win||(_vState.win||[0,Math.max(0,P()-1)]);
   const plan=versionData('plan');
   const futures=openFuturePeriods();
   if(!futures.length) return [];
+  /* Trust bar: if bridge is mostly unexplained, no auto Apply cards — Mark-a-driver only */
+  if(rfBridgeMostlyUnexplained(w)) return [];
   const matPct=Math.max(0.05, (model.matThresh||5)/100);
   const priority=rfPriorityLeafKeys();
   const out=[];
@@ -4281,7 +4297,8 @@ function collectRollForwardSuggestions(win){
     });
   });
   out.sort((a,b)=>b._gap-a._gap);
-  return out.slice(0,6).map(({_gap,_pri,...rest})=>rest);
+  return out.slice(0,6).map(({_gap,_pri,...rest})=>rest)
+    .filter(sg=>{ const vv=vget(sg.driver_id); return vv && !rfIsGrowthLike(vv); });
 }
 function rfToneVerb(s){
   if(s.plan_value>s.obs_max) return 'tone future periods down';
@@ -4317,7 +4334,9 @@ function renderRollForward(){
       </div>
       <div class="rf-reason" id="rfReason_${esc(s.driver_id)}" style="display:none"></div>
     </div>`;
-  }).join('') : `<p class="rf-empty">No material driver gaps in this window — plan sits inside observed ranges (or within materiality). Widen the period window or refresh actuals if you expected prompts.</p>`;
+  }).join('') : `<p class="rf-empty">${rfBridgeMostlyUnexplained(win)
+    ? 'Bridge is mostly <b>Other / unexplained</b> for the selected line — no auto Apply (trust bar). Use <b>Mark a driver yourself</b> below (e.g. take rate).'
+    : 'No material leaf-driver gaps in this window — or only growth/MoM noise, which we never auto-suggest. Use <b>Mark a driver yourself</b> if you want to bake one in.'}</p>`;
 
   const leafOpts=inputs().filter(v=>v&&v.writable!==false).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
     .map(v=>`<option value="${esc(v.key)}">${esc(v.name)}</option>`).join('');
@@ -5904,8 +5923,8 @@ function isStaleFakePnLInput(v){
   /* Graph leaves on Assumptions/other tabs are real inputs — never "fake" */
   if(v.srcGraph && !v.srcLine) return false;
   /* Growth / MoM / rates are often intentional inputs even on the P&L tab — never banner them as fake */
-  const nmKey=((v.name||'')+' '+(v.key||'')).toLowerCase();
-  if(v.unit==='%' || /\b(growth|mom|yoy|qoq|cagr|take[\s_-]?rate|rate|ratio|pct)\b/.test(nmKey)) return false;
+  const nmKey=(typeof rfNormTok==='function'?rfNormTok:(x=>String(x||'').toLowerCase().replace(/[_\-]+/g,' ')))((v.name||'')+' '+(v.key||''));
+  if(v.unit==='%' || /(?:^|\s)(growth|mom|yoy|qoq|cagr|rate|ratio|pct)(?:\s|$)/.test(nmKey) || /take\s*rate/.test(nmKey)) return false;
   const rng=String(v.range||'');
   const onPnL=/p\s*&\s*l|\bpnl\b|income\s*statement/i.test(rng);
   /* Only classic P&L result lines wrongly stored as Input (pre-walk / stale localStorage) */
