@@ -79,6 +79,19 @@
   .dive-item .ky{display:none}
   .dive-empty{font-size:12px;color:#98a0b2;padding:6px 2px}
   .human-expr{font-size:12.5px;color:#2a354d;line-height:1.4}
+  .edit-sec{margin:14px 0 0;padding-top:12px;border-top:1px solid #eef0f4}
+  .edit-sec:first-of-type{margin-top:4px;padding-top:0;border-top:0}
+  .edit-sec-h{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px;font-weight:700;color:#3a4763}
+  .edit-sec-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;background:#eef1f7;color:#5a6478;font-size:11px}
+  .plain-box{background:#f4f7fc;border:1px solid #e4eaf5;border-radius:10px;padding:12px 14px;margin-bottom:8px}
+  .plain-box .plain-eq{font-size:12px;color:#7d8598;margin:0 0 8px}
+  .plain-tier{display:flex;align-items:flex-start;gap:8px;margin:6px 0;font-size:12.5px;color:#2a354d;line-height:1.4}
+  .plain-tier .tag{flex:0 0 auto;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 7px;border-radius:6px}
+  .plain-tier .tag.starter{background:#e8eefc;color:#3b5bcc}
+  .plain-tier .tag.pro{background:#e7f6ee;color:#1f6b45}
+  .plain-tier .tag.enterprise{background:#f3e9fb;color:#6b3fa0}
+  .plain-plus{text-align:center;color:#98a0b2;font-weight:700;font-size:14px;margin:2px 0}
+  .plain-total{margin-top:10px;padding:8px 10px;background:#e8eef8;border-radius:8px;font-size:12px;color:#3a4763;font-weight:600}
   .vtbl .def-compact .human-expr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:340px;font-size:12px}
   .tokbar.drivers{gap:5px;margin-top:6px}
   .tokbar.drivers .tok{font-size:11px;padding:4px 8px}
@@ -1845,7 +1858,54 @@ function exprToHuman(expr){
     const re=new RegExp('\\b'+k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi');
     out=out.replace(re, v.name);
   });
+  /* Display-only ops — model/sheet keep * / */
+  out=out.replace(/\*/g,'×').replace(/(?<=\S)\s*\/\s*(?=\S)/g,' ÷ ');
   return out.replace(/\s+/g,' ').trim();
+}
+/** Split plain-terms on top-level + (respect parentheses). */
+function splitTopLevelSum(human){
+  const s=String(human||''); const parts=[]; let buf='', depth=0;
+  for(let i=0;i<s.length;i++){
+    const ch=s[i];
+    if(ch==='(') depth++;
+    if(ch===')') depth=Math.max(0,depth-1);
+    if(ch==='+' && depth===0){ const t=buf.trim(); if(t) parts.push(t); buf=''; continue; }
+    buf+=ch;
+  }
+  const t=buf.trim(); if(t) parts.push(t);
+  return parts;
+}
+/**
+ * Plain-terms HTML. Tier cards only when top-level summands already name Starter/Pro/Enterprise.
+ * Never invents model lines — tags are display labels only.
+ */
+function plainTermsHtml(v){
+  if(!v||!v.expr) return '<p class="mut fz12">No model formula yet.</p>';
+  const human=exprToHuman(v.expr); if(!human) return '<p class="mut fz12">No model formula yet.</p>';
+  const parts=splitTopLevelSum(human);
+  const tierOf=p=>{
+    if(/\bstarter\b/i.test(p)) return 'Starter';
+    if(/\bpro\b/i.test(p)) return 'Pro';
+    if(/\benterprise\b/i.test(p)) return 'Enterprise';
+    return '';
+  };
+  const tagged=parts.map(p=>({p, tier:tierOf(p)}));
+  const tiersFound=[...new Set(tagged.map(t=>t.tier).filter(Boolean))];
+  const allTagged=tagged.length>=2 && tagged.every(t=>t.tier) && tiersFound.length>=2;
+  if(!allTagged){
+    return '<div class="plain-box"><div class="human-expr">'+esc(human)+'</div></div>';
+  }
+  const order=['Starter','Pro','Enterprise'];
+  const sorted=tagged.slice().sort((a,b)=>order.indexOf(a.tier)-order.indexOf(b.tier));
+  let html='<div class="plain-box"><div class="plain-eq">'+esc(v.name||'This line')+' =</div>';
+  sorted.forEach((t,i)=>{
+    if(i) html+='<div class="plain-plus">+</div>';
+    const cls=t.tier.toLowerCase();
+    html+='<div class="plain-tier"><span class="tag '+cls+'">'+esc(t.tier)+'</span><span>'+esc(t.p)+'</span></div>';
+  });
+  html+='<div class="plain-total">Total = '+esc(tiersFound.sort((a,b)=>order.indexOf(a)-order.indexOf(b)).join(' + '))+' <span class="mut" style="font-weight:500">(display groups from the formula — not separate model lines)</span></div>';
+  html+='</div>';
+  return html;
 }
 /** Map a var key → A1 for period offset p within its mapped forecast range (same row, col+p). */
 function cellRefForVarPeriod(v, p, preferSheet){
@@ -2444,49 +2504,55 @@ function varModal(idx){
   const chips = others.map(o=>`<button type="button" class="tok insert-chip" data-name="${esc((o.name||'').toLowerCase())}" data-key="${esc((o.key||'').toLowerCase())}" onclick="insTok('${o.key}')" title="${esc(o.name)} (${esc(o.key)})">${esc(o.name||o.key)}</button>`).join('');
   showModal(`<div class="mhead"><h3>${idx==null?'Add variable':'Edit variable'}</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
-      <div class="frow two">
-        <div class="field"><label>Name</label><input class="inp" id="vName" value="${esc(v.name)}" placeholder="Price per unit" oninput="autoKey()"></div>
-        <div class="field"><label>Key (used in formulas)</label><input class="inp" id="vKey" value="${esc(v.key)}" placeholder="price" style="font-family:var(--mono)"></div>
+      <div class="edit-sec" style="border-top:0;padding-top:0;margin-top:0">
+        <div class="edit-sec-h"><span class="edit-sec-n">1</span> Basic details</div>
+        <div class="frow two">
+          <div class="field"><label>Name</label><input class="inp" id="vName" value="${esc(v.name)}" placeholder="Price per unit" oninput="autoKey()"></div>
+          <div class="field"><label>Key (used in formulas)</label><input class="inp" id="vKey" value="${esc(v.key)}" placeholder="price" style="font-family:var(--mono)"></div>
+        </div>
+        <div class="frow two">
+          <div class="field"><label>Type</label><select id="vKind" onchange="varKindToggle()">
+            <option value="input" ${v.kind==='input'?'selected':''}>Input — I set / plan it</option>
+            <option value="formula" ${v.kind==='formula'?'selected':''}>Formula — computed from others</option>
+            <option value="output" ${v.kind==='output'?'selected':''}>Output — read from sheet only</option>
+          </select></div>
+          <div class="field"><label>Unit</label><select id="vUnit"><option ${v.unit==='₹'?'selected':''}>₹</option><option ${v.unit==='#'?'selected':''}>#</option><option ${v.unit==='%'?'selected':''}>%</option></select></div>
+        </div>
+        <details style="margin:4px 0 0"><summary class="mut fz11" style="cursor:pointer">More options</summary>
+        <div class="frow two" style="margin-top:8px">
+          <div class="field"><label>Over a period, roll up as</label><select id="vAgg">
+            <option value="" ${!v.agg?'selected':''}>Auto — ${v.kind==='input'?'Average':'Sum'} for this type</option>
+            <option value="sum" ${v.agg==='sum'?'selected':''}>Sum — flows (revenue, units sold)</option>
+            <option value="avg" ${v.agg==='avg'?'selected':''}>Average — rates (price, margin %)</option>
+            <option value="last" ${v.agg==='last'?'selected':''}>Period-end — stocks (headcount, balance)</option>
+          </select></div>
+          <div class="field"><label>Canvas page</label><select id="vPage">${(model.pages||['Page 1']).map((nm,i)=>`<option value="${i}" ${i===nodePg?'selected':''}>${esc(nm)}</option>`).join('')}</select></div>
+        </div></details>
       </div>
-      <div class="frow two">
-        <div class="field"><label>Type</label><select id="vKind" onchange="varKindToggle()">
-          <option value="input" ${v.kind==='input'?'selected':''}>Input — I set / plan it</option>
-          <option value="formula" ${v.kind==='formula'?'selected':''}>Formula — computed from others</option>
-          <option value="output" ${v.kind==='output'?'selected':''}>Output — read from sheet only</option>
-        </select></div>
-        <div class="field"><label>Unit</label><select id="vUnit"><option ${v.unit==='₹'?'selected':''}>₹</option><option ${v.unit==='#'?'selected':''}>#</option><option ${v.unit==='%'?'selected':''}>%</option></select></div>
+            <div class="edit-sec" id="vDefinitionSec">
+        <div class="edit-sec-h"><span class="edit-sec-n">2</span> Definition</div>
+        <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
+          <p class="eyebrow" style="margin:0 0 6px">In plain terms</p>
+          ${plainTermsHtml(v)}
+          ${(()=>{ const d=(v.expr?driversOf(v):[]); const n=d.length;
+            let html='<p class="mut fz12" style="margin:0 0 8px">'+esc(driverCountLabel(n))+' · <a href="#" onclick="event.preventDefault();openDeepDive(\''+jesc(v.key)+'\')">See what drives this / what it feeds →</a></p>';
+            if(n) html+='<details style="margin-top:4px"><summary class="mut fz11" style="cursor:pointer">Show drivers</summary><div class="tokbar drivers" style="margin-top:8px">'+d.map(k=>{ const dep=vget(k); const lab=dep?esc(dep.name):esc(k); return '<button type="button" class="tok" onclick="openDeepDive(\''+jesc(k)+'\')">'+lab+'</button>'; }).join('')+'</div></details>';
+            return html;
+          })()}
+          <details style="margin-top:10px"><summary class="mut fz11" style="cursor:pointer">Edit formula</summary>
+            <div class="field" style="margin-top:8px"><label>Model formula</label><textarea class="inp" id="vExpr" rows="3" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
+            <div class="tokbar" style="margin-top:8px">${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}<button type="button" class="tok op" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" onclick="insFn('if')">if(</button><button type="button" class="tok op" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
+            <input class="inp" id="vInsertFilter" type="search" placeholder="Filter variables to insert…" oninput="filterInsertChips(this.value)">
+            <div class="insert-wrap tokbar" id="vInsertChips">${chips||'<span class="mut fz11">add other variables first</span>'}</div>
+            ${v.sheetFormula?`<details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Sheet formula (under the hood)</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:72px;overflow:auto">${esc(v.sheetFormula)}</div></details>`:''}
+          </details>
+        </div>
+        <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
+          <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
+        </div>
       </div>
-      <details style="margin:4px 0 8px"><summary class="mut fz11" style="cursor:pointer">More options</summary>
-      <div class="frow two" style="margin-top:8px">
-        <div class="field"><label>Over a period, roll up as</label><select id="vAgg">
-          <option value="" ${!v.agg?'selected':''}>Auto — ${v.kind==='input'?'Average':'Sum'} for this type</option>
-          <option value="sum" ${v.agg==='sum'?'selected':''}>Sum — flows (revenue, units sold)</option>
-          <option value="avg" ${v.agg==='avg'?'selected':''}>Average — rates (price, margin %)</option>
-          <option value="last" ${v.agg==='last'?'selected':''}>Period-end — stocks (headcount, balance)</option>
-        </select></div>
-        <div class="field"><label>Canvas page</label><select id="vPage">${(model.pages||['Page 1']).map((nm,i)=>`<option value="${i}" ${i===nodePg?'selected':''}>${esc(nm)}</option>`).join('')}</select></div>
-      </div></details>
-            <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
-        ${(()=>{ const human=(v.expr&&exprToHuman(v.expr))||''; const d=(v.expr?driversOf(v):[]); const n=d.length;
-          let html='';
-          if(human) html+='<p class="eyebrow" style="margin:0 0 6px">In plain terms</p><div class="human-expr" style="margin-bottom:8px;padding:10px 12px;background:#f7f8fc;border-radius:8px">'+esc(human)+'</div>';
-          else html+='<p class="mut fz12">No model formula yet.</p>';
-          html+='<p class="mut fz12" style="margin:0 0 8px">'+esc(driverCountLabel(n))+' · <a href="#" onclick="event.preventDefault();openDeepDive(\''+jesc(v.key)+'\')">See what drives this / what it feeds</a></p>';
-          if(n) html+='<details style="margin-top:4px"><summary class="mut fz11" style="cursor:pointer">Show drivers</summary><div class="tokbar drivers" style="margin-top:8px">'+d.map(k=>{ const dep=vget(k); const lab=dep?esc(dep.name):esc(k); return '<button type="button" class="tok" onclick="openDeepDive(\''+jesc(k)+'\')">'+lab+'</button>'; }).join('')+'</div></details>';
-          return html;
-        })()}
-        <details style="margin-top:10px"><summary class="mut fz11" style="cursor:pointer">Edit formula</summary>
-          <div class="field" style="margin-top:8px"><label>Model formula</label><textarea class="inp" id="vExpr" rows="3" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
-          <div class="tokbar" style="margin-top:8px">${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}<button type="button" class="tok op" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" onclick="insFn('if')">if(</button><button type="button" class="tok op" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
-          <input class="inp" id="vInsertFilter" type="search" placeholder="Filter variables to insert…" oninput="filterInsertChips(this.value)">
-          <div class="insert-wrap tokbar" id="vInsertChips">${chips||'<span class="mut fz11">add other variables first</span>'}</div>
-          ${v.sheetFormula?`<details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Sheet formula (under the hood)</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:72px;overflow:auto">${esc(v.sheetFormula)}</div></details>`:''}
-        </details>
-      </div>
-      <div id="vBaseRow" style="${v.kind==='input'?'':'display:none'}">
-        <div class="field"><label>Base value (starting level)</label><input class="inp" id="vBase" type="number" step="any" value="${v.base??0}" style="width:160px"></div>
-      </div>
-      <p class="eyebrow" style="margin:16px 0 6px">Forecast line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
+      <div class="edit-sec">
+        <div class="edit-sec-h"><span class="edit-sec-n">3</span> Forecast line <span class="mut" style="font-weight:500;text-transform:none;letter-spacing:0">(required for Confirmed)</span></div> <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
       ${scanCatalog().length?`<div class="field"><label>Sheet line</label><select class="inp" id="vPickLine" onchange="onEditPickForecast()">${['<option value="">— pick a sheet line —</option>'].concat(scanCatalog().map(c=>{ const lab=(c.metric?c.metric+' · ':'')+c.name; const sel=(c.range===v.range)?'selected':''; return `<option value="${esc(c.id)}" ${sel}>${esc(lab)} · ${esc(c.range)}</option>`; })).join('')}</select></div>
       <div class="rangeprev" id="rangePrev">${v.range?`→ maps to <b>${esc(v.range)}</b>`:'<span class="mut">Pick a sheet line from Scan</span>'}</div>
       <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Last resort — type cells only if Scan missed</summary>
@@ -2504,12 +2570,15 @@ function varModal(idx){
       <div class="rangeprev" id="rangePrev"></div>
       <p class="mut fz11" style="margin-top:6px">Tip: Connect → Scan to pick sheet lines instead of typing column and row.</p>`}
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-2);margin-top:10px" id="vWritableRow"><input type="checkbox" id="vWritable" ${v.writable?'checked':''}> This is an input cell — write my plan back here</label>
+      </div>
+      <div class="edit-sec">
+        <div class="edit-sec-h"><span class="edit-sec-n">4</span> Actuals cell <span class="mut" style="font-weight:500;text-transform:none;letter-spacing:0">(optional)</span></div>
       ${(()=>{
         const ra=parseRange(v.actualRange||'');
         const linked=!!conn.actualsSsid;
         const aCat=scanActualsCatalog();
         if(!linked){
-          return '<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p><p class="mut fz11">Actuals · not connected — add an actuals workbook in Connect to map.</p>';
+          return '<p class="mut fz11">Actuals · not connected — add an actuals workbook in Connect to map.</p>';
         }
         if(aCat.length){
           const opts=['<option value="">— no actuals —</option>'].concat(aCat.map(c=>{
@@ -2518,22 +2587,23 @@ function varModal(idx){
             return '<option value="'+esc(c.id)+'"'+sel+'>'+esc(lab)+' · '+esc(c.range)+'</option>';
           })).join('');
           const prev=v.actualRange?('→ actuals <b>'+esc(v.actualRange)+'</b>'):'<span class="mut">Actuals · no actuals (optional)</span>';
-          return '<p class="eyebrow" style="margin:16px 0 6px">Actuals line <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>'
+          return ''
             +'<div class="field"><label>Actuals sheet line</label><select class="inp" id="vPickActual" onchange="onEditPickActual()">'+opts+'</select></div>'
             +'<div class="rangeprev" id="actualPrev">'+prev+'</div>';
         }
         const asheet=(conn.actualsSheets&&conn.actualsSheets.length)
           ? ('<select id="vaSheet" oninput="updActualPrev()">'+([''].concat(conn.actualsSheets.map(s=>s.name))).map(n=>'<option value="'+esc(n)+'"'+(n===ra.sheet?' selected':'')+'>'+(n||'— pick a tab —')+'</option>').join('')+'</select>')
           : ('<input class="inp" id="vaSheet" value="'+esc(ra.sheet)+'" placeholder="Actuals" oninput="updActualPrev()">');
-        return '<p class="eyebrow" style="margin:16px 0 6px">Actuals cell <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(optional)</span></p>'
+        return ''
           +'<p class="mut fz11" style="margin:0 0 8px">'+(v.actualRange?'':'Leave blank for explicit “no actuals” on this line.')+'</p>'
           +'<div class="frow three"><div class="field"><label>Tab</label>'+asheet+'</div>'
           +'<div class="field"><label>Column</label><input class="inp" id="vaCol" value="'+esc(ra.col)+'" placeholder="K" style="text-transform:uppercase" oninput="updActualPrev()"></div>'
           +'<div class="field"><label>Start row</label><input class="inp" id="vaRow" type="number" value="'+esc(ra.row)+'" placeholder="11" oninput="updActualPrev()"></div></div>'
           +'<div class="rangeprev" id="actualPrev"></div>';
       })()}
+      </div>
       <div id="vErr" class="negv fz11" style="margin-top:8px"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save'}</button></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save changes'}</button></div>
     </div>`);
   varKindToggle(); updRangePrev(); updActualPrev();
 }
