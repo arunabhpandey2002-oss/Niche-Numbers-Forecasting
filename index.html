@@ -4196,29 +4196,49 @@ function rfIsGrowthLike(v){
   const s=(((v&&v.name)||'')+' '+((v&&v.key)||'')).toLowerCase();
   return /\b(growth|mom|yoy|qoq|cagr)\b/.test(s);
 }
+function rfOutcomeKeys(){
+  const keys=[];
+  const prefer=[/commission\s*revenue/i,/net\s*revenue/i,/gross\s+platform\s+revenue/i,/subscription\s*revenue/i,/ebitda/i];
+  prefer.forEach(re=>{
+    const hit=(model.vars||[]).find(v=>v&&v.kind==='formula'&&re.test(String(v.name||'')));
+    if(hit) keys.push(hit.key);
+  });
+  if(_vState.line && vget(_vState.line)) keys.unshift(_vState.line);
+  return [...new Set(keys)];
+}
+function rfPriorityLeafKeys(){
+  const leaves=new Set();
+  rfOutcomeKeys().forEach(k=>{ try{ leavesOf(k).forEach(x=>leaves.add(x)); }catch(e){} });
+  /* Bridge first-level deps that are inputs */
+  try{
+    if(_vState.line && vget(_vState.line)){
+      const A=versionData(_vState.A||'actual'), B=versionData(_vState.B||'plan',A);
+      const w=_vState.win||[0,P()-1];
+      const br=periodContributions(_vState.line,A,B,w[1]);
+      (br.steps||[]).forEach(st=>{
+        if(!st||!st.key||st.key==='__resid') return;
+        const v=vget(st.key);
+        if(v&&v.kind==='input') leaves.add(v.key);
+        else { try{ leavesOf(st.key).forEach(x=>leaves.add(x)); }catch(e){} }
+      });
+    }
+  }catch(e){}
+  return leaves;
+}
 function collectRollForwardSuggestions(win){
   const w=win||(_vState.win||[0,Math.max(0,P()-1)]);
   const plan=versionData('plan');
   const futures=openFuturePeriods();
   if(!futures.length) return [];
   const matPct=Math.max(0.05, (model.matThresh||5)/100);
+  const priority=rfPriorityLeafKeys();
   const out=[];
-  /* Prefer drivers that actually move the selected variance line this window */
-  let contribKeys=null;
-  try{
-    if(_vState.line && vget(_vState.line)){
-      const A=versionData(_vState.A||'actual'), B=versionData(_vState.B||'plan',A);
-      const p=w[1];
-      const br=periodContributions(_vState.line,A,B,p);
-      const parts=(br.steps||[]).filter(st=>Math.abs(st.delta)>1e-9).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
-      if(parts.length) contribKeys=new Set(parts.slice(0,12).map(st=>st.key));
-    }
-  }catch(e){ contribKeys=null; }
   inputs().forEach(v=>{
     if(!v || v.writable===false) return;
     ensurePolarity(v);
-    /* Fix unit for growth-like drivers so we never present MoM as ₹0 */
     if((!v.unit || v.unit==='₹') && rfIsGrowthLike(v)) v.unit='%';
+    /* Auto suggestions: skip growth/MoM noise — user can Mark manually if they want */
+    if(rfIsGrowthLike(v)) return;
     const vals=[];
     for(let p=w[0];p<=w[1];p++){
       if(v.actuals&&v.actuals[p]!=null&&v.actuals[p]!==''){
@@ -4243,31 +4263,25 @@ function collectRollForwardSuggestions(win){
     const plan_value=planVals.reduce((a,b)=>a+b,0)/planVals.length;
     const gap=Math.abs(plan_value-obs_mid);
     const floor=rfAbsFloor(v.unit||'');
-    /* Trust bar: never suggest identical / near-zero junk — fail closed */
     if(gap<1e-12) return;
     if(Math.abs(plan_value)<floor && Math.abs(obs_mid)<floor) return;
     if(gap<floor) return;
-    if(Math.abs(obs_min)<floor && Math.abs(obs_max)<floor && Math.abs(plan_value)<floor) return;
     const outside=plan_value<obs_min-floor*0.25 || plan_value>obs_max+floor*0.25;
     const denom=Math.max(Math.abs(plan_value), Math.abs(obs_mid), floor);
     const material=gap/denom >= matPct;
     if(!outside && !material) return;
-    /* Growth rates with no real observed movement are noise — skip */
-    if(rfIsGrowthLike(v) && Math.abs(obs_mid)<floor && Math.abs(plan_value)<floor) return;
-    const inBridge=contribKeys?contribKeys.has(v.key):false;
+    const inPri=priority.size?priority.has(v.key):true;
+    /* If we know outcome leaves, only auto-suggest those — fail closed on random inputs */
+    if(priority.size && !inPri) return;
     out.push({
       driver_id:v.key, name:v.name, unit:v.unit||'',
       obs_min, obs_max, obs_mid, plan_value,
       periods_open:futures.slice(),
-      _gap:gap, _bridge:inBridge
+      _gap:gap, _pri:inPri
     });
   });
-  out.sort((a,b)=>{
-    if(a._bridge!==b._bridge) return a._bridge?-1:1;
-    return b._gap-a._gap;
-  });
-  /* Cap to top material drivers — never dump junk MoM zeros */
-  return out.slice(0,8).map(({_gap,_bridge,...rest})=>rest);
+  out.sort((a,b)=>b._gap-a._gap);
+  return out.slice(0,6).map(({_gap,_pri,...rest})=>rest);
 }
 function rfToneVerb(s){
   if(s.plan_value>s.obs_max) return 'tone future periods down';
@@ -4305,15 +4319,86 @@ function renderRollForward(){
     </div>`;
   }).join('') : `<p class="rf-empty">No material driver gaps in this window — plan sits inside observed ranges (or within materiality). Widen the period window or refresh actuals if you expected prompts.</p>`;
 
+  const leafOpts=inputs().filter(v=>v&&v.writable!==false).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
+    .map(v=>`<option value="${esc(v.key)}">${esc(v.name)}</option>`).join('');
+  const markHtml=`<div class="rf-card" style="border-style:dashed">
+      <h3>Mark a driver yourself</h3>
+      <p class="rf-meta">See take rate (or any leaf) off plan? Pick it, set the value to bake into open months, and Apply — formulas keep flowing. Or Keep plan with a reason.</p>
+      <div class="frow two">
+        <div class="field"><label>Driver</label><select class="inp" id="rfMarkDriver" onchange="rfMarkDriverChanged()"><option value="">— pick a leaf driver —</option>${leafOpts}</select></div>
+        <div class="field"><label>Value for open months</label><input class="inp" id="rfMarkVal" type="number" step="any" placeholder="e.g. 0.015 or 1.5 if %"></div>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Note (optional for Apply · required for Keep)</label><input class="inp" id="rfMarkNote" placeholder="e.g. Take rate ran ~1.5–1.6% in actuals"></div>
+      <div class="rf-actions" style="margin-top:10px">
+        <button class="btn primary sm" onclick="rollForwardManualApply()">Apply to open forecast</button>
+        <button class="btn sm" onclick="rollForwardManualKeep()">Keep plan + reason</button>
+      </div>
+      <p class="mut fz11" style="margin:8px 0 0" id="rfMarkHint">Tip: for % drivers enter 1.5 for 1.5%, or 0.015 — we’ll detect from the driver’s unit.</p>
+    </div>`;
   el.innerHTML=`<div class="rf-wrap">
     <div class="rf-head">
       <div><p class="eyebrow" style="margin:0 0 4px">Roll-forward</p>
         <h2 style="font-size:16px;margin:0">Bake variance into the open forecast</h2>
-        <p class="mut fz12" style="margin:6px 0 0;max-width:560px">Suggestions use actuals in <b>${esc(winLabel)}</b> only. Apply writes one scalar to open future periods (from closed month ${model.closed|0} onward) — never into closed actuals.</p></div>
+        <p class="mut fz12" style="margin:6px 0 0;max-width:560px">Auto cards only for leaf drivers of Commission / Net revenue (and the selected bridge line) with real actuals gaps. Growth/MoM is never auto-suggested — mark it yourself if you mean it. Apply writes open months only.</p></div>
       <div class="mut fz11">${futures.length? futures.length+' open period'+(futures.length===1?'':'s') : 'No open future periods — raise timeline or lower “Closed / actual so far”'}</div>
     </div>
     ${cards}
+    ${markHtml}
   </div>`;
+}
+function rfMarkDriverChanged(){
+  const key=(document.getElementById('rfMarkDriver')||{}).value;
+  const v=vget(key); const hint=document.getElementById('rfMarkHint');
+  const inp=document.getElementById('rfMarkVal');
+  if(!v){ if(hint) hint.textContent='Pick a leaf driver to mark.'; return; }
+  const w=_vState.win||[0,P()-1];
+  let obs=null;
+  if(v.actuals){
+    const vals=[];
+    for(let p=w[0];p<=w[1];p++){ if(v.actuals[p]!=null&&v.actuals[p]!==''){ const n=Number(v.actuals[p]); if(Number.isFinite(n)) vals.push(n); } }
+    if(vals.length) obs=(Math.min(...vals)+Math.max(...vals))/2;
+  }
+  if(inp && obs!=null){
+    inp.value = v.unit==='%' ? ((obs*100).toFixed(4)) : String(obs);
+  }
+  if(hint){
+    const plan=versionData('plan');
+    const pv=(plan[v.key]||[])[w[1]];
+    hint.textContent = (v.unit==='%'?'Unit is % — enter 1.5 for 1.5%. ':'') +
+      (obs!=null?('Obs mid in window ≈ '+rfFmt(obs,v.unit||'')+'. ':'') ) +
+      (pv!=null?('Plan ≈ '+rfFmt(Number(pv),v.unit||'')+'.':'');
+  }
+}
+function rollForwardManualApply(){
+  const key=((document.getElementById('rfMarkDriver')||{}).value||'').trim();
+  const v=vget(key); if(!v||v.kind!=='input'){ toast('Pick a leaf driver'); return; }
+  let raw=Number((document.getElementById('rfMarkVal')||{}).value);
+  if(!Number.isFinite(raw)){ toast('Enter a valid value'); return; }
+  if(v.unit==='%'){
+    /* Accept 1.5 as 1.5% or 0.015 as fraction */
+    if(Math.abs(raw)>1) raw=raw/100;
+  }
+  const note=((document.getElementById('rfMarkNote')||{}).value||'').trim();
+  const periods=openFuturePeriods();
+  if(!periods.length){ toast('No open future periods'); return; }
+  periods.forEach(p=>setOv(key, p, raw));
+  rollForwardAudit({
+    driver_id:key, obs_min:null, obs_max:null, obs_mid:raw, plan_value:null,
+    action:'manual_apply', applied_value:raw, reason:note, periods_touched:periods
+  });
+  saveModel(); renderVariance(); toast('Marked '+v.name+' → open forecast');
+}
+function rollForwardManualKeep(){
+  const key=((document.getElementById('rfMarkDriver')||{}).value||'').trim();
+  const v=vget(key); if(!v){ toast('Pick a leaf driver'); return; }
+  const note=((document.getElementById('rfMarkNote')||{}).value||'').trim();
+  if(!note){ toast('A short reason is required to keep the plan'); return; }
+  rollForwardAudit({
+    driver_id:key, obs_min:null, obs_max:null, obs_mid:null, plan_value:null,
+    action:'manual_keep', applied_value:null, reason:note, periods_touched:[]
+  });
+  model.vnotes=model.vnotes||{}; const n=model.vnotes[key]||{}; n.remark=(n.remark?n.remark+'\n':'')+'Keep plan (manual): '+note; model.vnotes[key]=n;
+  saveModel(); renderVariance(); toast('Kept plan · reason saved');
 }
 function rfFindSuggestion(driver_id){
   const win=_vState.win||[0,P()-1];
@@ -5818,22 +5903,29 @@ function isStaleFakePnLInput(v){
   if(v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
   /* Graph leaves on Assumptions/other tabs are real inputs — never "fake" */
   if(v.srcGraph && !v.srcLine) return false;
+  /* Growth / MoM / rates are often intentional inputs even on the P&L tab — never banner them as fake */
+  const nmKey=((v.name||'')+' '+(v.key||'')).toLowerCase();
+  if(v.unit==='%' || /\b(growth|mom|yoy|qoq|cagr|take[\s_-]?rate|rate|ratio|pct)\b/.test(nmKey)) return false;
   const rng=String(v.range||'');
-  const onPnL=/p\s*&\s*l|\bpnl\b/i.test(rng);
-  /* Only P&L statement lines wrongly stored as Input (pre-walk / stale localStorage) */
+  const onPnL=/p\s*&\s*l|\bpnl\b|income\s*statement/i.test(rng);
+  /* Only classic P&L result lines wrongly stored as Input (pre-walk / stale localStorage) */
   if(!onPnL && !v.srcLine) return false;
   const nm=String(v.name||'');
-  if(!/revenue|cogs|gross|cost|margin|subscription|discount|credit|refund|ebitda|opex|cash|growth/i.test(nm)) return false;
+  if(!/\b(revenue|cogs|gross\s+profit|gross\s+margin|ebitda|ebit|opex|net\s+income|operating\s+income)\b/i.test(nm)) return false;
+  /* Totals / rollups that should be formulas */
+  if(!/\b(total|net|gross|operating)\b/i.test(nm) && !/\brevenue\b/i.test(nm)) return false;
   return true;
 }
 function staleGraphModel(){
   const fakes=(model.vars||[]).filter(isStaleFakePnLInput);
   const ver=(model.uiState&&model.uiState.graphIngestVersion)|0;
-  return {stale: fakes.length>0 || (fakes.length===0 && ver>0 && ver<GRAPH_INGEST_VERSION && (model.sources&&model.sources.graph)), fakes};
+  /* Version lag alone is soft — only banner when real fake Inputs remain */
+  const stale=fakes.length>0;
+  return {stale, fakes, verLag:(ver>0 && ver<GRAPH_INGEST_VERSION && !!(model.sources&&model.sources.graph))};
 }
 function warnIfStaleGraph(){
   const s=staleGraphModel();
-  if(!s.stale && !(s.fakes&&s.fakes.length)) return;
+  if(!(s.fakes&&s.fakes.length)) return;
   const names=s.fakes.slice(0,5).map(v=>v.name).join(', ');
   toast('Stale model — Clear all, then Connect & Scan (hard refresh alone keeps old Inputs'+(names?': '+names:'')+')');
 }
