@@ -2976,7 +2976,17 @@ function viewForecast(){
     </div>
     <div class="panel panel-pad">
       <div class="results-head"><div><p class="eyebrow">Scenario comparison</p><h2 id="resTitle" style="font-size:16px"></h2></div></div>
-      <p class="mut fz11" style="margin:2px 0 6px">Charted lines (add more if you need them):</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:2px 0 6px">
+        <p class="mut fz11" style="margin:0">Charted lines (add more if you need them):</p>
+        <div class="field" style="margin:0"><label style="margin:0 0 2px">Chart window</label>
+          <select class="inp" id="fcWin" style="height:30px;font-size:12px;min-width:140px" onchange="setForecastWin(this.value)">
+            <option value="all">Full timeline</option>
+            <option value="12">Last 12 months</option>
+            <option value="6">Last 6 months</option>
+            <option value="3">Last 3 months</option>
+          </select>
+        </div>
+      </div>
       <div class="linechips" id="lineChips"></div>
       <div class="fcbar">
         <div class="drag-hint" id="dragHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Drag open months — dashed = baseline, solid = scenario · closed months locked</div>
@@ -3335,44 +3345,76 @@ function expandDomainForDrag(key, target){
 const chX=(i,n)=>CH.x0+(CH.x1-CH.x0)*(i/Math.max(1,n-1));
 const chY=(val,d)=>CH.y1-(CH.y1-CH.y0)*((val-d.lo)/((d.hi-d.lo)||1));
 
+function forecastWinMode(){
+  model.uiState=model.uiState||{};
+  const m=String(model.uiState.fcWin||'all');
+  return (m==='3'||m==='6'||m==='12')?m:'all';
+}
+function setForecastWin(v){
+  model.uiState=model.uiState||{};
+  model.uiState.fcWin=(v==='3'||v==='6'||v==='12')?v:'all';
+  saveModel(); renderForecast();
+}
+/** Chart view slice only — model periods stay full. Returns absolute period indexes. */
+function forecastWinIdxs(){
+  const n=P(), mode=forecastWinMode();
+  if(mode==='all' || n<=1) return Array.from({length:n},(_,i)=>i);
+  const take=Math.min(n, parseInt(mode,10)||n);
+  const start=Math.max(0, n-take);
+  return Array.from({length:n-start},(_,i)=>start+i);
+}
+function syncForecastWinSelect(){
+  const el=document.getElementById('fcWin'); if(!el) return;
+  el.value=forecastWinMode();
+}
 function renderForecast(){
   const base=evalModel(false), scen=evalModel(true);
-  const keys=visibleKeys(), L=P()-1;
+  const keys=visibleKeys(), idxs=forecastWinIdxs(), L=idxs.length?idxs[idxs.length-1]:(P()-1);
+  const w0=idxs[0]||0;
+  syncForecastWinSelect();
   const rt=document.getElementById('resTitle');
-  if(rt) rt.textContent=`${keys.length>1?keys.length+' lines':vget(keys[0]).name} · ${model.periods[0]} to ${model.periods[L]}`;
+  if(rt){
+    const nm=keys.length>1?(keys.length+' lines'):((vget(keys[0])||{}).name||'');
+    rt.textContent=`${nm} · ${model.periods[w0]||''} to ${model.periods[L]||''}${forecastWinMode()==='all'?'':' (window)'}`;
+  }
   drawChart(base,scen);
   const leg=document.getElementById('serieslegend');
   if(leg) leg.innerHTML=keys.map((k,si)=>{ const v=vget(k),col=COLORS[si%COLORS.length];
     const bL=(base[k]||[])[L]||0, sL=(scen[k]||[])[L]||0, imp=sL-bL, pct=bL!==0?imp/Math.abs(bL)*100:0;
     const cls=imp>0?'pos':imp<0?'negv':'';
     return `<div class="slrow"><i style="background:${col}"></i><span class="nm">${v.name}</span><span class="vv">${fmtVar(bL,v.unit)} → ${fmtVar(sL,v.unit)}</span><span class="dd ${cls}">${imp===0?'—':fmtDelta(imp,v.unit)+' ('+(pct>=0?'+':'')+pct.toFixed(1)+'%)'}</span></div>`;
-  }).join('')+`<div class="mut fz11" style="margin-top:6px">${model.periods[L].split(' ')[0]} baseline → scenario. Each line is drawn on its own scale so trends stay visible.</div>`;
+  }).join('')+`<div class="mut fz11" style="margin-top:6px"><b>${esc(model.periods[L]||'')}</b> only (one month) · plan → scenario — not a ${P()}-month total. Chart window is view-only; drags still update the full model forward.</div>`;
   const sm=document.getElementById('solveMsg'); if(sm){ sm.hidden=!_solveMsg; sm.textContent=_solveMsg||''; }
   renderSolveBar();
 }
 
 function drawChart(base,scen){
   const svg=document.getElementById('chart'); if(!svg) return;
-  const keys=visibleKeys(), n=P();
-  if(!_dragging){ _domains={}; keys.forEach(k=>_domains[k]=seriesDomain(base[k],scen[k])); }
+  const keys=visibleKeys(), idxs=forecastWinIdxs(), n=idxs.length||1;
+  const slice=(arr)=>idxs.map(i=>(arr||[])[i]);
+  if(!_dragging){
+    _domains={};
+    keys.forEach(k=>_domains[k]=seriesDomain(slice(base[k]), slice(scen[k])));
+  }
   let g=''; for(let r=0;r<4;r++){const y=CH.y0+(CH.y1-CH.y0)*r/3;g+=`<line class="grid-line" x1="${CH.x0}" y1="${y}" x2="${CH.x1}" y2="${y}"/>`;}
   let body='';
   keys.forEach((k,si)=>{ const v=vget(k), col=COLORS[si%COLORS.length], d=_domains[k]||{lo:0,hi:1};
-    const b=base[k]||[], s=scen[k]||[];
-    const bp=b.map((val,i)=>`${chX(i,n)},${chY(val,d)}`).join(' ');
-    const sp=s.map((val,i)=>`${chX(i,n)},${chY(val,d)}`).join(' ');
+    const b=slice(base[k]), s=slice(scen[k]);
+    const bp=b.map((val,j)=>`${chX(j,n)},${chY(val,d)}`).join(' ');
+    const sp=s.map((val,j)=>`${chX(j,n)},${chY(val,d)}`).join(' ');
     body+=`<polyline points="${bp}" fill="none" stroke="${col}" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.4" stroke-linejoin="round"/>`;
     body+=`<polyline id="scen_${k}" points="${sp}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linejoin="round"/>`;
     const drag=v.kind!=='output';
     const closed=model.closed|0;
-    body+=s.map((val,i)=>{
+    body+=s.map((val,j)=>{
+      const i=idxs[j];
       const locked=i<closed;
       const can=drag&&!locked;
-      return `<circle class="scenario-dot" data-key="${k}" data-i="${i}" data-locked="${locked?1:0}" cx="${chX(i,n)}" cy="${chY(val,d)}" r="4.2" style="fill:#fff;stroke:${col};${can?'cursor:ns-resize':(locked?'cursor:not-allowed;opacity:.32':'cursor:default;opacity:.45')}"></circle>`;
+      return `<circle class="scenario-dot" data-key="${k}" data-i="${i}" data-j="${j}" data-locked="${locked?1:0}" cx="${chX(j,n)}" cy="${chY(val,d)}" r="4.2" style="fill:#fff;stroke:${col};${can?'cursor:ns-resize':(locked?'cursor:not-allowed;opacity:.32':'cursor:default;opacity:.45')}"></circle>`;
     }).join('');
   });
   const every=n>13?2:1;
-  const labels=model.periods.map((m,i)=>(i%every===0)?`<text class="axis-label" x="${chX(i,n)}" y="258" text-anchor="middle">${m.split(' ')[0]}</text>`:'').join('');
+  const labels=idxs.map((i,j)=>(j%every===0)?`<text class="axis-label" x="${chX(j,n)}" y="258" text-anchor="middle">${(model.periods[i]||'').split(' ')[0]}</text>`:'').join('');
   svg.innerHTML=`${g}${body}${labels}`;
   bindDrag(svg);
 }
@@ -3380,10 +3422,15 @@ function drawChart(base,scen){
 /* redraw the moving lines/dots ONLY (no innerHTML rebuild) so the held dot keeps pointer capture */
 function updateDuringDrag(){
   const svg=document.getElementById('chart'); if(!svg) return;
-  const scen=evalModel(true), keys=visibleKeys(), n=P();
-  keys.forEach(k=>{ const d=_domains[k]||{lo:0,hi:1}, s=scen[k]||[];
-    const pl=svg.querySelector('[id="scen_'+k+'"]'); if(pl) pl.setAttribute('points', s.map((val,i)=>`${chX(i,n)},${chY(val,d)}`).join(' '));
-    svg.querySelectorAll('.scenario-dot[data-key="'+k+'"]').forEach(dot=>{ const i=+dot.dataset.i; dot.setAttribute('cy', chY(s[i],d)); });
+  const scen=evalModel(true), keys=visibleKeys(), idxs=forecastWinIdxs(), n=idxs.length||1;
+  keys.forEach(k=>{ const d=_domains[k]||{lo:0,hi:1};
+    const s=idxs.map(i=>(scen[k]||[])[i]);
+    const pl=svg.querySelector('[id="scen_'+k+'"]'); if(pl) pl.setAttribute('points', s.map((val,j)=>`${chX(j,n)},${chY(val,d)}`).join(' '));
+    svg.querySelectorAll('.scenario-dot[data-key="'+k+'"]').forEach(dot=>{
+      const i=+dot.dataset.i; const j=idxs.indexOf(i); if(j<0) return;
+      dot.setAttribute('cy', chY((scen[k]||[])[i],d));
+      dot.setAttribute('cx', chX(j,n));
+    });
   });
 }
 
