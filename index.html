@@ -138,14 +138,14 @@
   .chip .k{font-family:var(--mono);font-size:9px;color:#98a0b2}
   .chainwrap .arrow{color:#b6bccb}
   .canvas{position:relative;height:520px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;background-image:radial-gradient(#e7eaf1 1px,transparent 1px);background-size:18px 18px;overflow:hidden;touch-action:none;cursor:grab}
-  .canvas .links{position:absolute;top:0;left:0;width:4200px;height:2800px;pointer-events:none}
+  .canvas .links{position:absolute;top:0;left:0;width:100%;height:100%;min-width:4200px;min-height:2800px;overflow:visible;pointer-events:none}
   .canvas .links .edgegrp{pointer-events:auto;cursor:pointer}
   .canvas .links .edgegrp:hover .edge{stroke:#c23140;stroke-width:2.6}
   .canvas .links .edgegrp:hover .hit{stroke:rgba(194,49,64,.07)}
   .node2{position:absolute;min-width:118px;max-width:190px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px 8px 10px;box-shadow:0 2px 8px rgba(40,52,85,.08);cursor:grab;user-select:none}
   .node2.formula{border-color:#c9e6d8;background:#f4fbf7} .node2.input{border-color:#d8ddfa;background:#f7f8ff} .node2.output{border-color:#f2d6bf;background:#fff8f1}
   .node2 .nm{font-weight:600;font-size:12px;color:#2b3a55} .node2 .sub{font-family:var(--mono);font-size:9px;color:#8b93a6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .node2 .val{font-size:10px;color:#3a4763;margin-top:3px;font-variant-numeric:tabular-nums}
-  .canvas-inner{position:absolute;top:0;left:0;width:4200px;height:2800px;will-change:transform;transform-origin:0 0}
+  .canvas-inner{position:absolute;top:0;left:0;width:4200px;height:2800px;min-width:4200px;min-height:2800px;will-change:transform;transform-origin:0 0;overflow:visible}
   .pagebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 22px;margin-top:6px}
   .ptab{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border:1px solid var(--line);border-radius:8px 8px 0 0;border-bottom:0;background:#f7f8fb;color:var(--muted-2);font-size:12px;font-weight:600;cursor:pointer}
   .ptab.on{background:#fff;color:var(--indigo-ink);border-color:var(--indigo-border);box-shadow:0 -2px 0 var(--indigo) inset}
@@ -2629,7 +2629,26 @@ function confirmAllSuggested(){
   saveModel(); render(); toast('Confirmed '+n+(skipped?` · ${skipped} still need a forecast line`:''));
 }
 
-const CANW=4200, CANH=2800;
+let CANW=4200, CANH=2800;
+function canvasContentBounds(){
+  let maxX=900, maxY=600;
+  const cur=typeof curPage==='function'?curPage():0;
+  (model.vars||[]).forEach(v=>{
+    if(typeof nodePage==='function' && nodePage(v.key)!==cur) return;
+    const p=(model.nodePos&&model.nodePos[v.key])||{x:0,y:0};
+    maxX=Math.max(maxX,(p.x||0)+220);
+    maxY=Math.max(maxY,(p.y||0)+120);
+  });
+  return {w:Math.ceil(maxX+80), h:Math.ceil(maxY+120)};
+}
+function syncCanvasSize(){
+  const b=canvasContentBounds();
+  CANW=Math.max(4200,b.w); CANH=Math.max(2800,b.h);
+  const inn=document.querySelector('#lineageCanvas .canvas-inner');
+  if(inn){ inn.style.width=CANW+'px'; inn.style.height=CANH+'px'; }
+  const svg=document.getElementById('lineLinks');
+  if(svg){ svg.style.width=CANW+'px'; svg.style.height=CANH+'px'; svg.setAttribute('width',String(CANW)); svg.setAttribute('height',String(CANH)); }
+}
 let _pan={x:0,y:0};
 let _zoom=1;
 function clampZoom(z){ return Math.max(0.35, Math.min(2.2, z)); }
@@ -2791,19 +2810,31 @@ function renderCanvas(){
     el.innerHTML=`<div class="nm">${v.name}</div><div class="sub">${v.kind==='formula'?esc(v.expr):v.key}</div><div class="val">${val}</div><div class="handle" data-handle="1" title="Drag onto another line to feed it in"></div>`;
     inner.appendChild(el);
   });
+  syncCanvasSize();
   redrawLinks(); attachCanvas(cv);
   applySetupSelection();
 }
 function redrawLinks(){
   const cv=document.getElementById('lineageCanvas'), svg=document.getElementById('lineLinks'); if(!cv||!svg) return;
+  syncCanvasSize();
   svg.setAttribute('viewBox',`0 0 ${CANW} ${CANH}`);
+  svg.setAttribute('overflow','visible');
   const el=k=>cv.querySelector(`.node2[data-key="${(window.CSS&&CSS.escape)?CSS.escape(k):k}"]`);
   const sel=_setupSel || (model.uiState&&model.uiState.selKey) || null;
   const focus=sel?focusNeighborKeys(sel):null;
   let out=`<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#b6bccb"/></marker><marker id="ahf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#4055c7"/></marker></defs>`;
-  formulas().forEach(f=>{ const fe=el(f.key); if(!fe) return; const fp=model.nodePos[f.key]; const fx=fp.x, fy=fp.y+fe.offsetHeight/2;
-    compile(f.expr).deps.forEach(dk=>{ const dv=model.vars.find(x=>x.key.toLowerCase()===dk.toLowerCase()); if(!dv) return; const de=el(dv.key); if(!de) return;
-      const dp=model.nodePos[dv.key]; const sx=dp.x+de.offsetWidth, sy=dp.y+de.offsetHeight/2, mx=(sx+fx)/2;
+  formulas().forEach(f=>{
+    const fp=model.nodePos[f.key]; if(!fp) return;
+    /* Prefer live DOM size; fall back to nodePos so edges survive scroll / off-page mates */
+    const fe=el(f.key);
+    const fx=fp.x+(fe?0:0), fy=fp.y+(fe?fe.offsetHeight/2:36);
+    const fVisible=!!fe;
+    compile(f.expr).deps.forEach(dk=>{ const dv=model.vars.find(x=>x.key.toLowerCase()===dk.toLowerCase()); if(!dv) return;
+      const dp=model.nodePos[dv.key]; if(!dp) return;
+      const de=el(dv.key);
+      /* Need at least one endpoint on this page (DOM) so the edge is meaningful while scrolling */
+      if(!fVisible && !de) return;
+      const sx=dp.x+(de?de.offsetWidth:160), sy=dp.y+(de?de.offsetHeight/2:36), mx=(sx+fx)/2;
       const d=`M${sx},${sy} C${mx},${sy} ${mx},${fy} ${fx-2},${fy}`;
       let cls='edgegrp', stroke='#b6bccb', sw='1.6', mk='url(#ah)';
       if(focus){
@@ -3858,7 +3889,28 @@ function verLabel(which){
   return which;
 }
 function verShort(which){ if(which&&which.slice(0,2)==='v:'){ const v=(model.versions||[]).find(x=>x.id===which.slice(2)); return v?(v.name.length>14?v.name.slice(0,13)+'…':v.name):'—'; } return {plan:'Plan',scenario:'Scenario',forecast:'Forecast',actual:'Actuals',prior:PRIOR_LABEL[_vState.priorN||1]||'Prior'}[which]||which; }
-function goodDir(v){ return v.good||'up'; }
+function inferGoodDir(v){
+  const s=(((v&&v.name)||'')+' '+((v&&v.key)||'')+' '+((v&&v.account)||'')+' '+((v&&v.metric)||'')).toLowerCase();
+  if(!s.trim()) return null;
+  /* Costs / spend / deductions — lower is better */
+  if(/\b(cost|costs|expense|expenses|opex|spend|spending|cogs|cac|burn|churn|refund|cashback|incentive|incentives|write[\s_-]?off|impairment|depreciat|amorti|interest\s+expense|tax\s+expense|payroll|salary|salaries|wage|wages|headcount\s+cost|people\s+cost|marketing\s+spend|performance\s+marketing)\b/.test(s)) return 'down';
+  if(/\bless\s*:/.test(s) || /^less\b/.test(s.trim()) || /\b(deduction|deductions)\b/.test(s)) return 'down';
+  /* Revenue / profit — higher is better */
+  if(/\b(revenue|gmv|gross\s+merchandise|profit|ebitda|ebit|income|margin|contribution|take[\s_-]?rate|arpu|aov)\b/.test(s)) return 'up';
+  return null;
+}
+function goodDir(v){
+  if(v&&v.good) return v.good;
+  const inf=inferGoodDir(v);
+  return inf||'up';
+}
+function ensurePolarity(v){
+  if(!v || v.favOverride) return v;
+  if(v.good) return v;
+  const inf=inferGoodDir(v);
+  if(inf) v.good=inf;
+  return v;
+}
 function isFav(v,variance){
   if(v.favOverride==='fav') return true;
   if(v.favOverride==='unf') return false;
@@ -4121,6 +4173,15 @@ function rfFmt(v, unit){
   if(unit==='%') return ((Number(v)||0)*100).toFixed(2)+'%';
   try{ return fmtVar(Number(v)||0, unit||''); }catch(e){ return String(v); }
 }
+function rfAbsFloor(unit){
+  if(unit==='%') return 0.0025; /* 0.25pp */
+  if(unit==='#') return 0.5;
+  return 1; /* ₹ — ignore sub-rupee noise / false zeros */
+}
+function rfIsGrowthLike(v){
+  const s=(((v&&v.name)||'')+' '+((v&&v.key)||'')).toLowerCase();
+  return /\b(growth|mom|yoy|qoq|cagr)\b/.test(s);
+}
 function collectRollForwardSuggestions(win){
   const w=win||(_vState.win||[0,Math.max(0,P()-1)]);
   const plan=versionData('plan');
@@ -4128,14 +4189,28 @@ function collectRollForwardSuggestions(win){
   if(!futures.length) return [];
   const matPct=Math.max(0.05, (model.matThresh||5)/100);
   const out=[];
-  inputs().forEach(v=>{
-    if(!v || v.writable===false && !(v.actuals&&v.actuals.length)) {
-      /* still allow writable inputs; skip non-writable without actuals */
+  /* Prefer drivers that actually move the selected variance line this window */
+  let contribKeys=null;
+  try{
+    if(_vState.line && vget(_vState.line)){
+      const A=versionData(_vState.A||'actual'), B=versionData(_vState.B||'plan',A);
+      const p=w[1];
+      const br=periodContributions(_vState.line,A,B,p);
+      const parts=(br.steps||[]).filter(st=>Math.abs(st.delta)>1e-9).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+      if(parts.length) contribKeys=new Set(parts.slice(0,12).map(st=>st.key));
     }
-    if(v.writable===false) return; /* only drivers we can override */
+  }catch(e){ contribKeys=null; }
+  inputs().forEach(v=>{
+    if(!v || v.writable===false) return;
+    ensurePolarity(v);
+    /* Fix unit for growth-like drivers so we never present MoM as ₹0 */
+    if((!v.unit || v.unit==='₹') && rfIsGrowthLike(v)) v.unit='%';
     const vals=[];
     for(let p=w[0];p<=w[1];p++){
-      if(v.actuals&&v.actuals[p]!=null&&v.actuals[p]!=='') vals.push(Number(v.actuals[p]));
+      if(v.actuals&&v.actuals[p]!=null&&v.actuals[p]!==''){
+        const n=Number(v.actuals[p]);
+        if(Number.isFinite(n)) vals.push(n);
+      }
     }
     if(!vals.length) return;
     const obs_min=Math.min(...vals), obs_max=Math.max(...vals);
@@ -4152,18 +4227,31 @@ function collectRollForwardSuggestions(win){
       planVals.push(Number(pv));
     }
     const plan_value=planVals.reduce((a,b)=>a+b,0)/planVals.length;
-    const outside=plan_value<obs_min-1e-12 || plan_value>obs_max+1e-12;
-    const denom=Math.max(Math.abs(plan_value), Math.abs(obs_mid), 1e-9);
-    const material=Math.abs(plan_value-obs_mid)/denom >= matPct;
+    const gap=Math.abs(plan_value-obs_mid);
+    const floor=rfAbsFloor(v.unit||'');
+    /* Trust bar: never suggest when both sides are ~0 / below absolute floor */
+    if(Math.abs(plan_value)<floor && Math.abs(obs_mid)<floor) return;
+    if(gap<floor) return;
+    const outside=plan_value<obs_min-floor*0.25 || plan_value>obs_max+floor*0.25;
+    const denom=Math.max(Math.abs(plan_value), Math.abs(obs_mid), floor);
+    const material=gap/denom >= matPct;
     if(!outside && !material) return;
+    /* Growth rates with no real observed movement are noise — skip */
+    if(rfIsGrowthLike(v) && Math.abs(obs_mid)<floor && Math.abs(plan_value)<floor) return;
+    const inBridge=contribKeys?contribKeys.has(v.key):false;
     out.push({
       driver_id:v.key, name:v.name, unit:v.unit||'',
       obs_min, obs_max, obs_mid, plan_value,
-      periods_open:futures.slice()
+      periods_open:futures.slice(),
+      _gap:gap, _bridge:inBridge
     });
   });
-  out.sort((a,b)=>Math.abs(b.plan_value-b.obs_mid)-Math.abs(a.plan_value-a.obs_mid));
-  return out;
+  out.sort((a,b)=>{
+    if(a._bridge!==b._bridge) return a._bridge?-1:1;
+    return b._gap-a._gap;
+  });
+  /* Cap to top material drivers — never dump junk MoM zeros */
+  return out.slice(0,8).map(({_gap,_bridge,...rest})=>rest);
 }
 function rfToneVerb(s){
   if(s.plan_value>s.obs_max) return 'tone future periods down';
@@ -4348,7 +4436,7 @@ function renderVariance(){
   const perOpts=`<option value="all" ${win0[0]===0&&win0[1]===P()-1?'selected':''}>Full timeline</option>`+model.periods.map((m,i)=>`<option value="${i}" ${win0[0]===win0[1]&&win0[0]===i?'selected':''}>${m}</option>`).join('');
 
   // ---- line table ----
-  const rows=model.vars.map(v=>{ const bHas=versionHasData(_vState.B,v.key,win), aHas=versionHasData(_vState.A,v.key,win);
+  const rows=model.vars.map(v=>{ ensurePolarity(v); const bHas=versionHasData(_vState.B,v.key,win), aHas=versionHasData(_vState.A,v.key,win);
     const b=bHas?vAgg(B,v.key,win):null, a=aHas?vAgg(A,v.key,win):null;
     const d=(a!=null&&b!=null)?a-b:null, pct=(d!=null&&b)?d/Math.abs(b)*100:null, fav=d!=null?isFav(v,d):null;
     return {v,b,a,d,pct,fav,mag:d==null?-1:Math.abs(d),noData:a==null||b==null}; }).sort((x,y)=>y.mag-x.mag);
@@ -5335,7 +5423,7 @@ function applySheetLineToVar(v, line, sheetName, firstCol, periodsLen, asActual)
 }
 function slugKey(name){ let k=String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); if(!k)k='line'; if(!/^[a-z_]/.test(k))k='x_'+k; return k; }
 function inferUnit(name){ const s=String(name).toLowerCase();
-  if(/%/.test(s) || /\b(rate|ratio|pct|percent|take[\s_-]?rate|conversion|ctr|cvr|discount)\b/.test(s)) return '%';
+  if(/%/.test(s) || /\b(rate|ratio|pct|percent|take[\s_-]?rate|conversion|ctr|cvr|discount|growth|mom|yoy|qoq|cagr)\b/.test(s)) return '%';
   if(/\b(price|asp|arpu|ticket|fee|cpc|cpm)\b|per\s*unit|per\s*seat/.test(s)) return '₹'; /* price still currency, but flagged for avg roll-up */
   if(/\b(units?|qty|count|nos?|volume|headcount|fte|employees|customers|distributors|orders|seats?|visits?|impressions)\b/.test(s)) return '#';
   return '₹'; }
@@ -5348,7 +5436,9 @@ function isVolumeLike(v){
   return (v&&v.unit==='#') || /\b(units?|qty|volume|seats?|customers|orders|visits?)\b/i.test(s);
 }
 function applyRollupHeuristic(v){
-  if(!v || v.agg) return; /* founder override wins */
+  if(!v) return;
+  ensurePolarity(v);
+  if(v.agg) return; /* founder override wins */
   if(v.unit==='%' || isPriceLike(v) || (v.kind==='input' && v.unit!=='₹')) v.agg='avg';
   else if(v.kind==='input') v.agg='avg';
   else v.agg='sum'; /* currency & volume outputs / formulas */
