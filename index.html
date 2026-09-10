@@ -1851,15 +1851,14 @@ function driverCountLabel(n){
 /** Show model expr with business names (longest keys first). Keys stay the source of truth. */
 function exprToHuman(expr){
   const raw=String(expr||'').trim(); if(!raw) return '';
+  /* Convert math ops BEFORE name swap — names often contain "/" (e.g. price / account) */
+  let out=raw.replace(/\*/g,' × ').replace(/\//g,' ÷ ');
   const keys=(model.vars||[]).map(v=>v.key).filter(Boolean).sort((a,b)=>b.length-a.length);
-  let out=raw;
   keys.forEach(k=>{
     const v=vget(k); if(!v||!v.name) return;
     const re=new RegExp('\\b'+k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi');
     out=out.replace(re, v.name);
   });
-  /* Display-only ops — model/sheet keep * / */
-  out=out.replace(/\*/g,'×').replace(/(?<=\S)\s*\/\s*(?=\S)/g,' ÷ ');
   return out.replace(/\s+/g,' ').trim();
 }
 /** Split plain-terms on top-level + (respect parentheses). */
@@ -5019,18 +5018,21 @@ function ensureModelShape(){
   if(model.scenarios===undefined){ /* no-op */ }
   recompileAll();
 }
-const GRAPH_INGEST_VERSION=6;
+const GRAPH_INGEST_VERSION=7;
 function isStaleFakePnLInput(v){
   if(!v) return false;
   if(v.srcPricing) return false; /* Pricing controls are not P&L walk fakes */
-  if(v.kind==='formula' && v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
-  /* P&L revenue/COGS-looking lines stored as Input with only a P&L range and no sheet formula = pre-walk localStorage */
-  const nm=String(v.name||'');
-  if(!/revenue|cogs|gross|cost|margin|subscription|usage|discount|credit|refund|ebitda|opex|cash/i.test(nm)) return false;
   if(v.kind!=='input') return false;
   if(v.sheetFormula && String(v.sheetFormula).startsWith('=')) return false;
+  /* Graph leaves on Assumptions/other tabs are real inputs — never "fake" */
+  if(v.srcGraph && !v.srcLine) return false;
   const rng=String(v.range||'');
-  return /p\s*&\s*l|pnl/i.test(rng) || !!v.srcLine || !!v.srcGraph;
+  const onPnL=/p\s*&\s*l|\bpnl\b/i.test(rng);
+  /* Only P&L statement lines wrongly stored as Input (pre-walk / stale localStorage) */
+  if(!onPnL && !v.srcLine) return false;
+  const nm=String(v.name||'');
+  if(!/revenue|cogs|gross|cost|margin|subscription|discount|credit|refund|ebitda|opex|cash|growth/i.test(nm)) return false;
+  return true;
 }
 function staleGraphModel(){
   const fakes=(model.vars||[]).filter(isStaleFakePnLInput);
