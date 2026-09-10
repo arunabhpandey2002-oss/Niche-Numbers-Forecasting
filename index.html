@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:hotfix-blank-20260910d -->
+<!-- NN_BUILD:scan-range-20260910e -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -5081,6 +5081,7 @@ function classifyConnectError(err, kind){
   if(!raw) return `Couldn’t reach the ${where}. Check the URL and try again.`;
   if(/invalid|malformed|url/.test(m) && /script|http|exec/.test(m)) return 'That Apps Script URL doesn’t look right. Paste the full /exec web app URL.';
   if(/401|403|unauthor|forbidden|token|permission|access denied|not allowed/.test(m)) return 'Bad token or no permission. Re-check the secret token and that the script can open this Google Sheet.';
+  if(/range not found/.test(m)) return `Scan hit a bad cell range. Redeploy latest Code.gs (New version), then Clear all → Connect & Scan. If it persists, a P&L formula points at a missing tab/cell.`;
   if(/404|not found|missing|no spreadsheet|unable to open|does not exist/.test(m)) return `Sheet not found or unreachable (${where}). Check the URL/ID and sharing with the script’s Google account.`;
   if(/network|failed to fetch|load failed|cors|timeout|unreachable/.test(m)) return `Couldn’t reach Google (${where}). Check the Apps Script deployment (Anyone access) and your network, then retry.`;
   if(/actuals/.test(kind||'') || kind==='actuals') return `Actuals sheet failed: ${raw}. Nothing was connected — fix actuals or clear that field.`;
@@ -5405,6 +5406,9 @@ async function ingestFromConnectedSheet(opts){
       /* explicit escape hatch only */
     } else {
       const msg=String((graphErr&&graphErr.message)||graphErr||'formula-graph ingest failed');
+      if(/range not found/i.test(msg)){
+        throw new Error('Scan hit a bad sheet cell ref (Range not found). Usually a formula points at a missing tab/cell. Redeploy latest Code.gs (skips bad ranges), Clear all → Connect & Scan. Detail: '+msg);
+      }
       throw new Error(msg+( /formula|includeFormulas|Apps Script/i.test(msg) ? '' : ' Redeploy Apps Script Code.gs with includeFormulas, then Clear all → Connect & Scan.'));
     }
   }
@@ -5628,8 +5632,15 @@ async function gasReadRanges(ranges, opts){
   const url=opts.url||conn.url, token=opts.token||conn.token;
   const ssid=opts.ssid!=null?opts.ssid:conn.ssid;
   const includeFormulas=!!opts.includeFormulas;
-  const list=(ranges||[]).filter(Boolean);
+  const list=(ranges||[]).filter(r=>{
+    if(!r || !String(r).trim()) return false;
+    /* Drop obviously broken A1 (trailing !, empty sheet, bare !A1) */
+    const t=String(r).trim();
+    if(/^!/.test(t) || /!$/.test(t) || /!!/.test(t)) return false;
+    return true;
+  });
   if(!url||!token) throw new Error('Not connected');
+  if(!list.length) return {ok:true, values:{}, formulas:includeFormulas?{}:undefined};
   /* Prefer POST for long range lists + formulas flag */
   try{
     const body={token, action:'read', ssid:ssid||'', ranges:list, includeFormulas};
