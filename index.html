@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:rf-trust-20260910c -->
+<!-- NN_BUILD:hotfix-blank-20260910d -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -4383,9 +4383,11 @@ function rfMarkDriverChanged(){
   if(hint){
     const plan=versionData('plan');
     const pv=(plan[v.key]||[])[w[1]];
-    hint.textContent = (v.unit==='%'?'Unit is % — enter 1.5 for 1.5%. ':'') +
-      (obs!=null?('Obs mid in window ≈ '+rfFmt(obs,v.unit||'')+'. ':'') ) +
-      (pv!=null?('Plan ≈ '+rfFmt(Number(pv),v.unit||'')+'.':'');
+    let tip='';
+    if(v.unit==='%') tip+='Unit is % — enter 1.5 for 1.5%. ';
+    if(obs!=null) tip+='Obs mid in window ≈ '+rfFmt(obs,v.unit||'')+'. ';
+    if(pv!=null) tip+='Plan ≈ '+rfFmt(Number(pv),v.unit||'')+'.';
+    hint.textContent=tip;
   }
 }
 function rollForwardManualApply(){
