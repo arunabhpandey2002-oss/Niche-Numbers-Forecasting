@@ -107,10 +107,17 @@ function doPost(event) {
     if (body.action === 'write') {
       const writes = body.writes || [];
       writes.forEach(function (write) {
-        if (!write.range || !Array.isArray(write.values)) {
-          throw new Error('Every write needs a range and a two-dimensional values array.');
+        if (!write.range) {
+          throw new Error('Every write needs a range.');
         }
-        spreadsheet.getRange(write.range).setValues(write.values);
+        /* Prefer formulas (logic writeback) over values — never confuse the two */
+        if (Array.isArray(write.formulas)) {
+          spreadsheet.getRange(write.range).setFormulas(write.formulas);
+        } else if (Array.isArray(write.values)) {
+          spreadsheet.getRange(write.range).setValues(write.values);
+        } else {
+          throw new Error('Every write needs formulas or a two-dimensional values array.');
+        }
       });
       SpreadsheetApp.flush();
       return json_({

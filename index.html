@@ -66,15 +66,20 @@
   .vtbl .def-compact .def-line{font-size:11.5px;color:#5a6478;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .vtbl .def-compact .def-meta{font-size:10.5px;color:#98a0b2}
   .vtbl .def-compact .expr{font-size:10.5px;color:#7d8598;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:340px}
-  .dive-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
-  @media(max-width:720px){.dive-grid{grid-template-columns:1fr}}
+  .dive-grid{display:grid;grid-template-columns:1fr minmax(160px,1.1fr) 1fr;gap:10px;margin-top:8px;align-items:stretch}
+  @media(max-width:860px){.dive-grid{grid-template-columns:1fr}}
   .dive-col{border:1px solid #eef0f4;border-radius:10px;padding:10px 12px;background:#fbfcfe;min-height:80px}
+  .dive-col.center{background:#fff;border-color:#d9deea;box-shadow:0 1px 0 rgba(40,52,85,.04)}
   .dive-col h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#747d92}
+  .dive-center-name{font-size:16px;font-weight:650;color:#1f2a44;margin:0 0 6px;line-height:1.25}
+  .dive-human{font-size:13.5px;color:#2a354d;line-height:1.45;margin:0 0 8px}
   .dive-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent}
   .dive-item:hover{background:#fff;border-color:#e5e8ef}
   .dive-item .nm{font-size:12.5px;color:#344056;font-weight:550}
-  .dive-item .ky{font-family:var(--mono);font-size:10px;color:#98a0b2}
+  .dive-item .ky{display:none}
   .dive-empty{font-size:12px;color:#98a0b2;padding:6px 2px}
+  .human-expr{font-size:12.5px;color:#2a354d;line-height:1.4}
+  .vtbl .def-compact .human-expr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:340px;font-size:12px}
   .tokbar.drivers{gap:5px;margin-top:6px}
   .tokbar.drivers .tok{font-size:11px;padding:4px 8px}
   #vInsertFilter{margin-top:8px;margin-bottom:6px}
@@ -1830,6 +1835,82 @@ function driverCountLabel(n){
   if(!n) return 'No drivers';
   return n===1 ? '1 driver' : (n+' drivers');
 }
+/** Show model expr with business names (longest keys first). Keys stay the source of truth. */
+function exprToHuman(expr){
+  const raw=String(expr||'').trim(); if(!raw) return '';
+  const keys=(model.vars||[]).map(v=>v.key).filter(Boolean).sort((a,b)=>b.length-a.length);
+  let out=raw;
+  keys.forEach(k=>{
+    const v=vget(k); if(!v||!v.name) return;
+    const re=new RegExp('\\b'+k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi');
+    out=out.replace(re, v.name);
+  });
+  return out.replace(/\s+/g,' ').trim();
+}
+/** Map a var key → A1 for period offset p within its mapped forecast range (same row, col+p). */
+function cellRefForVarPeriod(v, p, preferSheet){
+  if(!v||!v.range) return null;
+  const rp=parseRange(v.range); if(!rp.col||!rp.row) return null;
+  const c0=colToNum(rp.col); if(!c0) return null;
+  const col=numToCol(c0+Math.max(0,p|0));
+  const sh=String(rp.sheet||'').trim();
+  const pref=String(preferSheet||'').trim();
+  if(sh && pref && sh.toLowerCase()===pref.toLowerCase()) return col+rp.row;
+  if(!sh) return col+rp.row;
+  const q=/[^A-Za-z0-9_]/.test(sh)?("'"+sh+"'"):sh;
+  return q+'!'+col+rp.row;
+}
+/**
+ * Build one sheet formula string for period p from model expr.
+ * Only substitutes mapped drivers — fails closed if a driver has no range.
+ */
+function modelExprToSheetFormulaAt(expr, p, targetSheet){
+  const raw=String(expr||'').trim(); if(!raw) return {ok:false, reason:'empty formula'};
+  let deps=[];
+  try{ deps=(compile(raw).deps||[]).map(String); }catch(e){ return {ok:false, reason:String(e.message||e)}; }
+  const keys=deps.slice().sort((a,b)=>b.length-a.length);
+  let out='='+raw;
+  const missing=[];
+  keys.forEach(k=>{
+    const v=vget(k);
+    const ref=cellRefForVarPeriod(v, p, targetSheet);
+    if(!ref){ missing.push(k); return; }
+    const re=new RegExp('\\b'+k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi');
+    out=out.replace(re, ref);
+  });
+  if(missing.length) return {ok:false, reason:'unmapped driver(s): '+missing.map(k=>{ const v=vget(k); return v?v.name:k; }).join(', ')};
+  /* Reject if any model keys remain (would write nonsense into the sheet) */
+  const still=[];
+  (model.vars||[]).forEach(v=>{
+    if(!v.key) return;
+    const re=new RegExp('\\b'+v.key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i');
+    if(re.test(out.replace(/^=/,''))) still.push(v.key);
+  });
+  if(still.length) return {ok:false, reason:'could not map: '+still.join(', ')};
+  return {ok:true, formula:out};
+}
+/** Formulas row for the full mapped span — real sheet formulas, never values. */
+function buildFormulaWriteRow(v){
+  if(!v||v.kind!=='formula'||!v.expr||!v.range) return {ok:false, reason:'need formula + mapped range'};
+  const rp=parseRange(v.range);
+  const n=P();
+  const row=[];
+  for(let p=0;p<n;p++){
+    const got=modelExprToSheetFormulaAt(v.expr, p, rp.sheet);
+    if(!got.ok) return got;
+    row.push(got.formula);
+  }
+  return {ok:true, range:v.range, formulas:[row], human:exprToHuman(v.expr)};
+}
+async function writeFormulaLogicToSheet(v){
+  const built=buildFormulaWriteRow(v);
+  if(!built.ok) throw new Error(built.reason||'cannot build sheet formulas');
+  if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
+  const data=await fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:conn.token,action:'write',ssid:conn.ssid||'',writes:[{range:built.range, formulas:built.formulas}]})}).then(r=>r.json());
+  if(!data||data.ok===false) throw new Error((data&&data.error)||'Sheet write failed');
+  v.sheetFormula=built.formulas[0][0];
+  return built;
+}
 function openDeepDive(key){
   const v=vget(key); if(!v) return;
   const ups=driversOf(v);
@@ -1837,28 +1918,42 @@ function openDeepDive(key){
   const item=(k)=>{
     const d=vget(k);
     const nm=d?esc(d.name):esc(k);
-    const ky=esc(k);
-    return `<div class="dive-item" onclick="openDeepDive('${jesc(k)}')" title="Deep dive"><span class="nm">${nm}</span><span class="ky">${ky}</span></div>`;
+    return `<div class="dive-item" onclick="openDeepDive('${jesc(k)}')" title="Open ${nm}"><span class="nm">${nm}</span></div>`;
   };
-  const upHtml=ups.length?ups.map(item).join(''):`<div class="dive-empty">${v.kind==='input'?'Inputs have no formula drivers — they are set directly.':'No compiled drivers yet.'}</div>`;
-  const downHtml=downs.length?downs.map(item).join(''):`<div class="dive-empty">Nothing in the model formula graph reads this line yet.</div>`;
-  const sheet=v.sheetFormula?`<p class="eyebrow" style="margin:0 0 6px">Sheet formula</p><div class="expr" style="padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:88px;overflow:auto">${esc(v.sheetFormula)}</div>`:'';
-  const modelF=(v.kind==='formula'&&v.expr)?`<p class="eyebrow" style="margin:12px 0 6px">Model formula</p><div class="expr" style="padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:72px;overflow:auto">${esc(v.expr)}</div>`:'';
+  const upHtml=ups.length?ups.map(item).join(''):`<div class="dive-empty">${v.kind==='input'?'Set directly — no formula drivers.':'No first-level drivers yet.'}</div>`;
+  const downHtml=downs.length?downs.map(item).join(''):`<div class="dive-empty">Nothing reads this line yet.</div>`;
+  const human=(v.kind==='formula'&&v.expr)?exprToHuman(v.expr):'';
   const idx=model.vars.indexOf(v);
-  showModal(`<div class="mhead"><h3>${esc(v.name)}</h3><button class="x" onclick="closeModal()">×</button></div>
+  const canWrite=v.kind==='formula'&&v.expr&&v.range&&conn.connected;
+  showModal(`<div class="mhead"><h3>Deep dive</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
-      <p class="mut fz12" style="margin:0 0 4px"><span class="kind-pill ${v.kind==='input'?'kind-input':v.kind==='formula'?'kind-formula':'kind-output'}">${esc(v.kind)}</span> <span class="keychip">${esc(v.key)}</span>${v.range?` · <span class="cellref">${esc(v.range)}</span>`:''}</p>
-      <p class="mut fz11" style="margin:0 0 10px">Edges below are from the compiled model graph only — not guesses.</p>
-      ${sheet}${modelF}
+      <p class="mut fz11" style="margin:0 0 10px">First-level edges from the compiled model graph only — click a name to drill in.</p>
       <div class="dive-grid">
-        <div class="dive-col"><h4>Drivers (feeds into this)</h4>${upHtml}</div>
+        <div class="dive-col"><h4>Drivers</h4>${upHtml}</div>
+        <div class="dive-col center">
+          <h4>This line</h4>
+          <div class="dive-center-name">${esc(v.name)}</div>
+          <p class="mut fz11" style="margin:0 0 8px"><span class="kind-pill ${v.kind==='input'?'kind-input':v.kind==='formula'?'kind-formula':'kind-output'}">${esc(v.kind)}</span>${v.range?` · <span class="cellref">${esc(v.range)}</span>`:''}</p>
+          ${human?`<div class="dive-human">${esc(human)}</div>`:`<div class="dive-empty">${v.kind==='input'?'Input — set / plan directly.':'No model formula yet.'}</div>`}
+          ${v.sheetFormula?`<details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Sheet formula (under the hood)</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:72px;overflow:auto">${esc(v.sheetFormula)}</div></details>`:''}
+        </div>
         <div class="dive-col"><h4>Feeds into</h4>${downHtml}</div>
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px">
         <button class="btn" onclick="closeModal()">Close</button>
+        ${canWrite?`<button class="btn" onclick="writeLogicFromDive('${jesc(v.key)}')">Write formula to sheet</button>`:''}
         <button class="btn primary" onclick="closeModal();editVar(${idx})">Edit</button>
       </div>
     </div>`);
+}
+async function writeLogicFromDive(key){
+  const v=vget(key); if(!v) return;
+  try{
+    const built=await writeFormulaLogicToSheet(v);
+    saveModel();
+    toast('Wrote sheet formulas for '+v.name+' ('+P()+' periods)');
+    openDeepDive(key);
+  }catch(e){ toast(String(e.message||e)); }
 }
 function viewSetup(){
   const startLbl=model.periods[0]||"", endLbl=model.periods[P()-1]||"";
@@ -1874,8 +1969,9 @@ function viewSetup(){
     const deps=driversOf(v);
     let def='';
     if(v.kind==='formula'){
-      const hint=v.sheetFormula?String(v.sheetFormula).replace(/^\s*=\s*/,''): (v.expr||'');
-      def=`<div class="def-compact"><span class="def-meta">${esc(driverCountLabel(deps.length))}${v.err?' · ⚠':''}</span>${hint?`<span class="expr" title="${esc(hint)}">${esc(hint)}</span>`:''}</div>`;
+      const human=exprToHuman(v.expr||'');
+      const title=human||String(v.sheetFormula||'');
+      def=`<div class="def-compact"><span class="def-meta">${esc(driverCountLabel(deps.length))}${v.err?' · ⚠':''}</span>${human?`<span class="human-expr" title="${esc(title)}">${esc(human)}</span>`:(v.sheetFormula?`<span class="expr" title="${esc(v.sheetFormula)}">${esc(String(v.sheetFormula).replace(/^\s*=\s*/,''))}</span>`:'')}</div>`;
     } else if(v.kind==='input'){
       def=`<div class="def-compact"><span class="def-line">Input · base ${fmtVar(v.base,v.unit)}</span><span class="def-meta">${(v.steps&&v.steps.length)?(v.steps.length+' step'+(v.steps.length>1?'s':'')):'set directly'}</span></div>`;
     } else {
@@ -2357,9 +2453,10 @@ function varModal(idx){
         <div class="field"><label>Canvas page</label><select id="vPage">${(model.pages||['Page 1']).map((nm,i)=>`<option value="${i}" ${i===nodePg?'selected':''}>${esc(nm)}</option>`).join('')}</select></div>
       </div>
       <div id="vFormulaRow" style="${v.kind==='formula'?'':'display:none'}">
-        ${v.sheetFormula?`<p class="eyebrow" style="margin:0 0 6px">Sheet formula</p><div class="expr" style="margin-bottom:10px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:96px;overflow:auto">${esc(v.sheetFormula)}</div>`:`<p class="mut fz12">No sheet formula on this line.</p>`}
-        ${(()=>{ if(v.kind!=='formula'||!v.expr) return '<p class="mut fz12">No drivers yet.</p>'; try{ const d=driversOf(v); if(!d.length) return '<p class="mut fz12">Drivers: (none)</p>'; return '<p class="eyebrow" style="margin:10px 0 4px">Drivers</p><div class="tokbar drivers">'+d.map(k=>{ const dep=vget(k); const lab=dep?esc(dep.name):esc(k); return '<span class="tok" title="'+esc(k)+'">'+lab+'</span>'; }).join('')+'</div>'; }catch(e){ return ''; } })()}
-        <p class="mut fz11" style="margin:8px 0 0"><a href="#" onclick="event.preventDefault();openDeepDive('${jesc(v.key)}')">Deep dive — drivers &amp; feeds into</a></p>
+        ${(()=>{ const human=(v.expr&&exprToHuman(v.expr))||''; if(human) return '<p class="eyebrow" style="margin:0 0 6px">In plain terms</p><div class="human-expr" style="margin-bottom:10px;padding:10px 12px;background:#f7f8fc;border-radius:8px">'+esc(human)+'</div>'; return '<p class="mut fz12">No model formula yet.</p>'; })()}
+        ${(()=>{ if(v.kind!=='formula'||!v.expr) return '<p class="mut fz12">No first-level drivers yet.</p>'; try{ const d=driversOf(v); if(!d.length) return '<p class="mut fz12">Drivers: (none)</p>'; return '<p class="eyebrow" style="margin:10px 0 4px">Drivers (first level)</p><div class="tokbar drivers">'+d.map(k=>{ const dep=vget(k); const lab=dep?esc(dep.name):esc(k); return '<button type="button" class="tok" title="Deep dive" onclick="openDeepDive(\''+jesc(k)+'\')">'+lab+'</button>'; }).join('')+'</div>'; }catch(e){ return ''; } })()}
+        <p class="mut fz11" style="margin:8px 0 0"><a href="#" onclick="event.preventDefault();openDeepDive('${jesc(v.key)}')">Bloomberg deep dive — Drivers | this line | Feeds into</a></p>
+        ${v.sheetFormula?`<details style="margin-top:10px"><summary class="mut fz11" style="cursor:pointer">Sheet formula (under the hood)</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word;max-height:80px;overflow:auto">${esc(v.sheetFormula)}</div></details>`:''}
         <details style="margin-top:12px"><summary class="mut fz11" style="cursor:pointer">Edit formula</summary>
           <div class="field" style="margin-top:8px"><label>Model formula</label><textarea class="inp" id="vExpr" rows="3" placeholder="price * volume">${esc(v.expr||'')}</textarea></div>
           <div class="tokbar" style="margin-top:8px">${["+","−","*","/","(",")"].map(o=>`<button type="button" class="tok op" onclick="insTok('${o==='−'?'-':o}')">${o}</button>`).join('')}<button type="button" class="tok op" title="lag(var,n)" onclick="insFn('lag')">lag(</button><button type="button" class="tok op" title="if(cond,a,b)" onclick="insFn('if')">if(</button><button type="button" class="tok op" title="sum_periods(var)" onclick="insFn('sum_periods')">sum_periods(</button><button type="button" class="tok op" title="pct(a,b)" onclick="insFn('pct')">pct(</button><button type="button" class="tok op" onclick="insTok(',')">,</button></div>
@@ -2508,7 +2605,35 @@ function saveVar(idx){
   if(!model.nodePos[key]){ const onPage=model.vars.filter(x=>x.key!==key && nodePage(x.key)===pgSel).length; model.nodePos[key]={x:24, y:22+onPage*84, pg:pgSel}; }
   else model.nodePos[key].pg=pgSel;
   if(idx==null && window.__pendingChart){ if(!Array.isArray(model.displayVars)) model.displayVars=[]; if(!model.displayVars.includes(v.key)) model.displayVars.push(v.key); window.__pendingChart=false; }
+  const prevExpr=String((prev&&prev.expr)||'');
+  const formulaChanged=(kind==='formula' && v.expr && v.expr!==prevExpr);
   recompileAll(); closeModal(); render(); saveModel();
+  if(formulaChanged && v.range && conn.connected){
+    const built=buildFormulaWriteRow(v);
+    if(built.ok){
+      showModal(`<div class="mhead"><h3>Write formula to sheet?</h3><button class="x" onclick="closeModal()">×</button></div>
+        <div class="mbody">
+          <p class="mut fz12" style="margin:0 0 8px">Updates <b>${esc(v.name)}</b> on <span class="cellref">${esc(v.range)}</span> with real sheet formulas (not values).</p>
+          <p class="eyebrow" style="margin:0 0 6px">Plain terms</p>
+          <div class="human-expr" style="padding:10px 12px;background:#f7f8fc;border-radius:8px;margin-bottom:10px">${esc(built.human||exprToHuman(v.expr))}</div>
+          <details><summary class="mut fz11" style="cursor:pointer">First-period sheet formula</summary><div class="expr" style="margin-top:6px;padding:8px 10px;background:#f7f8fc;border-radius:8px;word-break:break-word">${esc(built.formulas[0][0])}</div></details>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+            <button class="btn" onclick="closeModal()">Not now</button>
+            <button class="btn primary" onclick="confirmFormulaWrite('${jesc(v.key)}')">Write formulas</button>
+          </div>
+        </div>`);
+    } else {
+      toast('Saved model. Sheet write skipped — '+built.reason);
+    }
+  }
+}
+async function confirmFormulaWrite(key){
+  const v=vget(key); if(!v){ closeModal(); return; }
+  try{
+    await writeFormulaLogicToSheet(v);
+    saveModel(); closeModal(); render();
+    toast('Wrote sheet formulas for '+v.name);
+  }catch(e){ toast(String(e.message||e)); }
 }
 
 /* ============================ FORECASTING ============================ */
