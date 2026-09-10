@@ -1609,6 +1609,11 @@ function disablePricingSeed(opts){
   }
 }
 function syncPricingDrivers(){
+  /* Graph-backed P&L owns revenue — never re-seed SaaS Pricing ghosts or Drive model revenue */
+  if(model.sources && model.sources.graph){
+    pricing.link_revenue=false;
+    return null;
+  }
   if(!pricingSeedAllowed()) return null;
   if(uiTab==='pricing') enablePricingSeed();
   const n=P();
@@ -1727,20 +1732,107 @@ function clearPricingPeriodValue(key){
   toast('Override cleared');
 }
 
-function viewPricing(){
+function pricingOfferOutcome(){
+  /* Only lines already in the scanned model — never invent an offer card */
+  const prefer=[/commission\s*revenue/i, /subscription\s*revenue/i, /^net\s*revenue$/i];
+  for(let i=0;i<prefer.length;i++){
+    const re=prefer[i];
+    const hit=(model.vars||[]).find(v=>v && v.kind==='formula' && re.test(String(v.name||'').trim()));
+    if(hit) return hit;
+  }
+  return null;
+}
+function pricingGraphLeafDrivers(outcome){
+  if(!outcome) return [];
+  return [...leavesOf(outcome.key)].map(k=>vget(k)).filter(v=>v && v.kind==='input');
+}
+function pricingOfferIsSaasLeaves(leaves){
+  if(!leaves.length) return false;
+  const blob=leaves.map(v=>((v.key||'')+' '+(v.name||'')).toLowerCase()).join(' ');
+  const saas=/paying_seats|seat_list|usage_units|usage_list|seat_discount|usage_discount/.test(blob);
+  const mkt=/gmv|take[_\s-]?rate|transaction|merchant|aov|order\s*value/.test(blob);
+  if(saas && !mkt) return true;
+  if(mkt) return false;
+  return saas;
+}
+function setPricingGraphLeaf(key, val){
+  const v=vget(key); if(!v || v.kind!=='input') return;
+  const p=pricingUI.period|0;
+  const num=pricingNum(val);
+  v.base=num;
+  setOv(key, p, num);
+  saveModel(); render();
+  toast('Updated '+(v.name||key)+' · '+(model.periods[p]||''));
+}
+function viewPricingGraphOffer(outcome){
+  pricing.link_revenue=false;
+  const p=pricingUI.period|0;
+  const scen=evalModel(true), plan=evalModel(false);
+  const leaves=pricingGraphLeafDrivers(outcome);
+  const outNow=(scen[outcome.key]||[])[p]||0;
+  const outPlan=(plan[outcome.key]||[])[p]||0;
+  const periodHtml=(model.periods||[]).map((lab,i)=>{
+    const marked=leaves.some(v=>model.ov&&model.ov[v.key]&&Object.prototype.hasOwnProperty.call(model.ov[v.key],i));
+    return `<button class="tok ${((pricingUI.period|0)===i)?'op':''}" onclick="setPricingPeriod(${i})">${esc((lab||('P'+(i+1))).split(' ')[0])}${marked?' ·':''}</button>`;
+  }).join('');
+  const cards=leaves.length?leaves.map(v=>{
+    const live=(scen[v.key]||[])[p];
+    const edited=!!(model.ov&&model.ov[v.key]&&Object.prototype.hasOwnProperty.call(model.ov[v.key],p));
+    const shown=live!=null?live:(v.base||0);
+    const step = (v.unit==='%')?'0.0001':'any';
+    return `<div class="pricing-card" style="padding:14px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+        <div><strong style="font-size:14px">${esc(v.name)}</strong><div class="mut fz11" style="margin-top:2px">${esc(v.key)}${v.range?' · '+esc(v.range):''}</div></div>
+        ${edited?'<span class="change-pill">edited</span>':''}
+      </div>
+      <div class="field" style="margin-top:12px"><label>Value this month (${esc(v.unit||'')})</label>
+        <input class="inp" type="number" step="${step}" value="${esc(String(shown))}" onchange="setPricingGraphLeaf('${v.key}', this.value)"></div>
+      <p class="mut fz11" style="margin:8px 0 0">Plan base ${fmtVar(v.base||0,v.unit)} · leaf driver of ${esc(outcome.name)} — write-back only touches mapped inputs.</p>
+    </div>`;
+  }).join(''):`<div class="pricing-card"><p class="mut" style="margin:0">No leaf input drivers found under <b>${esc(outcome.name)}</b> yet. Confirm Scan mapped the sheet formulas that feed it.</p></div>`;
+  return `<div class="pricing-wrap">
+    <div class="pricing-hero">
+      <div><p class="eyebrow">Pricing · offer from Scan</p><h1 style="font-size:22px;letter-spacing:-.02em;margin:0 0 6px">Change the offer. Watch ${esc(outcome.name)} move.</h1>
+        <p class="mut fz13" style="margin:0;max-width:640px">Only leaf drivers Scan already mapped under <b>${esc(outcome.name)}</b>. No invented cards. Edits write leaf inputs only — P&amp;L keeps its <code>=</code> formulas.</p></div>
+      <div class="pricing-actions">
+        <span class="mut fz12" style="background:#eef0fa;border:1px solid #d8ddfa;border-radius:8px;padding:6px 10px">Drive model revenue off · graph P&amp;L</span>
+        <button class="btn sm" onclick="switchTab('forecast')">Open in Forecasting</button>
+      </div>
+    </div>
+    <div class="pricing-card" style="padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div><p class="eyebrow" style="margin:0 0 2px">Period lens</p>
+          <p class="mut fz12" style="margin:0">KPIs and leaf edits follow this month. Scenario overrides carry on the same drivers Forecasting uses.</p></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;max-width:100%">${periodHtml}</div>
+      </div>
+    </div>
+    <div class="pricing-kpis">
+      <div class="pricing-kpi"><label>${esc(outcome.name)} (this month)</label><b>${fmtVar(outNow,outcome.unit)}</b><span>plan ${fmtVar(outPlan,outcome.unit)}</span></div>
+      <div class="pricing-kpi"><label>Leaf drivers</label><b>${leaves.length}</b><span>from Scan graph only</span></div>
+      <div class="pricing-kpi"><label>Sheet link</label><b>${outcome.range?esc(outcome.range):'—'}</b><span>formula cell stays <code>=</code></span></div>
+    </div>
+    <div class="pricing-grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${cards}</div>
+    <div class="pricing-card" style="margin-top:14px">
+      <div class="result-foot" style="margin:0;border:0;padding:0">
+        <div class="txt"><strong>Same write-back trust as Forecasting</strong><span>Review write-back lists these leaf drivers only — never hardcodes ${esc(outcome.name)}.</span></div>
+        <div class="acts"><button class="btn sm" onclick="openWriteback()">Review write-back</button><button class="btn sm primary" onclick="switchTab('forecast')">See on chart</button></div>
+      </div>
+    </div>
+  </div>`;
+}
+function viewPricingSaasSeed(){
   const c = syncPricingDrivers();
   const seatRows = (pricing.seat_tiers||[]).map((t,i)=>tierRowHtml('seat', i, t, '#')).join('');
   const usageRows = (pricing.usage_tiers||[]).map((t,i)=>tierRowHtml('usage', i, t, pricing.usage_unit_label||'units')).join('');
   return `<div class="pricing-wrap">
     <div class="pricing-hero">
-      <div><p class="eyebrow">Pricing</p><h1 style="font-size:22px;letter-spacing:-.02em;margin:0 0 6px">Design the offer. Watch net revenue move.</h1>
-        <p class="mut fz13" style="margin:0;max-width:560px">AI hybrid reference: seats + usage, progressive tiers, then the discount waterfall. Controls set the plan base; period overrides belong in Forecasting (same drivers), so X-ray and scenarios stay consistent.</p></div>
+      <div><p class="eyebrow">Pricing · SaaS seed</p><h1 style="font-size:22px;letter-spacing:-.02em;margin:0 0 6px">Design the offer. Watch net revenue move.</h1>
+        <p class="mut fz13" style="margin:0;max-width:560px">Seats + usage, progressive tiers, discount waterfall — for SaaS sheets. After a marketplace P&amp;L Scan, this seed stays out of the way and Pricing binds to scanned leaf drivers instead.</p></div>
       <div class="pricing-actions">
         <label class="mut fz12" style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${pricing.link_revenue?'checked':''} onchange="setPricingLinkRevenue(this.checked)"> Drive model <code>revenue</code></label>
         <button class="btn sm" onclick="resetPricingSeed()">Reset seed</button>
       </div>
     </div>
-
     <div class="pricing-card" style="padding:12px 14px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div><p class="eyebrow" style="margin:0 0 2px">Period lens</p>
@@ -1759,7 +1851,6 @@ function viewPricing(){
         ${pricingOvField('promo_discount_pct','Promo %', true)}
       </div>
     </div>
-
     <div class="pricing-kpis">
       <div class="pricing-kpi"><label>List revenue</label><b>${fmtMoney(c.list_revenue)}</b><span>before discounts</span></div>
       <div class="pricing-kpi"><label>Seats (after line discount)</label><b>${fmtMoney(c.revenue_seats_net)}</b><span>before contract / promo / flat</span></div>
@@ -1814,6 +1905,18 @@ function viewPricing(){
     </div>
   </div>`;
 }
+function viewPricing(){
+  if(model.sources && model.sources.graph){
+    pricing.link_revenue=false;
+    const outcome=pricingOfferOutcome();
+    if(outcome) return viewPricingGraphOffer(outcome);
+    return `<div class="pricing-wrap"><div class="pricing-hero"><div><p class="eyebrow">Pricing</p><h1 style="font-size:22px;margin:0 0 6px">No offer line from Scan yet</h1>
+      <p class="mut fz13">Connect &amp; Scan a P&amp;L that includes Commission revenue, Subscription revenue, or Net revenue — Pricing will list only that line’s leaf drivers.</p></div>
+      <button class="btn primary" onclick="switchTab('setup')">Back to Setup</button></div></div>`;
+  }
+  return viewPricingSaasSeed();
+}
+
 function tierRowHtml(kind, i, t, unitHint){
   const up = (t.up_to==null||t.up_to==='') ? '' : t.up_to;
   return `<tr>
@@ -1858,7 +1961,15 @@ function removePricingTier(kind,i){
   const key=pricingTierKey(kind); const rows=pricing[key]||[]; if(rows.length<=1){ toast('Keep at least one tier'); return; }
   rows.splice(i,1); savePricing(); syncPricingDrivers(); saveModel(); render();
 }
-function setPricingLinkRevenue(on){ pricing.link_revenue=!!on; savePricing(); syncPricingDrivers(); saveModel(); render(); toast(on?'Model revenue follows Pricing':'Pricing outputs stay separate'); }
+function setPricingLinkRevenue(on){
+  if(model.sources && model.sources.graph){
+    pricing.link_revenue=false; savePricing(); render();
+    toast('Graph P&L owns revenue — edit leaf drivers instead of Drive model revenue');
+    return;
+  }
+  pricing.link_revenue=!!on; savePricing(); syncPricingDrivers(); saveModel(); render();
+  toast(on?'Model revenue follows Pricing':'Pricing outputs stay separate');
+}
 function resetPricingSeed(){
   pricing = {
     seeded:true, link_revenue:true, paying_seats:80,
@@ -1905,7 +2016,10 @@ function pricingPromoteRows(){
   return rows;
 }
 
-function switchTab(t){ uiTab=t; if(t==="pricing") enablePricingSeed();
+function switchTab(t){ uiTab=t; if(t==="pricing"){
+    if(model.sources && model.sources.graph){ pricing.link_revenue=false; try{savePricing();}catch(e){} }
+    else enablePricingSeed();
+  }
   if(t==="forecast"){
     try{
       const sk=_setupSel||(model.uiState&&model.uiState.selKey);
