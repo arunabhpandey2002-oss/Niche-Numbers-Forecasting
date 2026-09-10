@@ -128,15 +128,15 @@
   .chip.out{background:#eef7f2;border-color:#c9e6d8;color:var(--green-ink);font-weight:600}
   .chip .k{font-family:var(--mono);font-size:9px;color:#98a0b2}
   .chainwrap .arrow{color:#b6bccb}
-  .canvas{position:relative;height:440px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;background-image:radial-gradient(#e7eaf1 1px,transparent 1px);background-size:18px 18px;overflow:hidden;touch-action:none;cursor:grab}
-  .canvas .links{position:absolute;top:0;left:0;width:2600px;height:1500px;pointer-events:none}
+  .canvas{position:relative;height:520px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;background-image:radial-gradient(#e7eaf1 1px,transparent 1px);background-size:18px 18px;overflow:hidden;touch-action:none;cursor:grab}
+  .canvas .links{position:absolute;top:0;left:0;width:4200px;height:2800px;pointer-events:none}
   .canvas .links .edgegrp{pointer-events:auto;cursor:pointer}
   .canvas .links .edgegrp:hover .edge{stroke:#c23140;stroke-width:2.6}
   .canvas .links .edgegrp:hover .hit{stroke:rgba(194,49,64,.07)}
   .node2{position:absolute;min-width:118px;max-width:190px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px 8px 10px;box-shadow:0 2px 8px rgba(40,52,85,.08);cursor:grab;user-select:none}
   .node2.formula{border-color:#c9e6d8;background:#f4fbf7} .node2.input{border-color:#d8ddfa;background:#f7f8ff} .node2.output{border-color:#f2d6bf;background:#fff8f1}
   .node2 .nm{font-weight:600;font-size:12px;color:#2b3a55} .node2 .sub{font-family:var(--mono);font-size:9px;color:#8b93a6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .node2 .val{font-size:10px;color:#3a4763;margin-top:3px;font-variant-numeric:tabular-nums}
-  .canvas-inner{position:absolute;top:0;left:0;width:2600px;height:1500px;will-change:transform}
+  .canvas-inner{position:absolute;top:0;left:0;width:4200px;height:2800px;will-change:transform;transform-origin:0 0}
   .pagebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 22px;margin-top:6px}
   .ptab{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border:1px solid var(--line);border-radius:8px 8px 0 0;border-bottom:0;background:#f7f8fb;color:var(--muted-2);font-size:12px;font-weight:600;cursor:pointer}
   .ptab.on{background:#fff;color:var(--indigo-ink);border-color:var(--indigo-border);box-shadow:0 -2px 0 var(--indigo) inset}
@@ -1087,6 +1087,7 @@ async function ingestFormulaGraphFromSheet(opts){
   /* Prefer seed P&L order first, then other graph nodes */
   newVars.sort((a,b)=>(b.srcLine?1:0)-(a.srcLine?1:0));
   model.vars=keep.concat(newVars);
+  disablePricingSeed({strip:false}); /* graph model owns the lines — do not re-seed Pricing ghosts on render */
   model.periods=periods;
   model.sources=Object.assign({}, model.sources, {forecast:src, graph:true});
   model.uiState=model.uiState||{};
@@ -1453,6 +1454,7 @@ function fmtPct(v){ return (v>=0?"+":"")+v.toFixed(1)+"%"; }
 let pricingUI = { period: 0 };
 let pricing = {
   seeded: true,
+  seedInModel: true, /* when false, render must not resurrect Pricing ghost vars */
   link_revenue: true, /* revenue formula reads revenue_total_net */
   paying_seats: 80,
   seat_tiers: [
@@ -1553,7 +1555,29 @@ function upsertPricingVar(spec){
   return v;
 }
 /** Keep Pricing drivers first-class in the shared model graph ( forecaster / X-ray / scenarios ). */
+function pricingSeedAllowed(){
+  return !!(pricing && pricing.seedInModel) || uiTab==='pricing';
+}
+function enablePricingSeed(){
+  if(!pricing.seedInModel){ pricing.seedInModel=true; try{savePricing();}catch(e){} }
+}
+function disablePricingSeed(opts){
+  const strip = !(opts && opts.strip===false);
+  pricing.seedInModel=false;
+  pricing.link_revenue=false;
+  try{savePricing();}catch(e){}
+  if(strip && model.vars && model.vars.length){
+    const before=model.vars.length;
+    model.vars=model.vars.filter(v=>!(v&&v.srcPricing));
+    if(model.vars.length!==before){
+      const gone=new Set(['paying_seats','usage_units','seat_list','usage_list','list_revenue','seat_discount_pct','usage_discount_pct','contract_discount_pct','promo_discount_pct','discount_amount','revenue_seats_net','revenue_usage_net','pricing_after_contract','pricing_after_promo','revenue_total_net','arpu','effective_discount_pct']);
+      if(Array.isArray(model.displayVars)) model.displayVars=model.displayVars.filter(k=>k&&!gone.has(k));
+    }
+  }
+}
 function syncPricingDrivers(){
+  if(!pricingSeedAllowed()) return null;
+  if(uiTab==='pricing') enablePricingSeed();
   const n=P();
   const seatSeries=[], usageSeries=[];
   for(let p=0;p<n;p++){
@@ -1848,7 +1872,7 @@ function pricingPromoteRows(){
   return rows;
 }
 
-function switchTab(t){ if(t==="treasury")return; uiTab=t; document.querySelectorAll('.tab').forEach(b=>b.dataset.active=(b.dataset.tab===t)); render(); window.scrollTo({top:0,behavior:"instant"}); }
+function switchTab(t){ if(t==="treasury")return; uiTab=t; if(t==="pricing") enablePricingSeed(); document.querySelectorAll('.tab').forEach(b=>b.dataset.active=(b.dataset.tab===t)); render(); window.scrollTo({top:0,behavior:"instant"}); }
 function render(){ if(typeof syncPricingDrivers==='function'){ try{ syncPricingDrivers(); }catch(e){} } recompileAll(); const el=document.getElementById('main');
   if(uiTab==="setup"){ el.innerHTML=viewSetup(); renderCanvas(); }
   else if(uiTab==="forecast"){ el.innerHTML=viewForecast(); mountForecast(); }
@@ -2141,11 +2165,11 @@ function viewSetup(){
 
   <div class="panel" style="margin-top:16px">
     <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Calculation lineage</p><h2>How it all connects</h2></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" onclick="addVarKind('input')">+ Input</button><button class="btn sm" onclick="addVarKind('formula')">+ Formula</button><button class="btn sm" onclick="autoArrange()">Auto-arrange</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn sm" onclick="addVarKind('input')">+ Input</button><button class="btn sm" onclick="addVarKind('formula')">+ Formula</button><button class="btn sm" onclick="autoArrange()">Auto-arrange</button><span style="width:1px;height:18px;background:var(--line);margin:0 2px"></span><button class="btn sm" onclick="canvasZoomOut()" title="Zoom out">−</button><span id="zoomLabel" class="mut fz11" style="min-width:36px;text-align:center">100%</span><button class="btn sm" onclick="canvasZoomIn()" title="Zoom in">+</button><button class="btn sm" onclick="canvasZoomReset()" title="Reset zoom">Fit</button></div></div>
     <div class="pagebar" id="pageBar"></div>
     <div class="panel-pad">
       <div class="canvas" id="lineageCanvas"><svg class="links" id="lineLinks"></svg></div>
-      <p class="mut fz11" style="margin-top:10px">Drag from a node's <b style="color:var(--indigo-ink)">● handle</b> onto another line to feed it in (pick ＋ − × ÷) · <b style="color:#c23140">click a link</b> to remove it · drag a node to move it · <b>drag the empty canvas to pan</b> · double-click a node to edit. Every link is a real formula dependency — it flows into forecasting <i>and</i> becomes the driver bridge in Variance. Use the <b>page tabs</b> above to spread many formulas across boards (a line's page is set in its edit dialog); links still work across pages.</p>
+      <p class="mut fz11" style="margin-top:10px">Drag from a node's <b style="color:var(--indigo-ink)">● handle</b> onto another line to feed it in (pick ＋ − × ÷) · <b style="color:#c23140">click a link</b> to remove it · drag a node to move it · <b>drag the empty canvas to pan</b> · <b>scroll to zoom</b> (or use − / +) · double-click a node to edit. Every link is a real formula dependency — it flows into forecasting <i>and</i> becomes the driver bridge in Variance. Use the <b>page tabs</b> above to spread many formulas across boards (a line's page is set in its edit dialog); links still work across pages. Auto-arrange uses roomier spacing — zoom out for the full picture.</p>
     </div>
   </div>`;
 }
@@ -2327,9 +2351,33 @@ function confirmAllSuggested(){
   saveModel(); render(); toast('Confirmed '+n+(skipped?` · ${skipped} still need a forecast line`:''));
 }
 
-const CANW=2600, CANH=1500;
+const CANW=4200, CANH=2800;
 let _pan={x:0,y:0};
-function autoArrange(){ autoLayout(); _pan={x:0,y:0}; renderCanvas(); saveModel(); }   // keeps pages, retidies positions
+let _zoom=1;
+function clampZoom(z){ return Math.max(0.35, Math.min(2.2, z)); }
+function applyCanvasTransform(){
+  const inn=document.querySelector('#lineageCanvas .canvas-inner');
+  if(inn) inn.style.transform=`translate(${_pan.x}px,${_pan.y}px) scale(${_zoom})`;
+  const lab=document.getElementById('zoomLabel');
+  if(lab) lab.textContent=Math.round(_zoom*100)+'%';
+}
+function canvasZoomBy(factor, cx, cy){
+  const cv=document.getElementById('lineageCanvas'); if(!cv) return;
+  const r=cv.getBoundingClientRect();
+  const mx = (cx!=null?cx: r.left+r.width/2) - r.left;
+  const my = (cy!=null?cy: r.top+r.height/2) - r.top;
+  const prev=_zoom;
+  const next=clampZoom(prev*factor);
+  if(Math.abs(next-prev)<1e-6) return;
+  _pan.x = mx - (mx - _pan.x) * (next/prev);
+  _pan.y = my - (my - _pan.y) * (next/prev);
+  _zoom=next;
+  applyCanvasTransform();
+}
+function canvasZoomIn(){ canvasZoomBy(1.15); }
+function canvasZoomOut(){ canvasZoomBy(1/1.15); }
+function canvasZoomReset(){ _zoom=1; _pan={x:0,y:0}; applyCanvasTransform(); }
+function autoArrange(){ autoLayout(); _pan={x:0,y:0}; _zoom=1; renderCanvas(); saveModel(); }   // keeps pages, retidies positions
 
 /* ---- canvas pages: several boards you can name & switch, to organise many formulas ---- */
 function ensurePages(){ if(!Array.isArray(model.pages)||!model.pages.length) model.pages=['Page 1'];
@@ -2341,8 +2389,8 @@ function refreshPageBar(){ const bar=document.getElementById('pageBar'); if(!bar
     +`<button class="ptab add" onclick="addPage()" title="Add a page">＋ Page</button>`
     +(model.pages.length>1?`<button class="ptab del" onclick="deletePage(${curPage()})" title="Delete this page (its lines move to the first page)">🗑</button>`:'');
 }
-function switchPage(i){ ensurePages(); model.canvasPage=Math.max(0,Math.min(model.pages.length-1,i)); _pan={x:0,y:0}; saveModel(); renderCanvas(); refreshPageBar(); }
-function addPage(){ ensurePages(); model.pages.push('Page '+(model.pages.length+1)); model.canvasPage=model.pages.length-1; _pan={x:0,y:0}; saveModel(); renderCanvas(); refreshPageBar(); }
+function switchPage(i){ ensurePages(); model.canvasPage=Math.max(0,Math.min(model.pages.length-1,i)); _pan={x:0,y:0}; _zoom=1; saveModel(); renderCanvas(); refreshPageBar(); }
+function addPage(){ ensurePages(); model.pages.push('Page '+(model.pages.length+1)); model.canvasPage=model.pages.length-1; _pan={x:0,y:0}; _zoom=1; saveModel(); renderCanvas(); refreshPageBar(); }
 function renamePage(i){ ensurePages(); showModal(`<div class="mhead"><h3>Rename page</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="mbody"><div class="field"><label>Page name</label><input class="inp" id="pgName" value="${esc(model.pages[i]||'')}" onkeydown="if(event.key==='Enter')document.getElementById('pgSaveBtn').click()"></div>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="pgSaveBtn" onclick="doRenamePage(${i})">Save</button></div></div>`);
@@ -2358,10 +2406,10 @@ function clearModel(){ showModal(`<div class="mhead"><h3>Clear the whole model?<
   <div class="mbody"><p class="mut fz12" style="margin:0 0 12px">This removes <b>all ${model.vars.length} line(s)</b> and their connections, leaving a blank canvas to build from. Your sheet connection and timeline stay. This can't be undone.</p>
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn" style="background:#c23140;border-color:#c23140;color:#fff" onclick="doClearModel()">Clear everything</button></div></div>`); }
 function doClearModel(){ model.vars=[]; model.nodePos={}; model.displayVars=[]; model.pages=['Page 1']; model.canvasPage=0;
-  _pan={x:0,y:0}; _vState.line=null; if(typeof _cState==='object'&&_cState) _cState.line=null;
+  _pan={x:0,y:0}; _zoom=1; _vState.line=null; if(typeof _cState==='object'&&_cState) _cState.line=null;
   if(model.sources) model.sources.graph=false;
   if(model.uiState){ model.uiState.graphIngestVersion=0; model.uiState.scanCatalog=[]; }
-  try{ if(typeof pricing==='object'&&pricing){ pricing.link_revenue=false; if(typeof savePricing==='function') savePricing(); } }catch(e){}
+  try{ disablePricingSeed({strip:false}); }catch(e){ try{ if(typeof pricing==='object'&&pricing){ pricing.link_revenue=false; pricing.seedInModel=false; if(typeof savePricing==='function') savePricing(); } }catch(_){ } }
   recompileAll(); saveModel(); closeModal(); render(); toast('Model cleared — blank slate'); }
 
 /* ---- drag-and-drop lineage canvas ---- */
@@ -2373,15 +2421,17 @@ function nodeDepth(){
   model.vars.forEach(v=>d(v,new Set())); return depth;
 }
 function autoLayout(){
-  const cv=document.getElementById('lineageCanvas'); const W=cv?cv.clientWidth:900;
+  const cv=document.getElementById('lineageCanvas'); const W=cv?Math.max(cv.clientWidth,900):900;
   const depth=nodeDepth(); const maxD=Math.max(0,...Object.values(depth));
-  const colX = maxD>0 ? Math.max(150,Math.min(210,(W-170)/maxD)) : 190;
+  /* Prefer readable gaps over packing into the viewport — zoom handles overview */
+  const colX = maxD>0 ? Math.max(220, Math.min(280, Math.floor((Math.max(W,1100)-80)/Math.max(1,maxD)))) : 240;
+  const rowH = 108;
   model.nodePos=model.nodePos||{};
   // lay each page out independently, preserving each node's page
   const perColByPage={};
   model.vars.forEach(v=>{ const pg=nodePage(v.key); const c=depth[v.key]||0;
     const pc=perColByPage[pg]=perColByPage[pg]||{}; pc[c]=pc[c]||0;
-    model.nodePos[v.key]={x:24+c*colX, y:22+pc[c]*84, pg}; pc[c]++; });
+    model.nodePos[v.key]={x:28+c*colX, y:28+pc[c]*rowH, pg}; pc[c]++; });
 }
 function renderCanvas(){
   const cv=document.getElementById('lineageCanvas'); if(!cv) return;
@@ -2392,7 +2442,9 @@ function renderCanvas(){
   refreshPageBar();
   let inner=cv.querySelector('.canvas-inner');
   if(!inner){ inner=document.createElement('div'); inner.className='canvas-inner'; const svg=cv.querySelector('#lineLinks'); if(svg) inner.appendChild(svg); cv.appendChild(inner); }
-  inner.style.transform=`translate(${_pan.x}px,${_pan.y}px)`;
+  inner.style.transform=`translate(${_pan.x}px,${_pan.y}px) scale(${_zoom})`;
+  inner.style.transformOrigin='0 0';
+  const lab=document.getElementById('zoomLabel'); if(lab) lab.textContent=Math.round(_zoom*100)+'%';
   const base=evalModel(false);
   inner.querySelectorAll('.node2').forEach(n=>n.remove());
   model.vars.forEach((v,i)=>{
@@ -2462,18 +2514,19 @@ function attachCanvas(cv){
   let mode=null,cur=null,off=null,from=null,tmp=null,panS=null;
   const inner=()=>cv.querySelector('.canvas-inner');
   const esc2=k=>(window.CSS&&CSS.escape)?CSS.escape(k):k;
+  const toLocal=(e,r)=>({x:(e.clientX-r.left-_pan.x)/_zoom, y:(e.clientY-r.top-_pan.y)/_zoom});
   cv.addEventListener('pointerdown',e=>{
     const handle=e.target.closest('[data-handle]'), node=e.target.closest('.node2');
     if(handle&&node){ mode='link'; from=node.dataset.key; try{cv.setPointerCapture(e.pointerId);}catch(_){}
       tmp=document.createElementNS('http://www.w3.org/2000/svg','path'); tmp.setAttribute('stroke','#4055c7'); tmp.setAttribute('stroke-width','2'); tmp.setAttribute('fill','none'); tmp.setAttribute('stroke-dasharray','4 3'); document.getElementById('lineLinks').appendChild(tmp); e.preventDefault(); return; }
-    if(node){ mode='drag'; cur=node; const r=cv.getBoundingClientRect(); const p=model.nodePos[node.dataset.key]; off={dx:e.clientX-r.left-_pan.x-p.x, dy:e.clientY-r.top-_pan.y-p.y}; try{cv.setPointerCapture(e.pointerId);}catch(_){}; node.style.cursor='grabbing'; e.preventDefault(); return; }
+    if(node){ mode='drag'; cur=node; const r=cv.getBoundingClientRect(); const p=model.nodePos[node.dataset.key]; const loc=toLocal(e,r); off={dx:loc.x-p.x, dy:loc.y-p.y}; try{cv.setPointerCapture(e.pointerId);}catch(_){}; node.style.cursor='grabbing'; e.preventDefault(); return; }
     mode='pan'; panS={x:e.clientX,y:e.clientY,px:_pan.x,py:_pan.y}; try{cv.setPointerCapture(e.pointerId);}catch(_){}; cv.style.cursor='grabbing'; e.preventDefault();
   });
   cv.addEventListener('pointermove',e=>{
     const r=cv.getBoundingClientRect();
-    if(mode==='drag'&&cur){ let x=e.clientX-r.left-_pan.x-off.dx, y=e.clientY-r.top-_pan.y-off.dy; x=Math.max(0,Math.min(CANW-60,x)); y=Math.max(0,Math.min(CANH-40,y)); model.nodePos[cur.dataset.key]={x,y,pg:nodePage(cur.dataset.key)}; cur.style.left=x+'px'; cur.style.top=y+'px'; redrawLinks(); }
-    else if(mode==='link'&&tmp){ const fe=cv.querySelector(`.node2[data-key="${esc2(from)}"]`); if(!fe)return; const p=model.nodePos[from]; const sx=p.x+fe.offsetWidth, sy=p.y+fe.offsetHeight/2, tx=e.clientX-r.left-_pan.x, ty=e.clientY-r.top-_pan.y; tmp.setAttribute('d',`M${sx},${sy} L${tx},${ty}`); }
-    else if(mode==='pan'&&panS){ _pan.x=panS.px+(e.clientX-panS.x); _pan.y=panS.py+(e.clientY-panS.y); const inn=inner(); if(inn) inn.style.transform=`translate(${_pan.x}px,${_pan.y}px)`; }
+    if(mode==='drag'&&cur){ const loc=toLocal(e,r); let x=loc.x-off.dx, y=loc.y-off.dy; x=Math.max(0,Math.min(CANW-60,x)); y=Math.max(0,Math.min(CANH-40,y)); model.nodePos[cur.dataset.key]={x,y,pg:nodePage(cur.dataset.key)}; cur.style.left=x+'px'; cur.style.top=y+'px'; redrawLinks(); }
+    else if(mode==='link'&&tmp){ const fe=cv.querySelector(`.node2[data-key="${esc2(from)}"]`); if(!fe)return; const p=model.nodePos[from]; const loc=toLocal(e,r); const sx=p.x+fe.offsetWidth, sy=p.y+fe.offsetHeight/2; tmp.setAttribute('d',`M${sx},${sy} L${loc.x},${loc.y}`); }
+    else if(mode==='pan'&&panS){ _pan.x=panS.px+(e.clientX-panS.x); _pan.y=panS.py+(e.clientY-panS.y); applyCanvasTransform(); }
   });
   cv.addEventListener('pointerup',e=>{
     if(mode==='link'){ if(tmp){tmp.remove();tmp=null;} const el=document.elementFromPoint(e.clientX,e.clientY); const tn=el&&el.closest('.node2'); if(tn&&tn.dataset.key!==from) appendDep(from,tn.dataset.key); }
@@ -2483,6 +2536,11 @@ function attachCanvas(cv){
   });
   cv.addEventListener('pointercancel',()=>{ if(tmp){tmp.remove();tmp=null;} mode=null;cur=null;from=null;panS=null; cv.style.cursor=''; });
   cv.addEventListener('dblclick',e=>{ const node=e.target.closest('.node2'); if(node) editVar(+node.dataset.i); });
+  cv.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const factor = e.deltaY<0 ? 1.1 : 1/1.1;
+    canvasZoomBy(factor, e.clientX, e.clientY);
+  }, {passive:false});
 }
 function appendDep(srcKey,tgtKey){
   const t=vget(tgtKey), src=vget(srcKey); if(!t||!src||srcKey===tgtKey) return;
@@ -5079,6 +5137,7 @@ function warnIfStaleGraph(){
   toast('Stale model — Clear all, then Connect & Scan (hard refresh alone keeps old Inputs'+(names?': '+names:'')+')');
 }
 function loadLocal(){
+  try{ loadPricing(); }catch(e){}
   try{ const m=localStorage.getItem('nn_model'); if(m){ const p=JSON.parse(m); if(p&&p.vars&&p.vars.length) model=p; } }catch(e){}
   if(!Array.isArray(model.displayVars)) model.displayVars = model.displayVar ? [model.displayVar] : [(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key||'revenue'];
   if(!model.chartVar || !model.vars.find(v=>v.key===model.chartVar)) model.chartVar = (model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key||'revenue';
@@ -5113,6 +5172,14 @@ function loadLocal(){
     }
   }catch(e){}
   ensureModelShape();
+  try{
+    if(model.sources && model.sources.graph){
+      pricing.seedInModel=false; pricing.link_revenue=false;
+      /* Drop Pricing ghosts left from an older render cycle */
+      if(model.vars&&model.vars.length) model.vars=model.vars.filter(v=>!(v&&v.srcPricing));
+      try{savePricing();}catch(e){}
+    }
+  }catch(e){}
   try{
     if(model.uiState.v){ const u=model.uiState.v; Object.assign(_vState,{A:u.A||_vState.A,B:u.B||_vState.B,line:u.line||null,win:u.win||null,priorN:u.priorN||1,userVer:!!u.userVer,winUser:!!u.winUser}); }
     if(model.uiState.c){ const u=model.uiState.c; Object.assign(_cState,{line:u.line||null,base:u.base||'plan',cmp:u.cmp||'scenario',win:u.win||null,cinema:u.cinema!=null?!!u.cinema:true,scrub:u.scrub|0}); }
