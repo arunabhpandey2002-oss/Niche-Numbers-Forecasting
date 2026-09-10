@@ -149,6 +149,15 @@
   .opbtn:hover{border-color:var(--indigo);background:#f6f7ff} .opbtn b{font-size:22px;line-height:1;color:var(--indigo-ink)} .opbtn span{font-size:12px}
   .node2 .handle{position:absolute;right:-8px;top:50%;transform:translateY(-50%);width:15px;height:15px;border-radius:50%;background:var(--indigo);border:2px solid #fff;cursor:crosshair;box-shadow:0 1px 3px rgba(0,0,0,.25)}
   .node2 .handle:hover{background:var(--indigo-ink)}
+  .node2.dim{opacity:.18;filter:grayscale(.35);box-shadow:none}
+  .node2.focus-sel{border-color:var(--indigo)!important;box-shadow:0 0 0 2px var(--indigo),0 4px 14px rgba(64,85,199,.22);z-index:3}
+  .node2.focus-near{border-color:#9aa8e8!important;box-shadow:0 2px 10px rgba(64,85,199,.14);z-index:2;opacity:1}
+  .canvas .links .edgegrp.dim{opacity:.12;pointer-events:none}
+  .canvas .links .edgegrp.focus-edge .edge{stroke:var(--indigo);stroke-width:2.2}
+  .vtbl tr.row-click.sel{background:#eef1ff}
+  .vtbl tr.row-click.sel td{border-color:#d5dbf5}
+  .focuschip{display:none;align-items:center;gap:8px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--indigo-border);background:var(--indigo-soft);border-radius:10px;font-size:12px;color:var(--indigo-ink)}
+  .focuschip.on{display:flex;flex-wrap:wrap}
 
   /* forecasting assumptions */
   .grid-forecast{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
@@ -2108,7 +2117,8 @@ function viewSetup(){
     }
     const cell = sheetCellsHtml(v);
     const confirm = (st==='suggested'||st==='unmapped')?` <button class="btn sm" style="height:22px;padding:0 8px;font-size:10px" onclick="event.stopPropagation();openConfirmClassify('${v.key}')">Confirm</button>`:'';
-    return `<tr class="row-click" onclick="openDeepDive('${jesc(v.key)}')" title="See drivers and what this feeds into">
+    const rowSel=(_setupSel||(model.uiState&&model.uiState.selKey))===v.key;
+    return `<tr class="row-click ${rowSel?'sel':''}" data-key="${esc(v.key)}" onclick="selectSetupLine('${jesc(v.key)}',{edit:true})" title="Open this line — same Edit box as the canvas">
       <td><strong>${esc(v.name)}</strong> <span class="keychip">${esc(v.key)}</span></td>
       <td><span class="kind-pill ${kindCls}">${v.kind}</span></td>
       <td>${def}</td>
@@ -2168,8 +2178,9 @@ function viewSetup(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn sm" onclick="addVarKind('input')">+ Input</button><button class="btn sm" onclick="addVarKind('formula')">+ Formula</button><button class="btn sm" onclick="autoArrange()">Auto-arrange</button><span style="width:1px;height:18px;background:var(--line);margin:0 2px"></span><button class="btn sm" onclick="canvasZoomOut()" title="Zoom out">−</button><span id="zoomLabel" class="mut fz11" style="min-width:36px;text-align:center">100%</span><button class="btn sm" onclick="canvasZoomIn()" title="Zoom in">+</button><button class="btn sm" onclick="canvasZoomReset()" title="Reset zoom">Fit</button></div></div>
     <div class="pagebar" id="pageBar"></div>
     <div class="panel-pad">
+      <div id="focusChip" class="focuschip"></div>
       <div class="canvas" id="lineageCanvas"><svg class="links" id="lineLinks"></svg></div>
-      <p class="mut fz11" style="margin-top:10px">Drag from a node's <b style="color:var(--indigo-ink)">● handle</b> onto another line to feed it in (pick ＋ − × ÷) · <b style="color:#c23140">click a link</b> to remove it · drag a node to move it · <b>drag the empty canvas to pan</b> · <b>scroll to zoom</b> (or use − / +) · double-click a node to edit. Every link is a real formula dependency — it flows into forecasting <i>and</i> becomes the driver bridge in Variance. Use the <b>page tabs</b> above to spread many formulas across boards (a line's page is set in its edit dialog); links still work across pages. Auto-arrange uses roomier spacing — zoom out for the full picture.</p>
+      <p class="mut fz11" style="margin-top:10px"><b>Click a node</b> (or its table row) to open the same Edit box and focus first-level Drivers / Feeds into — dimming the rest. Click empty canvas to clear focus. Drag from a node's <b style="color:var(--indigo-ink)">● handle</b> to feed another line · <b style="color:#c23140">click a link</b> to remove it · drag a node to move it · pan / scroll-zoom as before. Page tabs still spread large models.</p>
     </div>
   </div>`;
 }
@@ -2433,6 +2444,63 @@ function autoLayout(){
     const pc=perColByPage[pg]=perColByPage[pg]||{}; pc[c]=pc[c]||0;
     model.nodePos[v.key]={x:28+c*colX, y:28+pc[c]*rowH, pg}; pc[c]++; });
 }
+let _setupSel=null; /* selected line key — canvas + table stay in sync */
+function focusNeighborKeys(key){
+  const v=vget(key); if(!v) return new Set();
+  const s=new Set([String(key)]);
+  try{ driversOf(v).forEach(k=>s.add(String(k))); }catch(e){}
+  try{ feedsIntoOf(key).forEach(k=>s.add(String(k))); }catch(e){}
+  return s;
+}
+function selectSetupLine(key, opts){
+  opts=opts||{};
+  const v=key?vget(key):null;
+  if(key && !v) return;
+  _setupSel=key||null;
+  model.uiState=model.uiState||{};
+  model.uiState.selKey=_setupSel;
+  applySetupSelection();
+  if(opts.edit && v){
+    const i=model.vars.indexOf(v);
+    if(i>=0) editVar(i);
+  }
+}
+function clearSetupSelection(){
+  _setupSel=null;
+  if(model.uiState) model.uiState.selKey=null;
+  applySetupSelection();
+}
+function applySetupSelection(){
+  const key=_setupSel || (model.uiState&&model.uiState.selKey) || null;
+  _setupSel=key;
+  const focus=key?focusNeighborKeys(key):null;
+  document.querySelectorAll('.vtbl tr.row-click').forEach(tr=>{
+    const k=tr.getAttribute('data-key');
+    tr.classList.toggle('sel', !!(key && k===key));
+  });
+  const cv=document.getElementById('lineageCanvas');
+  if(cv){
+    cv.querySelectorAll('.node2').forEach(el=>{
+      const k=el.dataset.key;
+      el.classList.remove('dim','focus-sel','focus-near');
+      if(!focus) return;
+      if(k===key) el.classList.add('focus-sel');
+      else if(focus.has(k)) el.classList.add('focus-near');
+      else el.classList.add('dim');
+    });
+  }
+  const chip=document.getElementById('focusChip');
+  if(chip){
+    if(key && vget(key)){
+      chip.classList.add('on');
+      chip.innerHTML=`Focus on <b>${esc(vget(key).name)}</b> — first-level Drivers &amp; Feeds into <button type="button" class="btn sm" style="margin-left:auto" onclick="clearSetupSelection()">Clear focus</button>`;
+    } else {
+      chip.classList.remove('on');
+      chip.innerHTML='';
+    }
+  }
+  try{ redrawLinks(); }catch(e){}
+}
 function renderCanvas(){
   const cv=document.getElementById('lineageCanvas'); if(!cv) return;
   recompileAll();
@@ -2457,17 +2525,28 @@ function renderCanvas(){
     inner.appendChild(el);
   });
   redrawLinks(); attachCanvas(cv);
+  applySetupSelection();
 }
 function redrawLinks(){
   const cv=document.getElementById('lineageCanvas'), svg=document.getElementById('lineLinks'); if(!cv||!svg) return;
   svg.setAttribute('viewBox',`0 0 ${CANW} ${CANH}`);
   const el=k=>cv.querySelector(`.node2[data-key="${(window.CSS&&CSS.escape)?CSS.escape(k):k}"]`);
-  let out=`<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#b6bccb"/></marker></defs>`;
+  const sel=_setupSel || (model.uiState&&model.uiState.selKey) || null;
+  const focus=sel?focusNeighborKeys(sel):null;
+  let out=`<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#b6bccb"/></marker><marker id="ahf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#4055c7"/></marker></defs>`;
   formulas().forEach(f=>{ const fe=el(f.key); if(!fe) return; const fp=model.nodePos[f.key]; const fx=fp.x, fy=fp.y+fe.offsetHeight/2;
     compile(f.expr).deps.forEach(dk=>{ const dv=model.vars.find(x=>x.key.toLowerCase()===dk.toLowerCase()); if(!dv) return; const de=el(dv.key); if(!de) return;
       const dp=model.nodePos[dv.key]; const sx=dp.x+de.offsetWidth, sy=dp.y+de.offsetHeight/2, mx=(sx+fx)/2;
       const d=`M${sx},${sy} C${mx},${sy} ${mx},${fy} ${fx-2},${fy}`;
-      out+=`<g class="edgegrp" onclick="removeLink('${dv.key}','${f.key}')"><title>Click to remove: ${esc(dv.name)} → ${esc(f.name)}</title><path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="15"/><path class="edge" d="${d}" fill="none" stroke="#b6bccb" stroke-width="1.6" marker-end="url(#ah)"/></g>`; }); });
+      let cls='edgegrp', stroke='#b6bccb', sw='1.6', mk='url(#ah)';
+      if(focus){
+        const hot=focus.has(dv.key)&&focus.has(f.key)&& (dv.key===sel || f.key===sel || (focus.has(dv.key)&&focus.has(f.key)));
+        /* first-level only: edge must touch the selected line */
+        const first = (dv.key===sel || f.key===sel);
+        if(first){ cls+=' focus-edge'; stroke='#4055c7'; sw='2.2'; mk='url(#ahf)'; }
+        else { cls+=' dim'; }
+      }
+      out+=`<g class="${cls}" onclick="removeLink('${dv.key}','${f.key}')"><title>Click to remove: ${esc(dv.name)} → ${esc(f.name)}</title><path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="15"/><path class="edge" d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw}" marker-end="${mk}"/></g>`; }); });
   svg.innerHTML=out;
 }
 /* strip a variable from a formula expression (tokenizer-based), collapsing the
@@ -2511,11 +2590,12 @@ function applyRemoveLink(srcKey,tgtKey){
 }
 function attachCanvas(cv){
   if(cv._bound) return; cv._bound=true;
-  let mode=null,cur=null,off=null,from=null,tmp=null,panS=null;
+  let mode=null,cur=null,off=null,from=null,tmp=null,panS=null,moved=false,sx0=0,sy0=0;
   const inner=()=>cv.querySelector('.canvas-inner');
   const esc2=k=>(window.CSS&&CSS.escape)?CSS.escape(k):k;
   const toLocal=(e,r)=>({x:(e.clientX-r.left-_pan.x)/_zoom, y:(e.clientY-r.top-_pan.y)/_zoom});
   cv.addEventListener('pointerdown',e=>{
+    moved=false; sx0=e.clientX; sy0=e.clientY;
     const handle=e.target.closest('[data-handle]'), node=e.target.closest('.node2');
     if(handle&&node){ mode='link'; from=node.dataset.key; try{cv.setPointerCapture(e.pointerId);}catch(_){}
       tmp=document.createElementNS('http://www.w3.org/2000/svg','path'); tmp.setAttribute('stroke','#4055c7'); tmp.setAttribute('stroke-width','2'); tmp.setAttribute('fill','none'); tmp.setAttribute('stroke-dasharray','4 3'); document.getElementById('lineLinks').appendChild(tmp); e.preventDefault(); return; }
@@ -2523,6 +2603,7 @@ function attachCanvas(cv){
     mode='pan'; panS={x:e.clientX,y:e.clientY,px:_pan.x,py:_pan.y}; try{cv.setPointerCapture(e.pointerId);}catch(_){}; cv.style.cursor='grabbing'; e.preventDefault();
   });
   cv.addEventListener('pointermove',e=>{
+    if(Math.abs(e.clientX-sx0)>4 || Math.abs(e.clientY-sy0)>4) moved=true;
     const r=cv.getBoundingClientRect();
     if(mode==='drag'&&cur){ const loc=toLocal(e,r); let x=loc.x-off.dx, y=loc.y-off.dy; x=Math.max(0,Math.min(CANW-60,x)); y=Math.max(0,Math.min(CANH-40,y)); model.nodePos[cur.dataset.key]={x,y,pg:nodePage(cur.dataset.key)}; cur.style.left=x+'px'; cur.style.top=y+'px'; redrawLinks(); }
     else if(mode==='link'&&tmp){ const fe=cv.querySelector(`.node2[data-key="${esc2(from)}"]`); if(!fe)return; const p=model.nodePos[from]; const loc=toLocal(e,r); const sx=p.x+fe.offsetWidth, sy=p.y+fe.offsetHeight/2; tmp.setAttribute('d',`M${sx},${sy} L${loc.x},${loc.y}`); }
@@ -2530,12 +2611,19 @@ function attachCanvas(cv){
   });
   cv.addEventListener('pointerup',e=>{
     if(mode==='link'){ if(tmp){tmp.remove();tmp=null;} const el=document.elementFromPoint(e.clientX,e.clientY); const tn=el&&el.closest('.node2'); if(tn&&tn.dataset.key!==from) appendDep(from,tn.dataset.key); }
-    if(mode==='drag'&&cur){ cur.style.cursor='grab'; saveModel(); }
-    if(mode==='pan'){ cv.style.cursor=''; }
+    if(mode==='drag'&&cur){
+      cur.style.cursor='grab';
+      if(moved) saveModel();
+      else selectSetupLine(cur.dataset.key, {edit:true}); /* click → same Edit box as table row */
+    }
+    if(mode==='pan'){
+      cv.style.cursor='';
+      if(!moved) clearSetupSelection(); /* empty canvas click clears focus */
+    }
     mode=null;cur=null;from=null;panS=null;
   });
   cv.addEventListener('pointercancel',()=>{ if(tmp){tmp.remove();tmp=null;} mode=null;cur=null;from=null;panS=null; cv.style.cursor=''; });
-  cv.addEventListener('dblclick',e=>{ const node=e.target.closest('.node2'); if(node) editVar(+node.dataset.i); });
+  cv.addEventListener('dblclick',e=>{ const node=e.target.closest('.node2'); if(node){ selectSetupLine(node.dataset.key, {edit:true}); e.preventDefault(); } });
   cv.addEventListener('wheel',e=>{
     e.preventDefault();
     const factor = e.deltaY<0 ? 1.1 : 1/1.1;
@@ -2744,7 +2832,16 @@ function onEditPickActual(){
   else if(prev) prev.innerHTML=`<span class="mut">Actuals · no actuals (optional)</span>`;
 }
 function addVar(){ varModal(null); }
-function editVar(i){ varModal(i); }
+function editVar(i){
+  const v=(i!=null&&model.vars[i])?model.vars[i]:null;
+  if(v){
+    _setupSel=v.key;
+    model.uiState=model.uiState||{};
+    model.uiState.selKey=v.key;
+    try{ applySetupSelection(); }catch(e){}
+  }
+  varModal(i);
+}
 function delVar(i){ const v=model.vars[i]; if(!confirm(`Delete “${v.name}”?`))return; model.vars.splice(i,1); render(); saveModel(); }
 function saveVar(idx){
   const name=document.getElementById('vName').value.trim();
@@ -5172,6 +5269,7 @@ function loadLocal(){
     }
   }catch(e){}
   ensureModelShape();
+  try{ _setupSel=(model.uiState&&model.uiState.selKey)||null; }catch(e){}
   try{
     if(model.sources && model.sources.graph){
       pricing.seedInModel=false; pricing.link_revenue=false;
