@@ -297,11 +297,17 @@
   .linechip.on{border-color:transparent;color:#fff;font-weight:600}
   .linechip .rm{margin-left:2px;opacity:.7;font-weight:700;padding:0 2px}
   .linechip.anchor{box-shadow:0 0 0 2px rgba(64,85,199,.35)}
-  .asmcrumb{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 10px;font-size:12px}
-  .asmcrumb button{border:0;background:transparent;color:var(--indigo);cursor:pointer;padding:0;font:inherit;font-weight:600}
-  .asmcrumb button:hover{text-decoration:underline}
+  .asmcrumb{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
+  .asmcrumb .backrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .asmcrumb .backbtn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border:1px solid var(--indigo-border);background:var(--indigo-soft);color:var(--indigo-ink);border-radius:10px;font:600 13px var(--font);cursor:pointer}
+  .asmcrumb .backbtn:hover{background:#e4e8ff}
+  .asmcrumb .path{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;line-height:1.35}
+  .asmcrumb .path button{border:0;background:transparent;color:var(--indigo);cursor:pointer;padding:0;font:600 13px var(--font)}
+  .asmcrumb .path button:hover{text-decoration:underline}
   .asmcrumb .sep{color:#b0b6c4}
   .asmcrumb .here{color:#2b3a55;font-weight:700}
+  .wb-delta{font-variant-numeric:tabular-nums}
+  .wb-note{font-size:12px;color:#3a4680;background:#eef0fa;border:1px solid #d8ddfa;border-radius:10px;padding:10px 12px;margin:0 0 10px}
   .asm.formula-drv{cursor:pointer;border:1px solid #e4e8f2;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fbfcff}
   .asm.formula-drv:hover{border-color:var(--indigo-border);background:#f4f6ff}
   .asm.formula-drv .drillhint{font-size:11px;color:var(--indigo);font-weight:600;margin-top:4px}
@@ -1467,8 +1473,12 @@ function evalModel(scenario){
 /* ---- formatting ---- */
 function fmtNum(v){ return Math.round(v).toLocaleString('en-IN'); }
 function fmtMoney(v){ const a=Math.abs(v),s=v<0?"−":""; if(a>=1e7)return s+"₹"+(a/1e7).toFixed(2)+"Cr"; if(a>=1e5)return s+"₹"+(a/1e5).toFixed(2)+"L"; if(a>=1000)return s+"₹"+fmtNum(a); return s+"₹"+(Math.round(a*100)/100); }
-function fmtVar(v,unit){ if(unit==="#")return fmtNum(v); if(unit==="%")return v.toFixed(1)+"%"; return fmtMoney(v); }
-function fmtDelta(v,unit){ const s=v>=0?"+":"−",a=Math.abs(v); if(unit==="#")return s+fmtNum(a); if(unit==="%")return s+a.toFixed(1)+"%"; const m=fmtMoney(a); return s+m.replace("₹","₹"); }
+function pctDisplay(v){ const x=Number(v)||0; /* sheet rates often stored as 0.04; show 4.0% */
+  if(Math.abs(x)<=1.5) return (x*100).toFixed(1)+'%';
+  return x.toFixed(1)+'%';
+}
+function fmtVar(v,unit){ if(unit==="#")return fmtNum(v); if(unit==="%")return pctDisplay(v); return fmtMoney(v); }
+function fmtDelta(v,unit){ const s=v>=0?"+":"−",a=Math.abs(v); if(unit==="#")return s+fmtNum(a); if(unit==="%"){ const x=Math.abs(a)<=1.5?a*100:a; return s+x.toFixed(1)+'%'; } const m=fmtMoney(a); return s+m.replace("₹","₹"); }
 function fmtPct(v){ return (v>=0?"+":"")+v.toFixed(1)+"%"; }
 
 /* ============================ ROUTING ============================ */
@@ -2976,7 +2986,7 @@ function viewForecast(){
       <div class="solvemsg" id="solveMsg" hidden></div>
       <div class="serieslegend" id="serieslegend"></div>
       <div class="result-foot" style="margin-top:12px">
-        <div class="txt"><strong>Scenario is a plan, not yet saved</strong><span>Write-back pushes only the input assumptions you changed — formulas recompute themselves.</span></div>
+        <div class="txt"><strong>Scenario is a plan, not yet saved</strong><span>Write-back changes leaf drivers only — P&amp;L formula cells keep their <code>=</code> formulas and recompute.</span></div>
         <div class="acts"><button class="btn sm" onclick="saveVersionModal()">Save as version</button><button class="btn sm" onclick="openWriteback()">Review write-back</button><button class="btn sm" onclick="openPromoteModal(null)">Promote to Sheets</button></div>
       </div>
     </div>
@@ -3020,23 +3030,29 @@ function renderAsmCrumb(){
   const el=document.getElementById('asmCrumb'); if(!el) return;
   const anchor=forecastAnchorKey(); const av=anchor?vget(anchor):null;
   if(!av){ el.innerHTML=''; return; }
-  let html=`<button type="button" onclick="forecastDrillTo(-1)">${esc(av.name)}</button>`;
+  const depth=_fcDrill.length;
+  let path=`<div class="path"><button type="button" onclick="forecastDrillTo(-1)">${esc(av.name)}</button>`;
   _fcDrill.forEach((k,i)=>{
     const v=vget(k); if(!v) return;
-    html+=`<span class="sep">›</span>`;
-    if(i===_fcDrill.length-1) html+=`<span class="here">${esc(v.name)}</span>`;
-    else html+=`<button type="button" onclick="forecastDrillTo(${i})">${esc(v.name)}</button>`;
+    path+=`<span class="sep">›</span>`;
+    if(i===depth-1) path+=`<span class="here">${esc(v.name)}</span>`;
+    else path+=`<button type="button" onclick="forecastDrillTo(${i})">${esc(v.name)}</button>`;
   });
-  el.innerHTML=html;
+  path+='</div>';
+  const parent=depth?vget(_fcDrill[depth-1]):null;
+  const backLabel = depth===1 ? ('← Back to '+av.name) : (depth>1 && parent ? ('← Back to '+(vget(_fcDrill[depth-2])||av).name) : '');
+  const back = depth>0
+    ? `<div class="backrow"><button type="button" class="backbtn" onclick="forecastDrillTo(${depth===1?-1:depth-2})">${esc(backLabel||('← Back to '+av.name))}</button></div>`
+    : '';
+  el.innerHTML=back+path;
   const title=document.getElementById('asmTitle');
   const hint=document.getElementById('asmHint');
-  const depth=_fcDrill.length;
   if(title) title.textContent = depth===0 ? 'First-order drivers' : (depth===1 ? 'Second-order drivers' : ('Drivers · level '+(depth+1)));
   if(hint){
-    const parent=vget(forecastDriverParent());
+    const par=vget(forecastDriverParent());
     hint.textContent = depth===0
       ? ('Feeds '+((av&&av.name)||'the charted line')+' directly — click a formula to go one level deeper.')
-      : ('Feeds '+((parent&&parent.name)||'this driver')+' directly — these are deeper drivers of '+((av&&av.name)||'the charted line')+'.');
+      : ('Feeds '+((par&&par.name)||'this driver')+' directly — use Back to return to '+((av&&av.name)||'the charted line')+'.');
   }
 }
 
@@ -3305,9 +3321,16 @@ let _dragging=false, _domains={};
 function seriesDomain(baseArr,scenArr){
   const all=(baseArr||[]).concat(scenArr||[]).filter(x=>isFinite(x));
   let lo=all.length?Math.min(...all):0, hi=all.length?Math.max(...all):1;
-  if(hi-lo<1e-9){ const c=Math.abs(hi)||1; lo=hi-c*0.6; hi=hi+c*0.6; }
-  else { const pad=(hi-lo)*0.18; lo-=pad; hi+=pad; }
+  const mag=Math.max(Math.abs(hi),Math.abs(lo),1);
+  if(hi-lo<1e-9){ lo=hi-mag*0.75; hi=hi+mag*1.25; } /* room to forecast higher than a flat line */
+  else { const pad=Math.max((hi-lo)*0.35, mag*0.25); lo-=pad; hi+=pad*1.4; }
   return {lo,hi};
+}
+function expandDomainForDrag(key, target){
+  const d=_domains[key]; if(!d || !Number.isFinite(target)) return;
+  const span=Math.max(d.hi-d.lo, Math.abs(d.hi)||1, 1);
+  if(target > d.hi - span*0.12) d.hi = target + span*0.45;
+  if(target < d.lo + span*0.12) d.lo = target - span*0.45;
 }
 const chX=(i,n)=>CH.x0+(CH.x1-CH.x0)*(i/Math.max(1,n-1));
 const chY=(val,d)=>CH.y1-(CH.y1-CH.y0)*((val-d.lo)/((d.hi-d.lo)||1));
@@ -3446,10 +3469,30 @@ function outAt(key,period){ return (evalModel(true)[key]||[])[period]||0; }
 function applyDrag(key,period,target){
   const v=vget(key); if(!v) return;
   if(period < (model.closed|0)){ _solveMsg='Closed months are locked.'; return; }
+  expandDomainForDrag(key, target);
   if(v.kind==='input'){ setOv(key,period,target); _solveMsg=''; _lastDragXray=null; return; }
   const ok=backsolvePeriod(key,period,target);
   if(ok && v.kind==='formula') _lastDragXray={key,period};
   else if(!ok) _lastDragXray=null;
+}
+function restoreLeafOv(leaves,cur,period){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); }
+function runBalancedBacksolve(key,period,target,leaves,cur){
+  leaves.forEach((v,i)=>setOv(v.key,period,cur[i]));
+  let prev=Infinity;
+  for(let it=0;it<60;it++){
+    const y=outAt(key,period), res=target-y;
+    if(Math.abs(res)<=Math.max(1e-6,Math.abs(target)*1e-7)){ _solveMsg=''; return true; }
+    const g=leaves.map(v=>{ const x0=inputVal(v,period,true), eps=Math.max(1e-4,Math.abs(x0)*1e-4 || 1e-4);
+      setOv(v.key,period,x0+eps); const yp=outAt(key,period); setOv(v.key,period,x0); return (yp-y)/eps; });
+    const g2=g.reduce((s,x)=>s+x*x,0);
+    if(g2<1e-20){ restoreLeafOv(leaves,cur,period); _solveMsg='These drivers barely move this line — try Move one driver or unpin one.'; return false; }
+    let damp=1; if(Math.abs(res)>prev) damp=0.5; prev=Math.abs(res);
+    leaves.forEach((v,i)=>{ const x0=inputVal(v,period,true); setOv(v.key,period,x0+g[i]*res/g2*damp); });
+  }
+  const y=outAt(key,period);
+  const miss=Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4);
+  _solveMsg = miss?`Closest reachable: ${fmtVar(y,vget(key).unit)} (drivers maxed out).`:'';
+  return true;
 }
 function backsolvePeriod(key,period,target){
   const pol=lineSolvePolicy(key);
@@ -3457,41 +3500,44 @@ function backsolvePeriod(key,period,target){
   const leaves=freeLeavesOf(key);
   if(!leaves.length){ _solveMsg='All drivers of this line are pinned — release one to plan it.'; return false; }
   const cur=leaves.map(v=>stableCur(v,period));
+  const y0=outAt(key,period);
 
   /* P3: exact closed-form for pure multiply/divide (monomial) trees */
   if(mode==='proportional' || mode==='single'){
     const exact=tryExactBacksolve(key,period,target,leaves,mode);
-    if(exact.ok && exact.hit){ _solveMsg='Exact breakback (×÷).'; return true; }
-    /* if algebraic path missed due to decimal rounding, fall through to bisection */
-    if(exact.ok && !exact.hit){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); }
+    if(exact.ok && exact.hit){ _solveMsg='Changed leaf drivers (exact ×÷ breakback).'; return true; }
+    if(exact.ok && !exact.hit){ restoreLeafOv(leaves,cur,period); }
   }
 
   if(mode==='balanced'){
-    // damped Newton: Δxᵢ = gᵢ·(target−y)/Σgⱼ² , iterate, halve step on overshoot
-    leaves.forEach((v,i)=>setOv(v.key,period,cur[i]));           // start from stable base
-    let prev=Infinity;
-    for(let it=0;it<60;it++){
-      const y=outAt(key,period), res=target-y;
-      if(Math.abs(res)<=Math.max(1e-6,Math.abs(target)*1e-7)){ _solveMsg=''; return true; }
-      const g=leaves.map(v=>{ const x0=inputVal(v,period,true), eps=Math.max(1e-4,Math.abs(x0)*1e-4);
-        setOv(v.key,period,x0+eps); const yp=outAt(key,period); setOv(v.key,period,x0); return (yp-y)/eps; });
-      const g2=g.reduce((s,x)=>s+x*x,0);
-      if(g2<1e-20){ _solveMsg='These drivers barely move this line — try another driver or unpin one.'; return false; }
-      let damp=1; if(Math.abs(res)>prev) damp=0.5; prev=Math.abs(res);
-      leaves.forEach((v,i)=>{ const x0=inputVal(v,period,true); setOv(v.key,period,x0+g[i]*res/g2*damp); });
-    }
-    const y=outAt(key,period); _solveMsg = Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4)?`Closest reachable: ${fmtVar(y,vget(key).unit)} (drivers maxed out).`:''; return true;
+    return runBalancedBacksolve(key,period,target,leaves,cur);
   }
 
   // proportional / single fallback: common factor r on the free leaves, bisected
-  if(cur.every(x=>Math.abs(x)<1e-12)){ _solveMsg='These drivers are zero at this month — nothing to scale. Set a base or pick another driver.'; return false; }
+  if(cur.every(x=>Math.abs(x)<1e-12)){
+    /* nothing to scale — try additive balanced so growth still works */
+    const ok=runBalancedBacksolve(key,period,target,leaves,cur);
+    if(!ok) _solveMsg='Drivers are zero this month — set a base on a first-order input, or use Move one driver.';
+    return ok;
+  }
   const f=r=>{ leaves.forEach((v,i)=>setOv(v.key,period,cur[i]*r)); return outAt(key,period); };
-  let lo=0.0001,hi=8,flo=f(lo),fhi=f(hi), tries=0;
-  while(((fhi>flo)?(fhi<target):(fhi>target)) && tries<50){ hi*=1.6; fhi=f(hi); tries++; }   // expand to bracket
-  if(flo===fhi){ leaves.forEach((v,i)=>setOv(v.key,period,cur[i])); _solveMsg='This line doesn’t respond to these drivers — check the formula tree or pins.'; return false; }
+  let lo=0.0001,hi=Math.max(8, Math.abs(target/(y0||1))*2||8), flo=f(lo), fhi=f(hi), tries=0;
+  while(((fhi>flo)?(fhi<target):(fhi>target)) && tries<60){ hi*=1.75; fhi=f(hi); tries++; }
+  if(!(Math.abs(fhi-flo)>1e-12)){
+    restoreLeafOv(leaves,cur,period);
+    const ok=runBalancedBacksolve(key,period,target,leaves,cur);
+    if(!ok) _solveMsg='This line doesn’t respond to proportional scaling — try Balanced or Move one driver.';
+    return ok;
+  }
   for(let it=0;it<54;it++){ const mid=(lo+hi)/2,val=f(mid); if((fhi>flo)?val<target:val>target) lo=mid; else hi=mid; }
-  const r=(lo+hi)/2; const y=f(r);
-  _solveMsg = Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4)?`Closest reachable: ${fmtVar(y,vget(key).unit)}.`:'';
+  const r=(lo+hi)/2; let y=f(r);
+  /* If we collapsed away from a higher target, fall back to balanced instead of leaving ₹0 */
+  if(target>y0 && y<y0*0.5){
+    restoreLeafOv(leaves,cur,period);
+    return runBalancedBacksolve(key,period,target,leaves,cur);
+  }
+  const miss=Math.abs(y-target)>Math.max(1,Math.abs(target)*1e-4);
+  _solveMsg = miss?`Closest reachable: ${fmtVar(y,vget(key).unit)}. Leaf drivers updated — P&L formula stays intact.`:( 'Changed leaf drivers to hit the target.');
   return true;
 }
 
@@ -4497,27 +4543,37 @@ async function confirmPromote(){
 
 /* ============================ WRITE-BACK (edited inputs only) ============================ */
 function scenRow(v){ return Array.from({length:P()},(_,p)=>+(inputVal(v,p,true)).toFixed(4)); }
+function driverOvSummaryRows(){
+  const plan=evalModel(false), scen=evalModel(true);
+  return inputs().filter(v=>v.writable!==false && hasOv(v.key)).map(v=>{
+    const periods=Object.keys(model.ov[v.key]||{}).map(Number).sort((a,b)=>a-b);
+    const bits=periods.slice(0,6).map(p=>{
+      const a=(plan[v.key]||[])[p], b=(scen[v.key]||[])[p];
+      return `${(model.periods[p]||'').split(' ')[0]}: ${fmtVar(a,v.unit)} → <b class="wb-delta">${fmtVar(b,v.unit)}</b>`;
+    });
+    const more=periods.length>6?` · +${periods.length-6} more`:'';
+    return {v, periods, bits, more};
+  });
+}
 function openWriteback(){
   const edited=inputs().filter(v=>v.writable!==false && hasOv(v.key));   // only inputs you actually changed
   const mapped=edited.filter(v=>v.range);
   if(!edited.length){
     showModal(`<div class="mhead"><h3>Review write-back</h3><button class="x" onclick="closeModal()">×</button></div>
-      <div class="mbody"><p class="mut" style="margin:0">No scenario changes yet. Drag a point on the chart to change an assumption, then come back here to write it to your sheet.</p>
+      <div class="mbody"><p class="mut" style="margin:0">No scenario changes yet. Drag a point on the chart (or edit a driver) so leaf inputs change, then come back here.</p>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="closeModal()">Got it</button></div></div>`);
     return;
   }
-  const tbl=edited.map(v=>{ const row=scenRow(v); const nEdit=Object.keys(model.ov[v.key]||{}).length;
-    const lo=Math.min(...row), hi=Math.max(...row);
-    const rng = lo===hi ? fmtVar(lo,v.unit) : `${fmtVar(lo,v.unit)} – ${fmtVar(hi,v.unit)}`;
-    return `<tr><td><strong>${v.name}</strong></td><td class="cellref ${v.range?'':'unmapped'}">${v.range||'— map a cell in Model setup —'}</td><td class="num">${rng}<br><span class="mut fz11">${nEdit} period${nEdit!==1?'s':''} changed</span></td></tr>`;}).join('');
+  const rows=driverOvSummaryRows();
+  const tbl=rows.map(({v,periods,bits,more})=>`<tr><td><strong>${esc(v.name)}</strong><div class="mut fz11">${esc(v.key)}</div></td><td class="cellref ${v.range?'':'unmapped'}">${v.range||'— map in Model setup —'}</td><td class="num" style="text-align:left">${bits.join('<br>')}${more}<div class="mut fz11">${periods.length} period${periods.length!==1?'s':''} changed</div></td></tr>`).join('');
   showModal(`<div class="mhead"><h3>Review write-back</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
-      <p class="mut fz12" style="margin:0 0 8px">Only the <b>input assumptions you changed</b> are written — never the calculated outputs. Your sheet's own formulas turn these into revenue. Each assumption writes its full row across ${P()} periods.</p>
-      <table class="wtable"><thead><tr><th>Assumption</th><th>Target cells</th><th class="num">Scenario (first → last)</th></tr></thead><tbody>${tbl}</tbody></table>
-      ${mapped.length<edited.length?`<div class="write-feedback" style="background:#fff8ec;color:#8a5a12">${edited.length-mapped.length} changed assumption(s) aren’t mapped to a cell yet — map them in Model setup to include them.</div>`:''}
-      ${!conn.connected?`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Not connected to a sheet — this is a dry run. Connect to write for real.</div>`:''}
+      <div class="wb-note"><b>Drivers change — formulas stay.</b> We write only the <b>leaf input cells</b> you changed (GMV drivers, rates, headcount, …). We do <b>not</b> hardcode Commission revenue / Net Revenue / other P&amp;L formula cells. The sheet keeps <code>=</code> formulas and recalculates to your target.</div>
+      <table class="wtable"><thead><tr><th>Driver (leaf)</th><th>Sheet cells</th><th>Plan → scenario</th></tr></thead><tbody>${tbl}</tbody></table>
+      ${mapped.length<edited.length?`<div class="write-feedback" style="background:#fff8ec;color:#8a5a12">${edited.length-mapped.length} changed driver(s) aren’t mapped — map them in Model setup to include them.</div>`:''}
+      ${!conn.connected?`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Not connected — dry run only.</div>`:''}
       <div id="wbFeedback"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="confirmWriteback()" ${mapped.length===0?'disabled style="opacity:.5"':''}>Write ${mapped.length} assumption${mapped.length!==1?'s':''}</button></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="confirmWriteback()" ${mapped.length===0?'disabled style="opacity:.5"':''}>Write ${mapped.length} driver${mapped.length!==1?'s':''}</button></div>
     </div>`);
 }
 async function confirmWriteback(){
