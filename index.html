@@ -118,6 +118,15 @@
   .expr{font-family:var(--mono);font-size:11px;color:#3a4763}
   .cellref{font-family:var(--mono);font-size:11px;color:#7d8598}
   .cellref.unmapped{color:#b6bccb;font-style:italic}
+  .cellref.plan{color:#3a4680}
+  .cellref.act{color:#0f6b4c}
+  .map-plan,.map-act{display:flex;align-items:baseline;gap:6px;line-height:1.35}
+  .map-plan .tag,.map-act .tag{font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;flex:0 0 auto}
+  .map-plan .tag{color:#3a4680}
+  .map-act .tag{color:#0f6b4c}
+  .map-act.none .tag{color:#9aa3b5}
+  .act-banner{background:#e8f6ef;border:1px solid #b7e0c9;color:#0f6b4c;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13px}
+  .act-banner.warn{background:#fff6e8;border-color:#f0d2a0;color:#8a5a10}
   .rowacts{display:flex;gap:6px;justify-content:flex-end}
   .iconbtn{border:1px solid var(--line);background:#fff;border-radius:7px;width:28px;height:28px;display:grid;place-items:center;cursor:pointer;color:#6c7489}
   .iconbtn:hover{background:#f4f6fb}
@@ -1004,6 +1013,73 @@ async function walkFormulaGraph(seeds, opts){
  * Start from P&L/cash lines with formulas → walk to leaves (inputs) and mid formulas.
  * Day-to-day later only changes inputs; Accept reviews the graph.
  */
+
+/** Place Actuals onto current model vars after formula-graph Scan.
+ *  Prefer name match on P&L seed lines; never invent ranges. Aligns series by period label when headers differ. */
+async function placeActualsOntoGraphModel(){
+  model.uiState=model.uiState||{};
+  if(!conn.connected||!conn.actualsSsid){
+    model.uiState.scanActualsCatalog=[];
+    return {placed:0, catalog:0, withSeries:0};
+  }
+  const tabs=(conn.actualsSheets||[]).map(s=>s.name);
+  const pnlName=tabs.find(n=>/^p\s*&\s*l$/i.test(String(n).trim()))||tabs.find(n=>/p\s*&\s*l|\bpnl\b|profit|income/i.test(n))||tabs[0]||'';
+  let A=null, aSrc={ssid:conn.actualsSsid, tab:pnlName, labelCol:'A', headerRow:1, firstCol:'B', months:Math.max(12,P()||12)};
+  try{
+    const auto=await autoDetectAndRead({ssid:conn.actualsSsid, tab:pnlName});
+    if(auto&&auto.lines&&auto.lines.length){ A=auto; aSrc=Object.assign({}, aSrc, auto.detected, {tab:pnlName||(auto.detected&&auto.detected.tab)||'', ssid:conn.actualsSsid}); }
+  }catch(e){}
+  if(!A){ A=await readSource(aSrc); }
+  if(!A||!(A.lines||[]).length){
+    model.uiState.scanActualsCatalog=[];
+    model.sources=Object.assign({}, model.sources, {actual:aSrc});
+    return {placed:0, catalog:0, withSeries:0, warn:'Actuals sheet opened but no P&L-like lines found'};
+  }
+  const aHeads=(A.headers||[]).map(fmtPeriodLabel);
+  const aHeadIdx={}; aHeads.forEach((h,i)=>{ const k=nrm(h); if(k&&aHeadIdx[k]==null) aHeadIdx[k]=i; });
+  const periods=model.periods||[];
+  const alignA=series=>periods.map((h,pi)=>{
+    const ai=aHeadIdx[nrm(h)];
+    const v=(ai!=null?(series||[])[ai]:(series||[])[pi]);
+    return v===undefined?null:v;
+  });
+  const idOf=l=>nrm(l.metric||'')+'|'+nrm(l.name||'');
+  const aById={}; (A.lines||[]).forEach(l=>{ aById[idOf(l)]=l; });
+  const aUsed=new Set();
+  let placed=0, withSeries=0;
+  const candidates=(model.vars||[]).filter(v=>v && (v.srcLine || v.srcGraph));
+  /* Prefer seed P&L lines first so drivers don't steal Commission's actuals row */
+  candidates.sort((a,b)=>(b.srcLine?1:0)-(a.srcLine?1:0));
+  candidates.forEach(v=>{
+    if(v.actualRange) return; /* preserve manual */
+    const id=nrm(v.metric||'')+'|'+nrm(v.account||v.name||'');
+    let al=aById[id];
+    if(al) aUsed.add(id);
+    else {
+      const hit=bestLabelMatch(v, A.lines||[], aUsed);
+      if(hit){ al=hit.line; aUsed.add(hit.id); }
+    }
+    if(!(al&&al.row)) return;
+    const tab=aSrc.tab||'';
+    const firstCol=aSrc.firstCol||'B';
+    v.actualRange=buildRange(tab, firstCol, al.row, periods.length);
+    if(al.series){
+      const aligned=alignA(al.series).map(x=>x==null||x===''?null:toNum(x, conn.scale||1));
+      v.actuals=aligned;
+      if(aligned.some(x=>x!=null&&x!=='')) withSeries++;
+    }
+    placed++;
+  });
+  model.uiState.scanActualsCatalog=(A.lines||[]).filter(l=>l&&l.row).map(l=>({
+    name:l.name, metric:l.metric||'', row:l.row, sheet:aSrc.tab||'', firstCol:aSrc.firstCol||'B',
+    range:buildRange(aSrc.tab||'', aSrc.firstCol||'B', l.row, periods.length),
+    id:idOf(l)
+  }));
+  model.sources=Object.assign({}, model.sources, {actual:aSrc});
+  try{ model.closed=Math.max(model.closed|0, lastActualIdx()+1); }catch(e){}
+  return {placed, catalog:model.uiState.scanActualsCatalog.length, withSeries, name:A.name||''};
+}
+
 async function ingestFormulaGraphFromSheet(opts){
   opts=opts||{};
   if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
@@ -1175,6 +1251,15 @@ async function ingestFormulaGraphFromSheet(opts){
   if(proofVar && (!proofVar.expr || proofDeps<1)){
     throw new Error('Proof failed: '+(proofVar.name||'Subscription revenue')+' did not resolve feeders from the sheet formula. Clear all → Connect & Scan after confirming the P&L cell formula references Pricing/Assumptions.');
   }
+  let actInfo={placed:0, catalog:0, withSeries:0};
+  try{
+    actInfo=await placeActualsOntoGraphModel();
+  }catch(actErr){
+    console.warn('actuals place failed', actErr);
+    model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[];
+    actInfo={placed:0, catalog:0, withSeries:0, warn:String((actErr&&actErr.message)||actErr)};
+  }
+  saveModel();
   return {
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
@@ -1182,7 +1267,11 @@ async function ingestFormulaGraphFromSheet(opts){
     proof: proofVar?proofVar.key:'',
     proofKind: proofVar?proofVar.kind:'',
     proofDeps,
-    formulaSeeds: seedFormulaLabels.size
+    formulaSeeds: seedFormulaLabels.size,
+    actualsPlaced: actInfo.placed|0,
+    actualsCatalog: actInfo.catalog|0,
+    actualsSeries: actInfo.withSeries|0,
+    actualsWarn: actInfo.warn||''
   };
 }
 function mapStatusOf(v){
@@ -1210,11 +1299,14 @@ function actualsCellLabel(v){
 }
 function sheetCellsHtml(v){
   const fc = v.range
-    ? `<span class="cellref">${esc(v.range)}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}`
-    : `<span class="cellref unmapped">— not mapped —</span>`;
-  const ac = v.actualRange
-    ? `<div class="mut fz10" style="margin-top:2px">Actuals · <span class="cellref">${esc(v.actualRange)}</span></div>`
-    : (conn&&conn.actualsSsid ? `<div class="mut fz10" style="margin-top:2px">Actuals · none</div>` : '');
+    ? `<div class="map-plan"><span class="tag">Plan</span><span class="cellref plan">${esc(v.range)}</span>${v.writable&&v.kind==='input'?' <span class="keychip">write</span>':''}</div>`
+    : `<div class="map-plan"><span class="tag">Plan</span><span class="cellref unmapped">— not mapped —</span></div>`;
+  let ac='';
+  if(conn&&conn.actualsSsid){
+    ac = v.actualRange
+      ? `<div class="map-act"><span class="tag">Actuals</span><span class="cellref act">${esc(v.actualRange)}</span></div>`
+      : `<div class="map-act none"><span class="tag">Actuals</span><span class="cellref unmapped">— none —</span></div>`;
+  }
   return fc+ac;
 }
 function needsMapReview(v){
@@ -2254,6 +2346,13 @@ function viewSetup(){
   const reviewN=model.vars.filter(needsMapReview).length;
   const staleInfo=staleGraphModel();
   const staleBanner=(staleInfo.fakes&&staleInfo.fakes.length)?`<div class="mapbanner" style="background:#fff0f1;border-color:#f0cdd2"><span><b>Stale local model</b> — hard refresh is not enough. Click <b>Clear all</b>, then <b>Connect &amp; Scan</b>. Fake Inputs: ${esc(staleInfo.fakes.slice(0,6).map(v=>v.name).join(', '))}${staleInfo.fakes.length>6?'…':''}</span></div>`:'';
+  const actMapped=(model.vars||[]).filter(v=>v&&v.actualRange).length;
+  const actLoaded=hasActuals()? (model.vars||[]).filter(v=>v.actuals&&v.actuals.some(x=>x!=null&&x!=='')).length : 0;
+  const actBanner=(!conn.actualsSsid)?'':(
+    actMapped
+      ? `<div class="act-banner"><b>Actuals workbook linked</b> · ${actMapped} line(s) mapped (green) · plan stays blue.${actLoaded?` · ${actLoaded} with values`:' · hit <b>Refresh actuals</b> on Variance if series look empty'} · edit Actuals mapping separately from Plan cells.</div>`
+      : `<div class="act-banner warn"><b>Actuals workbook linked, but no lines mapped yet</b> — Clear all → Connect &amp; Scan (with Actuals URL), or open a line and set <b>Actuals cell</b> (separate from Plan). Variance needs mapped + refreshed actuals.</div>`
+  );
   const rows=model.vars.map((v,i)=>{
     const st=mapStatusOf(v);
     if(filt==='review' && !needsMapReview(v)) return '';
@@ -2321,7 +2420,7 @@ function viewSetup(){
   <div class="panel" style="margin-top:16px">
     <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Variables &amp; formulas</p><h2>What each number is, and where it lives</h2></div>
       <div style="display:flex;gap:8px">${model.vars.length?`<button class="btn sm" onclick="clearModel()" title="Remove every line and start blank">Clear all</button>`:''}<button class="btn sm indigo" onclick="addVar()">+ Add variable</button></div></div>
-    ${staleBanner}<div class="panel-pad" style="padding-bottom:0">${banner}</div>
+    ${staleBanner}${actBanner}<div class="panel-pad" style="padding-bottom:0">${banner}</div>
     <div style="overflow-x:auto"><table class="vtbl">
       <thead><tr><th>Variable</th><th>Type</th><th>Definition</th><th>Sheet cell(s)</th><th>Mapping</th><th></th></tr></thead>
       <tbody>${rows||`<tr><td colspan="6" class="mut fz12">No lines in this filter.</td></tr>`}</tbody>
@@ -4952,8 +5051,9 @@ async function doConnect(){
     try{
       const tabEl=document.getElementById('cnTab');
       const ing=await ingestFromConnectedSheet({tab:(tabEl&&tabEl.value)||''});
-      fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}</div>`;
-      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:''));},1100);
+      const actPlace=ing.actualsPlaced?` · ${ing.actualsPlaced} actuals mapped`:(actualsRaw?' · actuals linked (map pending)':'');
+      fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}${actPlace}</div>`;
+      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:'')+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):''));},1100);
     }catch(scanErr){
       fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
         <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}. Open Connect and use Scan &amp; load lines.</div>`;
