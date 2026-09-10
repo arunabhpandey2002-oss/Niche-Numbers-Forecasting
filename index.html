@@ -291,10 +291,21 @@
   .axis-label{fill:#99a0b0;font-size:9px}
   .drag-hint{display:inline-flex;align-items:center;gap:6px;color:#7b8398;font-size:11px;background:#f6f7fb;border:1px solid #e7eaf1;border-radius:8px;padding:6px 10px;margin-bottom:6px}
   .drag-hint svg{width:13px;height:13px}
-  .linechips{display:flex;flex-wrap:wrap;gap:7px;margin:2px 0 4px}
+  .linechips{display:flex;flex-wrap:wrap;gap:7px;margin:2px 0 4px;align-items:center}
   .linechip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 12px 5px 10px;font-size:12px;cursor:pointer;color:#5a6377;user-select:none}
   .linechip i{width:11px;height:11px;border-radius:50%;background:#c7ccd8;flex:none}
   .linechip.on{border-color:transparent;color:#fff;font-weight:600}
+  .linechip .rm{margin-left:2px;opacity:.7;font-weight:700;padding:0 2px}
+  .linechip.anchor{box-shadow:0 0 0 2px rgba(64,85,199,.35)}
+  .asmcrumb{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 10px;font-size:12px}
+  .asmcrumb button{border:0;background:transparent;color:var(--indigo);cursor:pointer;padding:0;font:inherit;font-weight:600}
+  .asmcrumb button:hover{text-decoration:underline}
+  .asmcrumb .sep{color:#b0b6c4}
+  .asmcrumb .here{color:#2b3a55;font-weight:700}
+  .asm.formula-drv{cursor:pointer;border:1px solid #e4e8f2;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fbfcff}
+  .asm.formula-drv:hover{border-color:var(--indigo-border);background:#f4f6ff}
+  .asm.formula-drv .drillhint{font-size:11px;color:var(--indigo);font-weight:600;margin-top:4px}
+  .asm-empty{font-size:12px;color:var(--muted-2);padding:8px 0}
   .serieslegend{display:flex;flex-direction:column;gap:2px;margin-top:12px;border-top:1px solid #edf0f4;padding-top:10px}
   .slrow{display:grid;grid-template-columns:14px 1fr auto auto;align-items:center;gap:10px;padding:5px 2px;font-size:12px}
   .slrow i{width:12px;height:3px;border-radius:2px}
@@ -1107,9 +1118,13 @@ async function ingestFormulaGraphFromSheet(opts){
   model.uiState.scanMeta={sheet:sheetName, firstCol, months:periods.length, mode:'formula-graph'};
   model.uiState.graphIngestVersion=GRAPH_INGEST_VERSION;
   model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[];
-  if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length){
-    const sub=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
-    model.displayVars=[(sub||newVars.find(v=>v.srcLine&&v.kind==='formula')||newVars[0]||{}).key].filter(Boolean);
+  {
+    const pnl=pickPnlDisplayKeys(newVars);
+    if(pnl.length) model.displayVars=pnl;
+    else if(!model.displayVars||!model.displayVars.filter(k=>vget(k)).length){
+      const sub=newVars.find(v=>/subscription\s*revenue/i.test(v.name));
+      model.displayVars=[(sub||newVars.find(v=>v.srcLine&&v.kind==='formula')||newVars[0]||{}).key].filter(Boolean);
+    }
   }
   /* Graph owns P&L Net revenue — kill Pricing alias + any Pricing→P&L row maps */
   try{
@@ -1881,7 +1896,14 @@ function pricingPromoteRows(){
   return rows;
 }
 
-function switchTab(t){ if(t==="treasury")return; uiTab=t; if(t==="pricing") enablePricingSeed(); document.querySelectorAll('.tab').forEach(b=>b.dataset.active=(b.dataset.tab===t)); render(); window.scrollTo({top:0,behavior:"instant"}); }
+function switchTab(t){ if(t==="treasury")return; uiTab=t; if(t==="pricing") enablePricingSeed();
+  if(t==="forecast"){
+    try{
+      const sk=_setupSel||(model.uiState&&model.uiState.selKey);
+      if(sk&&vget(sk)){ model.displayVars=[sk]; _fcAnchor=sk; _fcDrill=[]; }
+    }catch(e){}
+  }
+  document.querySelectorAll('.tab').forEach(b=>b.dataset.active=(b.dataset.tab===t)); render(); window.scrollTo({top:0,behavior:"instant"}); }
 function render(){ if(typeof syncPricingDrivers==='function'){ try{ syncPricingDrivers(); }catch(e){} } recompileAll(); const el=document.getElementById('main');
   if(uiTab==="setup"){ el.innerHTML=viewSetup(); renderCanvas(); }
   else if(uiTab==="forecast"){ el.innerHTML=viewForecast(); mountForecast(); }
@@ -1892,6 +1914,16 @@ function render(){ if(typeof syncPricingDrivers==='function'){ try{ syncPricingD
 
 /* ============================ MODEL SETUP (builder) ============================ */
 /** Exact upstream keys from compiled model formula — never synonym guesses. */
+function pickPnlDisplayKeys(vars){
+  const list=vars||model.vars||[];
+  const want=[/^net\s*revenue$/i, /contribution\s*margin(?!\s*%)/i, /^ebitda$/i];
+  const out=[];
+  want.forEach(re=>{
+    const hit=list.find(v=>v&&v.kind==='formula'&&re.test(String(v.name||'').trim()));
+    if(hit&&!out.includes(hit.key)) out.push(hit.key);
+  });
+  return out;
+}
 function driversOf(v){
   if(!v || v.kind!=='formula' || !v.expr) return [];
   try{ return [...new Set((compile(v.expr).deps||[]).map(String))]; }catch(e){ return []; }
@@ -2917,8 +2949,8 @@ function viewForecast(){
   return `
   <div class="hero">
     <div class="hero-row">
-      <div><p class="eyebrow">Forecast</p><h1>Chart your lines. Drag a point. Watch the model move.</h1>
-        <p>Pick the lines you want to see, drag any point to a new value, and every connected line recomputes live. Only your input assumptions get written back to the sheet — formulas recalculate themselves.</p></div>
+      <div><p class="eyebrow">Forecast</p><h1>Plan from the P&amp;L line down.</h1>
+        <p>Chart an outcome, edit its <b>first-order drivers</b> on the left, drill in for the next level. Drag the chart to scenario-plan — closed months stay locked. Only input assumptions write back to the sheet.</p></div>
       <div class="selrow">
         <div class="field"><label>Scenario</label><input class="inp" id="scName" value="${esc(model.scenarioName)}" style="width:150px" onchange="model.scenarioName=this.value;renderForecast()"></div>
       </div>
@@ -2926,16 +2958,18 @@ function viewForecast(){
   </div>
   <div class="grid-forecast" style="margin-top:16px">
     <div class="panel panel-pad">
-      <div class="results-head" style="margin-bottom:6px"><div><p class="eyebrow">Assumptions</p><h2 style="font-size:16px">Inputs over time</h2></div>
+      <div class="results-head" style="margin-bottom:6px"><div><p class="eyebrow">Drivers</p><h2 style="font-size:16px" id="asmTitle">First-order drivers</h2>
+        <p class="mut fz11" style="margin:4px 0 0" id="asmHint">Only what feeds the charted line — click a formula driver to see the next level.</p></div>
         <button class="btn sm" title="Clear all dragged scenario edits" onclick="clearScenario()">Reset scenario</button></div>
+      <div id="asmCrumb" class="asmcrumb"></div>
       <div id="asmList"></div>
     </div>
     <div class="panel panel-pad">
       <div class="results-head"><div><p class="eyebrow">Scenario comparison</p><h2 id="resTitle" style="font-size:16px"></h2></div></div>
-      <p class="mut fz11" style="margin:2px 0 6px">Choose which lines to chart:</p>
+      <p class="mut fz11" style="margin:2px 0 6px">Charted lines (add more if you need them):</p>
       <div class="linechips" id="lineChips"></div>
       <div class="fcbar">
-        <div class="drag-hint" id="dragHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Drag any point — dashed = baseline, solid = scenario</div>
+        <div class="drag-hint" id="dragHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Drag open months — dashed = baseline, solid = scenario · closed months locked</div>
         <button class="solveby" id="solveBtn" onclick="openSolveMenu()"></button>
       </div>
       <div class="chart-wrap"><svg id="chart" viewBox="0 0 760 265" preserveAspectRatio="none"></svg></div>
@@ -2950,6 +2984,61 @@ function viewForecast(){
 }
 let __pendingChart=false;
 function mountForecast(){ renderAssumptions(); renderLineChips(); renderSolveBar(); renderForecast(); }
+
+let _fcDrill=[]; /* keys drilled under the charted anchor — 2nd/3rd order path */
+let _fcAnchor=null; /* which charted line owns the left driver panel */
+
+function forecastAnchorKey(){
+  const ks=visibleKeys();
+  if(_fcAnchor && ks.includes(_fcAnchor)) return _fcAnchor;
+  const f=ks.find(k=>{ const v=vget(k); return v&&v.kind==='formula'; });
+  return f||ks[0]||null;
+}
+function forecastDriverParent(){
+  if(_fcDrill.length) return _fcDrill[_fcDrill.length-1];
+  return forecastAnchorKey();
+}
+function setForecastAnchor(k){
+  if(!vget(k)) return;
+  if(!visibleKeys().includes(k)){ model.displayVars=(model.displayVars||[]).concat([k]); }
+  _fcAnchor=k; _fcDrill=[];
+  renderLineChips(); renderAssumptions(); renderForecast(); saveModel();
+}
+function forecastDrillInto(key){
+  const v=vget(key); if(!v || v.kind==='input') return;
+  if(_fcDrill.length && _fcDrill[_fcDrill.length-1]===key) return;
+  _fcDrill.push(key);
+  renderAssumptions();
+}
+function forecastDrillTo(level){
+  /* level -1 = charted root; 0.. = keep first level+1 entries of _fcDrill */
+  if(level<0) _fcDrill=[];
+  else _fcDrill=_fcDrill.slice(0, level+1);
+  renderAssumptions();
+}
+function renderAsmCrumb(){
+  const el=document.getElementById('asmCrumb'); if(!el) return;
+  const anchor=forecastAnchorKey(); const av=anchor?vget(anchor):null;
+  if(!av){ el.innerHTML=''; return; }
+  let html=`<button type="button" onclick="forecastDrillTo(-1)">${esc(av.name)}</button>`;
+  _fcDrill.forEach((k,i)=>{
+    const v=vget(k); if(!v) return;
+    html+=`<span class="sep">›</span>`;
+    if(i===_fcDrill.length-1) html+=`<span class="here">${esc(v.name)}</span>`;
+    else html+=`<button type="button" onclick="forecastDrillTo(${i})">${esc(v.name)}</button>`;
+  });
+  el.innerHTML=html;
+  const title=document.getElementById('asmTitle');
+  const hint=document.getElementById('asmHint');
+  const depth=_fcDrill.length;
+  if(title) title.textContent = depth===0 ? 'First-order drivers' : (depth===1 ? 'Second-order drivers' : ('Drivers · level '+(depth+1)));
+  if(hint){
+    const parent=vget(forecastDriverParent());
+    hint.textContent = depth===0
+      ? ('Feeds '+((av&&av.name)||'the charted line')+' directly — click a formula to go one level deeper.')
+      : ('Feeds '+((parent&&parent.name)||'this driver')+' directly — these are deeper drivers of '+((av&&av.name)||'the charted line')+'.');
+  }
+}
 
 /* leaf inputs across all charted formula/output lines (what a drag could touch) */
 function chartedLeaves(){ const s=new Set(); visibleKeys().forEach(k=>{ const v=vget(k); if(v&&v.kind!=='input') leavesOf(k).forEach(l=>s.add(l)); }); return [...s].map(k=>vget(k)).filter(Boolean); }
@@ -3027,17 +3116,58 @@ function clearLineSolvePolicy(key){
 function visibleKeys(){ let ks=(model.displayVars||[]).filter(k=>vget(k)); if(!ks.length){ ks=[(model.vars.find(v=>v.kind==='formula')||model.vars[0]||{}).key].filter(Boolean); model.displayVars=ks.slice(); } return ks; }
 function renderLineChips(){
   const el=document.getElementById('lineChips'); if(!el) return;
-  const sel=new Set(visibleKeys());
-  el.innerHTML=model.vars.map((v,i)=>{ const on=sel.has(v.key); const col=COLORS[[...sel].indexOf(v.key)%COLORS.length];
-    const gear=(v.kind==='formula'||v.kind==='output')?`<span class="gear" title="Breakback policy for this line" onclick="event.stopPropagation();openSolveMenu('${v.key}')">⚙</span>`:'';
-    return `<span class="linechip ${on?'on':''}" style="${on?`background:${col};`:''}" onclick="toggleLine('${v.key}')"><i style="${on?'background:#fff':''}"></i>${v.name}${gear}</span>`; }).join('')
-    +`<span class="linechip" onclick="window.__pendingChart=true;addVar()" style="border-style:dashed;color:#8a92a4">＋ new variable</span>`;
+  const keys=visibleKeys();
+  const anchor=forecastAnchorKey();
+  el.innerHTML=keys.map((k,si)=>{
+    const v=vget(k); if(!v) return '';
+    const col=COLORS[si%COLORS.length];
+    const isA=k===anchor;
+    const gear=(v.kind==='formula'||v.kind==='output')?`<span class="gear" title="Breakback policy" onclick="event.stopPropagation();openSolveMenu('${k}')">⚙</span>`:'';
+    return `<span class="linechip on ${isA?'anchor':''}" style="background:${col}" title="${isA?'Driving the left panel':'Click to drive left panel'}" onclick="setForecastAnchor('${k}')"><i style="background:#fff"></i>${esc(v.name)}${gear}<span class="rm" title="Remove from chart" onclick="event.stopPropagation();toggleLine('${k}')">×</span></span>`;
+  }).join('')
+    +`<span class="linechip" onclick="openAddChartLine()" style="border-style:dashed;color:#8a92a4">＋ Add line</span>`;
 }
 function toggleLine(k){
   const dv=model.displayVars||[]; const i=dv.indexOf(k);
   if(i>=0){ if(dv.length>1) dv.splice(i,1); else { toast('Keep at least one line on the chart.'); return; } }
   else dv.push(k);
-  model.displayVars=dv; renderLineChips(); renderForecast(); saveModel();
+  model.displayVars=dv;
+  if(_fcAnchor && !dv.includes(_fcAnchor)) _fcAnchor=null;
+  _fcDrill=[];
+  renderLineChips(); renderAssumptions(); renderForecast(); saveModel();
+}
+function openAddChartLine(){
+  const sel=new Set(visibleKeys());
+  const pnl=pickPnlDisplayKeys(model.vars);
+  const rest=(model.vars||[]).filter(v=>v&&!sel.has(v.key));
+  const ranked=[...pnl.map(k=>vget(k)).filter(Boolean), ...rest.filter(v=>!pnl.includes(v.key))];
+  const rows=ranked.map(v=>{
+    const tag=v.kind==='formula'?'formula':v.kind;
+    return `<button type="button" class="tok" style="display:flex;width:100%;justify-content:space-between;margin:0 0 6px;text-align:left" onclick="addChartLine('${v.key}')">
+      <span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span><span class="mut fz11">${tag}</span></button>`;
+  }).join('')||'<p class="mut fz12">Every line is already on the chart.</p>';
+  showModal(`<div class="mhead"><h3>Add a line to the chart</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="mbody">
+      <input class="inp" id="addLineQ" placeholder="Search Net Revenue, EBITDA…" style="margin-bottom:10px" oninput="filterAddChartLine(this.value)">
+      <div id="addLineList" style="max-height:360px;overflow:auto">${rows}</div>
+    </div>`);
+  window.__addLineRanked=ranked;
+}
+function filterAddChartLine(q){
+  const box=document.getElementById('addLineList'); if(!box) return;
+  const qq=String(q||'').trim().toLowerCase();
+  const ranked=window.__addLineRanked||[];
+  const hit=qq?ranked.filter(v=>((v.name||'')+' '+(v.key||'')).toLowerCase().includes(qq)):ranked;
+  box.innerHTML=hit.map(v=>`<button type="button" class="tok" style="display:flex;width:100%;justify-content:space-between;margin:0 0 6px;text-align:left" onclick="addChartLine('${v.key}')">
+      <span><b>${esc(v.name)}</b> <span class="keychip">${esc(v.key)}</span></span><span class="mut fz11">${v.kind}</span></button>`).join('')||'<p class="mut fz12">No matches.</p>';
+}
+function addChartLine(k){
+  if(!vget(k)) return;
+  const dv=model.displayVars||(model.displayVars=[]);
+  if(!dv.includes(k)) dv.push(k);
+  _fcAnchor=k; _fcDrill=[];
+  closeModal();
+  renderLineChips(); renderAssumptions(); renderForecast(); saveModel();
 }
 
 /* upstream leaf inputs of a variable (recurse formulas down to inputs) */
@@ -3051,22 +3181,52 @@ function leavesOf(key){
 
 function renderAssumptions(){
   const el=document.getElementById('asmList'); if(!el) return;
-  el.innerHTML=inputs().map(v=>{
-    const steps=(v.steps||[]).slice().sort((a,b)=>a.from-b.from).map((s,si)=>`<span class="stepchip">from ${model.periods[s.from]}: ${fmtVar(s.value,v.unit)} <span class="x" onclick="delStep('${v.key}',${si})">✕</span></span>`).join('');
-    const ov=(model.ov&&model.ov[v.key])||{};
-    const ovChips=Object.keys(ov).map(p=>+p).sort((a,b)=>a-b).map(p=>`<span class="ovchip">from ${model.periods[p].split(' ')[0]}: ${fmtVar(ov[p],v.unit)} <span class="x" onclick="delOvClick('${v.key}',${p})">✕</span></span>`).join('');
-    const rampOn=v.ramp&&v.ramp.on, seasonOn=v.phase&&v.phase.some(x=>Math.abs((x==null?1:x)-1)>1e-6);
-    const shapeChip = rampOn?`<span class="shapechip" onclick="openShape('${v.key}')">↗ Ramp ${fmtVar(v.ramp.from!=null?v.ramp.from:0,v.unit)}→${fmtVar(v.ramp.to!=null?v.ramp.to:v.base,v.unit)} · ${v.ramp.months}mo</span>`
-      : seasonOn?`<span class="shapechip" onclick="openShape('${v.key}')">∿ Seasonal shape</span>`
-      : `<span class="stepadd" onclick="openShape('${v.key}')">＋ shape (ramp / seasonal)</span>`;
-    return `<div class="asm">
-      <div class="asm-head"><div><strong>${v.name}</strong> <span class="k">${v.key}</span></div>
+  renderAsmCrumb();
+  const parentKey=forecastDriverParent();
+  const parent=parentKey?vget(parentKey):null;
+  if(!parent){
+    el.innerHTML=`<div class="asm-empty">Add a P&amp;L line to the chart to see its drivers.</div>`;
+    return;
+  }
+  if(parent.kind==='input'){
+    el.innerHTML=asmInputCard(parent)+`<div class="asm-empty" style="margin-top:8px">This is an input — set it here. No deeper drivers.</div>`;
+    return;
+  }
+  const deps=driversOf(parent);
+  if(!deps.length){
+    el.innerHTML=`<div class="asm-empty">No first-level drivers on ${esc(parent.name)} yet.</div>`;
+    return;
+  }
+  const base=evalModel(true);
+  el.innerHTML=deps.map(dk=>{
+    const v=vget(dk);
+    if(!v) return `<div class="asm"><div class="asm-head"><strong>${esc(dk)}</strong></div><div class="asm-empty">Missing from model</div></div>`;
+    if(v.kind==='input') return asmInputCard(v);
+    const val=base[v.key]?fmtVar(base[v.key][0]||0,v.unit):'';
+    const n=driversOf(v).length;
+    return `<div class="asm formula-drv" onclick="forecastDrillInto('${v.key}')" title="See drivers of ${esc(v.name)}">
+      <div class="asm-head"><div><strong>${esc(v.name)}</strong> <span class="k">${esc(v.key)}</span></div>
         ${hasOv(v.key)?`<span class="change-pill">edited</span>`:''}</div>
-      <div class="asm-base"><span class="lab">${rampOn?'Target':'Base'}</span><input class="inp num" type="number" step="any" value="${v.base}" onchange="setBase('${v.key}',this.value)"><span class="lab">${v.unit}</span></div>
-      <div class="steps">${rampOn?'':steps+`<span class="stepadd" onclick="addStep('${v.key}')">＋ step change</span>`}${shapeChip}</div>
-      ${ovChips?`<div class="steps" style="margin-top:2px">${ovChips}</div>`:''}
+      <div class="mut fz12">${val?`Now ${val} · `:''}${esc(driverCountLabel(n))}</div>
+      <div class="drillhint">Drill into drivers →</div>
     </div>`;
   }).join('');
+}
+function asmInputCard(v){
+  const steps=(v.steps||[]).slice().sort((a,b)=>a.from-b.from).map((s,si)=>`<span class="stepchip">from ${model.periods[s.from]}: ${fmtVar(s.value,v.unit)} <span class="x" onclick="delStep('${v.key}',${si})">✕</span></span>`).join('');
+  const ov=(model.ov&&model.ov[v.key])||{};
+  const ovChips=Object.keys(ov).map(p=>+p).sort((a,b)=>a-b).map(p=>`<span class="ovchip">from ${model.periods[p].split(' ')[0]}: ${fmtVar(ov[p],v.unit)} <span class="x" onclick="delOvClick('${v.key}',${p})">✕</span></span>`).join('');
+  const rampOn=v.ramp&&v.ramp.on, seasonOn=v.phase&&v.phase.some(x=>Math.abs((x==null?1:x)-1)>1e-6);
+  const shapeChip = rampOn?`<span class="shapechip" onclick="openShape('${v.key}')">↗ Ramp ${fmtVar(v.ramp.from!=null?v.ramp.from:0,v.unit)}→${fmtVar(v.ramp.to!=null?v.ramp.to:v.base,v.unit)} · ${v.ramp.months}mo</span>`
+    : seasonOn?`<span class="shapechip" onclick="openShape('${v.key}')">∿ Seasonal shape</span>`
+    : `<span class="stepadd" onclick="openShape('${v.key}')">＋ shape (ramp / seasonal)</span>`;
+  return `<div class="asm">
+    <div class="asm-head"><div><strong>${esc(v.name)}</strong> <span class="k">${esc(v.key)}</span></div>
+      ${hasOv(v.key)?`<span class="change-pill">edited</span>`:''}</div>
+    <div class="asm-base"><span class="lab">${rampOn?'Target':'Base'}</span><input class="inp num" type="number" step="any" value="${v.base}" onchange="setBase('${v.key}',this.value)"><span class="lab">${esc(v.unit||'')}</span></div>
+    <div class="steps">${rampOn?'':steps+`<span class="stepadd" onclick="addStep('${v.key}')">＋ step change</span>`}${shapeChip}</div>
+    ${ovChips?`<div class="steps" style="margin-top:2px">${ovChips}</div>`:''}
+  </div>`;
 }
 function setBase(k,val){ vget(k).base=parseFloat(val)||0; renderForecast(); saveModel(); }
 function delOvClick(k,p){ delOv(k,p); renderAssumptions(); renderForecast(); saveModel(); }
@@ -3181,7 +3341,12 @@ function drawChart(base,scen){
     body+=`<polyline points="${bp}" fill="none" stroke="${col}" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.4" stroke-linejoin="round"/>`;
     body+=`<polyline id="scen_${k}" points="${sp}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linejoin="round"/>`;
     const drag=v.kind!=='output';
-    body+=s.map((val,i)=>`<circle class="scenario-dot" data-key="${k}" data-i="${i}" cx="${chX(i,n)}" cy="${chY(val,d)}" r="4.2" style="fill:#fff;stroke:${col};${drag?'cursor:ns-resize':'cursor:default;opacity:.45'}"></circle>`).join('');
+    const closed=model.closed|0;
+    body+=s.map((val,i)=>{
+      const locked=i<closed;
+      const can=drag&&!locked;
+      return `<circle class="scenario-dot" data-key="${k}" data-i="${i}" data-locked="${locked?1:0}" cx="${chX(i,n)}" cy="${chY(val,d)}" r="4.2" style="fill:#fff;stroke:${col};${can?'cursor:ns-resize':(locked?'cursor:not-allowed;opacity:.32':'cursor:default;opacity:.45')}"></circle>`;
+    }).join('');
   });
   const every=n>13?2:1;
   const labels=model.periods.map((m,i)=>(i%every===0)?`<text class="axis-label" x="${chX(i,n)}" y="258" text-anchor="middle">${m.split(' ')[0]}</text>`:'').join('');
@@ -3203,9 +3368,11 @@ function bindDrag(svg){ let active=null, moved=false, startY=0;
   const toVal=(cy,d)=>{ const r=svg.getBoundingClientRect(); const yPx=(cy-r.top)/r.height*CH.h; let t=(CH.y1-yPx)/(CH.y1-CH.y0); t=Math.max(0,Math.min(1,t)); return d.lo+(d.hi-d.lo)*t; };
   svg.querySelectorAll('.scenario-dot').forEach(dot=>{
     const v=vget(dot.dataset.key); if(!v) return;
-    const canDrag=v.kind!=='output';
-    dot.style.cursor=canDrag?'ns-resize':'pointer';
+    const locked=dot.dataset.locked==='1' || (+dot.dataset.i < (model.closed|0));
+    const canDrag=v.kind!=='output' && !locked;
+    dot.style.cursor=canDrag?'ns-resize':(locked?'not-allowed':'pointer');
     dot.addEventListener('pointerdown',e=>{
+      if(locked){ toast('Closed months are locked'); e.preventDefault(); return; }
       active={key:dot.dataset.key,i:+dot.dataset.i,canDrag}; moved=false; startY=e.clientY;
       if(canDrag){ _dragging=true; dot.setPointerCapture(e.pointerId); }
       e.preventDefault();
@@ -3278,6 +3445,7 @@ function outAt(key,period){ return (evalModel(true)[key]||[])[period]||0; }
 
 function applyDrag(key,period,target){
   const v=vget(key); if(!v) return;
+  if(period < (model.closed|0)){ _solveMsg='Closed months are locked.'; return; }
   if(v.kind==='input'){ setOv(key,period,target); _solveMsg=''; _lastDragXray=null; return; }
   const ok=backsolvePeriod(key,period,target);
   if(ok && v.kind==='formula') _lastDragXray={key,period};
