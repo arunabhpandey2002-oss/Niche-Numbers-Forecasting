@@ -1,4 +1,4 @@
-/** Isolated engine test harness (P0–P3). Run: node engine-test.mjs */
+/** Isolated engine test harness (P0–P4). Run: node engine-test.mjs */
 let model = { periods: ["P1"], ov: {}, vars: [] };
 
 /* ---- expression compiler (shunting-yard → RPN) + FP&A helpers ---- */
@@ -266,7 +266,7 @@ function assert(cond, msg){
 }
 function approx(a,b,eps=1e-6){ return Math.abs(a-b) < eps; }
 
-console.log("=== Niche Numbers engine tests (P0–P3) ===");
+console.log("=== Niche Numbers engine tests (P0–P4) ===");
 
 {
   const v = evalRPN(compile("10 / 2").rpn, {});
@@ -403,15 +403,84 @@ function periodContribFromExpr(expr, depsA, depsB, scopeKeys){
   /* depsA/depsB: {key: number} driver values; evaluate expr with successive swap B→A */
   const c=compile(expr);
   const deps=c.deps.filter(d=>scopeKeys.includes(d)||scopeKeys.includes(d.toLowerCase()));
+  const missing=new Set();
   const val=(sub)=>{
     const scope={};
-    deps.forEach(d=>{ const k=d.toLowerCase(); scope[k]=sub.has(d)||sub.has(k)?depsA[d]??depsA[k]:depsB[d]??depsB[k]; });
+    deps.forEach(d=>{ const k=d.toLowerCase(), av=depsA[d]??depsA[k], bv=depsB[d]??depsB[k];
+      const ha=av!=null&&Number.isFinite(Number(av)), hb=bv!=null&&Number.isFinite(Number(bv));
+      if(!(ha&&hb)){ missing.add(d); scope[k]=hb?Number(bv):ha?Number(av):0; }
+      else scope[k]=sub.has(d)||sub.has(k)?Number(av):Number(bv);
+    });
     return evalRPN(c.rpn, scope);
   };
   let prev=val(new Set()); const steps=[];
   const used=new Set();
   deps.forEach(d=>{ used.add(d); const now=val(used); steps.push({key:d,delta:now-prev}); prev=now; });
-  return {start:val(new Set()), end:prev, steps};
+  return {start:val(new Set()), end:prev, steps, missing:[...missing]};
+}
+
+function authoritativeBridge(expr, depsA, depsB, authoritativeA, authoritativeB, scopeKeys){
+  const calc=periodContribFromExpr(expr,depsA,depsB,scopeKeys);
+  const explained=calc.end-calc.start;
+  return {start:authoritativeB,end:authoritativeA,steps:calc.steps,residual:(authoritativeA-authoritativeB)-explained};
+}
+
+{
+  /* Regression: a mapped P&L actual must not become zero merely because its
+     lower-level actual drivers are absent. */
+  const b=authoritativeBridge('take_rate * volume',{take_rate:.02,volume:100},{take_rate:null,volume:null},1.52,1.60,['take_rate','volume']);
+  assert(approx(b.start,1.60), 'bridge preserves authoritative Subscription revenue actual');
+  assert(approx(b.end,1.52), 'bridge preserves authoritative plan endpoint');
+  const explained=b.steps.reduce((s,x)=>s+x.delta,0);
+  assert(approx(explained,0), 'missing driver actuals create no phantom contribution');
+  assert(approx(explained+b.residual,b.end-b.start), 'bridge residual reconciles authoritative endpoint gap');
+}
+
+function gapShareLabel(delta,total){
+  const ratio=delta/total,mag=Math.abs(ratio);
+  if(mag<=2)return Math.round(ratio*100)+'% of gap';
+  const times=(Math.round(mag*10)/10).toFixed(1).replace(/\.0$/,'');
+  return ratio<0?`offsets ${times}× net gap`:`${times}× net gap`;
+}
+assert(gapShareLabel(-129,7.54)==='offsets 17.1× net gap','extreme offset uses readable multiple, not −1700%');
+
+{
+  /* Workbook-backed acquisition-cost reconciliation, Jan–Dec 2026. */
+  const plan={demand:8100000,events:1200000,sales:6390000,marketing:1980000};
+  const actual={demand:9520000,events:1493000,sales:6160000,marketing:1870000};
+  const parts=Object.keys(plan).map(k=>actual[k]-plan[k]);
+  const planTotal=Object.values(plan).reduce((s,x)=>s+x,0);
+  const actualTotal=Object.values(actual).reduce((s,x)=>s+x,0);
+  assert(planTotal===17670000,'acquisition forecast total is ₹1.767 Cr');
+  assert(actualTotal===19043000,'acquisition actual total is ₹1.9043 Cr');
+  assert(parts.reduce((s,x)=>s+x,0)===actualTotal-planTotal,'acquisition components reconcile exactly to ₹13.73 L gap');
+  assert(parts[0]===1420000&&parts[1]===293000&&parts[2]===-230000&&parts[3]===-110000,'acquisition driver split matches source workbooks');
+}
+
+/* P4 root-cause trust helpers: robust center, persistence, and two-direction attribution. */
+function median(values){
+  const a=values.filter(Number.isFinite).slice().sort((x,y)=>x-y);
+  if(!a.length) return null;
+  const m=Math.floor(a.length/2);
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function persistentGap(actual, plan, floor=0){
+  const gaps=actual.map((x,i)=>x-plan[i]);
+  const direction=Math.sign(gaps.reduce((s,x)=>s+x,0));
+  return direction?gaps.filter(x=>Math.sign(x)===direction&&Math.abs(x)>=floor*.25).length/gaps.length:0;
+}
+function twoDirectionProductAttribution(plan, actual){
+  const base=plan.take*plan.volume;
+  const end=actual.take*actual.volume;
+  const takeForward=actual.take*plan.volume-base;
+  const volumeForward=end-actual.take*plan.volume;
+  const volumeReverse=plan.take*actual.volume-base;
+  const takeReverse=end-plan.take*actual.volume;
+  return {
+    base,end,take:(takeForward+takeReverse)/2,volume:(volumeForward+volumeReverse)/2,
+    takeSensitivity:Math.abs(takeForward-takeReverse)/2/Math.abs(end-base),
+    volumeSensitivity:Math.abs(volumeForward-volumeReverse)/2/Math.abs(end-base)
+  };
 }
 
 {
@@ -435,10 +504,61 @@ function periodContribFromExpr(expr, depsA, depsB, scopeKeys){
   assert(r.steps.length===2, "two driver steps");
   assert(approx(r.steps.reduce((s,x)=>s+x.delta,0), 1000), "steps sum to gap (got "+r.steps.map(x=>x.delta)+")");
 }
+{
+  const actualTake=new Array(12).fill(.016), planTake=new Array(12).fill(.02);
+  assert(approx(median(actualTake),.016), "persistent take-rate median is 1.6%");
+  assert(approx(persistentGap(actualTake,planTake,.0025),1), "take-rate gap persists for 12/12 periods");
+  const r=twoDirectionProductAttribution({take:.02,volume:100},{take:.016,volume:95});
+  assert(approx(r.end-r.base,-.48), "root-cause modeled revenue gap reconciles");
+  assert(approx(r.take+r.volume,r.end-r.base), "leaf contributions reconcile exactly");
+  assert(approx(Math.abs(r.take/(r.end-r.base)),.8125), "take rate explains about 81% of the gap");
+  assert(approx(Math.abs(r.volume/(r.end-r.base)),.1875), "volume explains about 19% of the gap");
+  assert(r.takeSensitivity<.15&&r.volumeSensitivity<.15, "attribution is stable enough for one-click apply");
+}
 
 
 
 /* ---- P3: sheet formula A1 → expr + exact ×÷ breakback ---- */
+function isPeriodHeaderTest(v){
+  if(v==null||v==='') return false;
+  const s=String(v).trim();
+  return /(^|[^a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(s)
+    || /^q[1-4]\b/i.test(s) || /^(fy|cy)?\s*'?\d{2,4}([-/]\d{1,2})?$/i.test(s);
+}
+function isRealNumTest(v){
+  if(typeof v==='number') return true;
+  if(v==null) return false;
+  const s=String(v).trim();
+  return !!s&&!/[a-zA-Z]/.test(s)&&/\d/.test(s.replace(/[₹,()%\s]/g,''));
+}
+function detectLayoutFromGridTest(grid){
+  let headerRowIdx=-1,bestCount=1;
+  for(let r=0;r<Math.min(grid.length,40);r++){ let n=0; for(let c=1;c<(grid[r]||[]).length;c++) if(isPeriodHeaderTest(grid[r][c])) n++; if(n>bestCount){bestCount=n;headerRowIdx=r;} }
+  if(headerRowIdx<0) return null;
+  const h=grid[headerRowIdx]; let firstColIdx=-1;
+  for(let c=1;c<h.length;c++) if(isPeriodHeaderTest(h[c])){firstColIdx=c;break;}
+  let months=0; for(let c=firstColIdx;c<h.length&&isPeriodHeaderTest(h[c]);c++) months++;
+  let labelColIdx=0,best=-1;
+  for(let c=0;c<firstColIdx;c++){ let n=0; for(let r=headerRowIdx+1;r<grid.length;r++){const v=(grid[r]||[])[c];if(String(v||'').trim()&&!isRealNumTest(v))n++;} if(n>best){best=n;labelColIdx=c;} }
+  return {labelColIdx,headerRowIdx,firstColIdx,months};
+}
+function rankedTabsTest(names,preferred=''){
+  const score=n=>preferred&&n.toLowerCase()===preferred.toLowerCase()?100:/p\s*&\s*l|\bpnl\b|profit\s*(?:&|and)?\s*loss|income\s*statement/i.test(n)?80:/pricing|cash\s*flow/i.test(n)?-20:0;
+  return names.slice().sort((a,b)=>score(b)-score(a));
+}
+{
+  const grid=[
+    ['Particulars','Units','Jan-26','Feb-26','Mar-26'],
+    ['Revenue','','','',''],
+    ['Subscription revenue','INR',568080,643824,729036],
+    ['Gross revenue','INR',795080,899424,1013686]
+  ];
+  const d=detectLayoutFromGridTest(grid);
+  assert(d&&d.labelColIdx===0&&d.headerRowIdx===0&&d.firstColIdx===2&&d.months===3,
+    'P&L layout detects label A, units B, periods from C');
+  assert(rankedTabsTest(['Pricing','P&L (CM view)','Cash Flow'])[0]==='P&L (CM view)',
+    'P&L (CM view) ranks ahead of Pricing and Cash Flow');
+}
 function colToNum(c){ let n=0; for(const ch of String(c).toUpperCase()) if(ch>='A'&&ch<='Z') n=n*26+(ch.charCodeAt(0)-64); return n; }
 function a1ColRow(ref){
   const m=String(ref||'').replace(/\$/g,'').match(/^([A-Za-z]+)(\d+)$/);

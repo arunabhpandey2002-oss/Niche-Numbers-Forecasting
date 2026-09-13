@@ -215,6 +215,10 @@
   .explbadge{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:#5a6377;font-weight:500}
   .explbar{display:inline-block;width:64px;height:6px;border-radius:100px;background:#e9ebf1;overflow:hidden}
   .explbar span{display:block;height:100%;background:#3aa981;border-radius:100px}
+  .explbar{display:inline-flex;width:92px}
+  .explbar .seg{display:block;height:100%;border-radius:0}
+  .explbar .seg.auto{background:var(--indigo)} .explbar .seg.tag{background:#3aa981}
+  .explnums{white-space:nowrap} .explnums .autoc{color:var(--indigo-ink)} .explnums .tagc{color:#28735b}
   .sparkbox{margin:2px 0 14px}
   .sparktitle{font-size:11px;color:#7d8599;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:5px}
   .vspark{width:100%;height:46px;display:block}
@@ -231,6 +235,22 @@
   .metchip{display:inline-block;font-size:9.5px;font-weight:600;color:#3a4680;background:#eef0ff;border:1px solid #dde1fb;border-radius:5px;padding:1px 6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.02em}
   .bridgenote{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 12px;padding:8px 10px;background:#fdf9ef;border:1px solid #f4ecd6;border-radius:9px}
   .bridgenote .bnrem{font-size:12.5px;color:#5a6377} .bridgenote .cdrill{margin-left:auto}
+  .bridgetag{margin:2px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe}
+  .bridgetag.set{border-color:#f2e2b8;background:#fdf9ef}
+  .bridgetag-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .bridgetag-row label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted-2)}
+  .bridgetag .tagpill{font-size:10px;font-weight:600;color:#28735b;background:#e8f7f1;border:1px solid #c9ecdd;border-radius:5px;padding:1px 6px}
+  .bridgetag-note{width:100%;height:32px;margin-top:8px;font-size:12.5px;border:1px solid var(--line);border-radius:8px;padding:0 10px}
+  .drvcov{margin:2px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe}
+  .drvcov-head{font-size:12px;color:#3a4152;margin-bottom:4px} .drvcov-head b{color:var(--ink)}
+  .drvcov-all{color:var(--green-ink);font-size:12px;font-weight:600}
+  .drvrow{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;border-top:1px solid #eef0f4}
+  .drvrow .st{width:15px;text-align:center;font-weight:700;flex:none}
+  .drvrow .st.ok{color:var(--green)} .drvrow .st.warn{color:var(--amber)} .drvrow .st.miss{color:var(--red)}
+  .drvrow .dn{flex:1} .drvrow .dpar{color:var(--muted-2);font-size:11px}
+  .drvrow .fixbtn{border:1px solid var(--indigo-border);background:var(--indigo-soft);color:var(--indigo-ink);border-radius:6px;font-size:11px;font-weight:600;padding:2px 9px;cursor:pointer;flex:none}
+  .drvrow .fixbtn:hover{background:#e2e7ff}
+  .drvcov details summary{cursor:pointer;color:var(--muted-2);font-size:11px;margin-top:6px}
   .vscrim{position:fixed;inset:0;background:rgba(30,34,48,.32);opacity:0;pointer-events:none;transition:opacity .18s;z-index:60}
   .vscrim.on{opacity:1;pointer-events:auto}
   .vdrawer{position:fixed;top:0;right:0;height:100%;width:min(420px,92vw);background:var(--panel,#fff);box-shadow:-8px 0 30px rgba(30,34,48,.18);transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:61;padding:22px;overflow-y:auto}
@@ -264,6 +284,7 @@
   .gdir{border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 7px;font-size:10.5px;color:#7a8296;cursor:pointer}
   .pos{color:#1f8a5b} .negv{color:#c23140}
   .wfwrap{padding:6px 0 0}
+  .wfwrap svg{display:block;height:256px;max-height:256px}
   .wf{}
   .wf.base,.wf.end{fill:#c9cede} .wf.up{fill:#3aa981} .wf.down{fill:#e06a6a}
   .wfv{font-size:10px;fill:#48536c;font-variant-numeric:tabular-nums} .wfx{font-size:10px;fill:#7d8599} .wfb{font-size:10.5px;fill:#2b3044;font-weight:600;font-variant-numeric:tabular-nums}
@@ -421,6 +442,12 @@
   .rf-stat{background:#f7f8fb;border-radius:9px;padding:8px 10px;min-width:110px}
   .rf-stat label{display:block;font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2);margin-bottom:2px}
   .rf-stat b{font-size:13px;font-variant-numeric:tabular-nums}
+  .rf-proof{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+  .rf-proof-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:7px;background:#f2f4f8;color:#566077;font-size:10.5px;font-weight:650}
+  .rf-proof-chip.high{background:var(--green-soft);color:var(--green-ink)}
+  .rf-proof-chip.review{background:var(--amber-soft);color:#8a5a12}
+  .rf-contribution{font-size:13px;color:#344056;margin:0 0 12px;line-height:1.5}
+  .rf-contribution b{color:var(--ink)}
   .rf-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .rf-reason{margin-top:10px}
   .rf-empty{font-size:12.5px;color:var(--muted);margin:0}
@@ -438,6 +465,61 @@
   .connect-m .conn-adv-body{padding:0 12px 12px}
   .connect-m .conn-actions{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:16px}
   .connect-m .conn-err{background:#fff0f1;color:#a33d4d;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.45}
+
+  /* public-facing polish: calmer surfaces, clearer hierarchy, same controls */
+  .page{max-width:1280px;padding-top:32px}
+  .hero h1{font-size:30px;line-height:1.18;letter-spacing:-.035em}
+  .hero p{max-width:760px;line-height:1.65}
+  .panel{box-shadow:0 1px 2px rgba(30,38,62,.025),0 8px 28px rgba(30,38,62,.035)}
+  .panel-pad{padding:22px 24px}
+
+  /* variable editor */
+  .scrim{padding:24px;background:rgba(20,26,42,.38);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+  .modal{display:flex;flex-direction:column;max-height:calc(100vh - 48px);border:1px solid rgba(223,227,235,.85);border-radius:18px;box-shadow:0 28px 80px rgba(20,26,42,.24)}
+  .modal:has(.variable-editor){max-width:760px}
+  .modal .mhead{flex:0 0 auto;padding:18px 24px}
+  .modal .mbody{min-height:0;max-height:none;padding:22px 24px;overflow-y:auto;overscroll-behavior:contain}
+  .variable-editor .edit-sec{margin-top:18px;padding-top:18px}
+  .variable-editor .edit-sec:first-child{margin-top:0;padding-top:0}
+  .variable-editor .edit-sec-h{margin-bottom:14px;font-size:13px}
+  .variable-editor .edit-sec-n{width:22px;height:22px;border-radius:7px}
+  .variable-editor .frow{margin-bottom:16px}
+  .variable-editor .field label{margin-bottom:2px}
+  .variable-editor select,.variable-editor .inp{height:40px;border-radius:10px}
+  .variable-editor textarea.inp{height:auto;min-height:76px}
+  .variable-editor details>summary{padding:2px 0}
+  .plain-box{padding:16px 18px;margin-bottom:10px;border-radius:12px;background:#f6f8fc}
+  .plain-box .plain-eq{margin-bottom:10px;font-size:12.5px}
+  .plain-box .human-expr{font-size:13.5px;line-height:1.55}
+  .plain-tier{gap:10px;margin:8px 0;font-size:13.5px;line-height:1.5}
+  .plain-total{margin-top:12px;padding:10px 12px}
+  .editor-actions{position:sticky;bottom:-22px;z-index:2;display:flex;justify-content:flex-end;gap:8px;margin:18px -24px -22px;padding:14px 24px;background:rgba(255,255,255,.96);border-top:1px solid var(--line-2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+
+  /* variance: separate decisions from actions and keep advanced work quiet */
+  .variance-toolbar{display:flex;flex-direction:column;gap:16px}
+  .variance-toolbar-main{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+  .variance-toolbar-main .field{min-width:138px}
+  .variance-toolbar-main .field:first-child,.variance-toolbar-main .field:nth-child(3){min-width:178px}
+  .variance-toolbar-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:14px;border-top:1px solid var(--line-2);flex-wrap:wrap}
+  .variance-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .variance-actions-secondary{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .variance-toolbar .explbadge{margin-left:auto}
+  .rf-wrap{gap:16px}
+  .rf-head{align-items:flex-start}
+  .rf-head-copy{max-width:620px}
+  .rf-card{padding:16px 18px;border-color:var(--line-2);box-shadow:none}
+  .rf-card.manual{background:#fbfcfe;border-style:solid}
+  .rf-manual-grid{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(240px,1fr);gap:12px;margin-top:14px}
+  .rf-manual-grid .note{grid-column:1/-1}
+  .rf-tip{margin:8px 0 0;font-size:11px;color:var(--muted-2)}
+  @media(max-width:760px){
+    .page{padding:24px 18px 64px}.panel-pad{padding:18px}
+    .scrim{padding:10px;align-items:flex-end}.modal{max-height:calc(100vh - 20px);border-radius:16px 16px 0 0}
+    .modal:has(.variable-editor){max-width:none}.variable-editor .frow.two{grid-template-columns:1fr}
+    .variance-toolbar-main .field,.variance-toolbar-main .field:first-child,.variance-toolbar-main .field:nth-child(3){min-width:min(100%,220px);flex:1}
+    .variance-toolbar-foot{align-items:flex-start}.variance-toolbar .explbadge{margin-left:0}
+    .rf-manual-grid{grid-template-columns:1fr}.rf-manual-grid .note{grid-column:auto}
+  }
 
   .hintbox code{font-family:var(--mono);background:#e6eaff;padding:1px 5px;border-radius:4px}
   .tokbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
@@ -1027,14 +1109,14 @@ async function placeActualsOntoGraphModel(){
   const pnlName=tabs.find(n=>/^p\s*&\s*l$/i.test(String(n).trim()))||tabs.find(n=>/p\s*&\s*l|\bpnl\b|profit|income/i.test(n))||tabs[0]||'';
   let A=null, aSrc={ssid:conn.actualsSsid, tab:pnlName, labelCol:'A', headerRow:1, firstCol:'B', months:Math.max(12,P()||12)};
   try{
-    const auto=await autoDetectAndRead({ssid:conn.actualsSsid, tab:pnlName});
-    if(auto&&auto.lines&&auto.lines.length){ A=auto; aSrc=Object.assign({}, aSrc, auto.detected, {tab:pnlName||(auto.detected&&auto.detected.tab)||'', ssid:conn.actualsSsid}); }
+    const auto=await discoverPnlSource({ssid:conn.actualsSsid, tab:pnlName, sheets:conn.actualsSheets||[]});
+    if(auto&&auto.lines&&auto.lines.length){ A=auto; aSrc=Object.assign({}, aSrc, auto.detected, {tab:(auto.detected&&auto.detected.tab)||pnlName||'', ssid:conn.actualsSsid}); }
   }catch(e){}
   if(!A){ A=await readSource(aSrc); }
   if(!A||!(A.lines||[]).length){
     model.uiState.scanActualsCatalog=[];
     model.sources=Object.assign({}, model.sources, {actual:aSrc});
-    return {placed:0, catalog:0, withSeries:0, warn:'Actuals sheet opened but no P&L-like lines found'};
+    return {placed:0, catalog:0, withSeries:0, tab:aSrc.tab||'', warn:'Actuals sheet opened, but no period table was detected on any tab'};
   }
   const aHeads=(A.headers||[]).map(fmtPeriodLabel);
   const aHeadIdx={}; aHeads.forEach((h,i)=>{ const k=nrm(h); if(k&&aHeadIdx[k]==null) aHeadIdx[k]=i; });
@@ -1069,7 +1151,10 @@ async function placeActualsOntoGraphModel(){
     if(!(al&&al.row)){ if(v.srcLine) misses.push(v.name||v.key); return; }
     const tab=aSrc.tab||'';
     const firstCol=aSrc.firstCol||'B';
-    v.actualRange=buildRange(tab, firstCol, al.row, periods.length);
+    const actualSpan=Math.max(1,(A.headers||[]).length||aSrc.months||periods.length);
+    v.actualRange=buildRange(tab, firstCol, al.row, actualSpan);
+    v.actualSpan=actualSpan;
+    v.actualPeriods=aHeads.slice(0,actualSpan);
     if(al.series){
       const aligned=alignA(al.series).map(x=>x==null||x===''?null:toNum(x, conn.scale||1));
       v.actuals=aligned;
@@ -1079,12 +1164,53 @@ async function placeActualsOntoGraphModel(){
   });
   model.uiState.scanActualsCatalog=(A.lines||[]).filter(l=>l&&l.row).map(l=>({
     name:l.name, metric:l.metric||'', row:l.row, sheet:aSrc.tab||'', firstCol:aSrc.firstCol||'B',
-    range:buildRange(aSrc.tab||'', aSrc.firstCol||'B', l.row, periods.length),
+    range:buildRange(aSrc.tab||'', aSrc.firstCol||'B', l.row,Math.max(1,(A.headers||[]).length||aSrc.months||periods.length)),
     id:idOf(l)
   }));
+  /* Root-cause inputs often live outside the P&L (Pricing, Assumptions, Ops).
+     Search every remaining period-shaped tab and map only exact names. */
+  for(const meta of (conn.actualsSheets||[])){
+    const tab=String(meta&&meta.name||'');
+    if(!tab || nrm(tab)===nrm(aSrc.tab||'')) continue;
+    let extra=null;
+    try{ extra=await autoDetectAndRead({ssid:conn.actualsSsid,tab}); }catch(e){ continue; }
+    if(!extra||!(extra.lines||[]).length) continue;
+    const eSrc=Object.assign({tab,firstCol:'B'},extra.detected||{});
+    const eHeads=(extra.headers||[]).map(fmtPeriodLabel), eIdx={};
+    eHeads.forEach((h,i)=>{ const k=nrm(h); if(k&&eIdx[k]==null)eIdx[k]=i; });
+    const used=new Set();
+    candidates.forEach(v=>{
+      if(v.actualRange) return;
+      const hit=bestLabelMatch(v,extra.lines||[],used);
+      if(!(hit&&hit.score>=100&&hit.line&&hit.line.row)) return;
+      used.add(hit.id);
+      const line=hit.line;
+      const actualSpan=Math.max(1,(extra.headers||[]).length||eSrc.months||periods.length);
+      v.actualRange=buildRange(tab,eSrc.firstCol||'B',line.row,actualSpan);
+      v.actualSpan=actualSpan;
+      v.actualPeriods=eHeads.slice(0,actualSpan);
+      if(line.series){
+        const aligned=periods.map((h,pi)=>{
+          const ai=eIdx[nrm(h)], x=(ai!=null?(line.series||[])[ai]:(line.series||[])[pi]);
+          return x==null||x===''?null:toNum(x,conn.scale||1);
+        });
+        v.actuals=aligned;
+        if(aligned.some(x=>x!=null&&x!=='')) withSeries++;
+      }
+      placed++;
+    });
+    (extra.lines||[]).filter(l=>l&&l.row).forEach(l=>model.uiState.scanActualsCatalog.push({
+      name:l.name,metric:l.metric||'',row:l.row,sheet:tab,firstCol:eSrc.firstCol||'B',
+      range:buildRange(tab,eSrc.firstCol||'B',l.row,Math.max(1,(extra.headers||[]).length||eSrc.months||periods.length)),id:idOf(l)
+    }));
+  }
   model.sources=Object.assign({}, model.sources, {actual:aSrc});
-  try{ model.closed=Math.max(model.closed|0, lastActualIdx()+1); }catch(e){}
-  return {placed, catalog:model.uiState.scanActualsCatalog.length, withSeries, name:A.name||'', misses:misses.slice(0,12), missCount:misses.length};
+  try{ syncClosedFromActuals(); }catch(e){}
+  const unresolved=misses.filter(name=>{
+    const v=candidates.find(x=>(x.name||x.key)===name);
+    return v&&!v.actualRange;
+  });
+  return {placed, catalog:model.uiState.scanActualsCatalog.length, withSeries, name:A.name||'', tab:aSrc.tab||'', misses:unresolved.slice(0,12), missCount:unresolved.length};
 }
 
 async function ingestFormulaGraphFromSheet(opts){
@@ -1096,8 +1222,8 @@ async function ingestFormulaGraphFromSheet(opts){
   const pnlName=opts.tab||tabs.find(n=>/^p\s*&\s*l$/i.test(String(n).trim()))||tabs.find(n=>/p\s*&\s*l|\bpnl\b|profit|income/i.test(n))||tabs[0]||'';
   let F=null, src={ssid, tab:pnlName, labelCol:'A', headerRow:1, firstCol:'B', months:Math.max(12,P()||12)};
   try{
-    const auto=await autoDetectAndRead({ssid, tab:pnlName});
-    if(auto&&auto.lines.length){ F=auto; src=Object.assign({}, src, auto.detected, {tab:pnlName||auto.detected.tab}); }
+    const auto=await discoverPnlSource({ssid, tab:pnlName, sheets:conn.sheets||[]});
+    if(auto&&auto.lines.length){ F=auto; src=Object.assign({}, src, auto.detected, {tab:(auto.detected&&auto.detected.tab)||pnlName}); }
   }catch(e){}
   if(!F){ F=await readSource(src); }
   if(!F.lines.length) throw new Error('No P&L lines found — pick the P&L tab and Scan again');
@@ -1192,6 +1318,34 @@ async function ingestFormulaGraphFromSheet(opts){
     applyRollupHeuristic(v);
     return v;
   });
+  /* Keep the workbook's full forecast series on every graph node. The formula
+     graph explains lineage; it must not replace the authoritative forecast
+     with a reconstruction from only the first input cell. */
+  try{
+    const graphRanges=[...new Set(newVars.map(v=>v.range).filter(Boolean))];
+    const graphData=await gasReadRanges(graphRanges,{ssid,includeFormulas:false});
+    newVars.forEach(v=>{
+      const raw=(graphData.values&&graphData.values[v.range]&&graphData.values[v.range][0])||[];
+      const series=periods.map((_,i)=>{
+        const x=raw[i]; return x==null||x===''?null:toNum(x,conn.scale||1);
+      });
+      if(series.some(x=>x!=null)){
+        v.forecast=series;
+        v.read=series.slice();
+        if(v.kind==='input'){
+          const first=series.findIndex(x=>x!=null);
+          if(first>=0){
+            v.base=series[first]; v.steps=[];
+            for(let i=first+1;i<series.length;i++){
+              if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]});
+            }
+          }
+        }
+      }
+    });
+  }catch(seriesErr){
+    console.warn('graph forecast series read failed',seriesErr);
+  }
   /* Prefer seed P&L order first, then other graph nodes */
   newVars.sort((a,b)=>(b.srcLine?1:0)-(a.srcLine?1:0));
   model.vars=keep.concat(newVars);
@@ -1282,6 +1436,7 @@ async function ingestFormulaGraphFromSheet(opts){
     actualsPlaced: actInfo.placed|0,
     actualsCatalog: actInfo.catalog|0,
     actualsSeries: actInfo.withSeries|0,
+    actualsTab: actInfo.tab||'',
     actualsWarn: actInfo.warn||'',
     actualsMisses: actInfo.missCount|0
   };
@@ -2217,7 +2372,7 @@ function plainTermsHtml(v){
   const tiersFound=[...new Set(tagged.map(t=>t.tier).filter(Boolean))];
   const allTagged=tagged.length>=2 && tagged.every(t=>t.tier) && tiersFound.length>=2;
   if(!allTagged){
-    return '<div class="plain-box"><div class="human-expr">'+esc(human)+'</div></div>';
+    return '<div class="plain-box"><div class="plain-eq">'+esc(v.name||'This line')+' =</div><div class="human-expr">'+esc(human)+'</div></div>';
   }
   const order=['Starter','Pro','Enterprise'];
   const sorted=tagged.slice().sort((a,b)=>order.indexOf(a.tier)-order.indexOf(b.tier));
@@ -2427,7 +2582,7 @@ function viewSetup(){
       <div class="field"><label>Start month</label><select id="tlStart" onchange="setTimeline()">${MN.map((m,i)=>`<option value="${i}" ${i===startMonthIdx()?'selected':''}>${m}</option>`).join('')}</select></div>
       <div class="field"><label>Start year</label><select id="tlYear" onchange="setTimeline()">${[25,26,27,28].map(y=>`<option value="${y}" ${y===startYear()?'selected':''}>20${y}</option>`).join('')}</select></div>
       <div class="field"><label>Periods (months)</label><input class="inp" id="tlN" type="number" min="1" max="60" value="${P()}" style="width:110px" onchange="setTimeline()"></div>
-      <div class="field"><label>Closed / actual so far</label><input class="inp" id="tlClosed" type="number" min="0" max="${P()}" value="${model.closed}" style="width:110px" onchange="setTimeline()"></div>
+      <div class="field"><label>Closed / actual so far</label><input class="inp" id="tlClosed" type="number" min="0" max="${P()}" value="${model.closed}" style="width:110px" onchange="setTimeline()"><span class="mut fz11" style="display:block;margin-top:5px">${esc(closedPeriodExplanation())}</span></div>
     </div></div>
   </div>
 
@@ -2967,6 +3122,7 @@ function setTimeline(){
   const n=Math.max(1,Math.min(60,+document.getElementById('tlN').value||12));
   const cl=Math.max(0,Math.min(n,+document.getElementById('tlClosed').value||0));
   model.periods=genMonths(n,sm,sy); model.closed=cl;
+  model.uiState=model.uiState||{}; model.uiState.closedMode='manual';
   /* Period lens is view-only — respan existing maps, never clear them */
   rescaleMappedRanges(n);
   saveModel(); render();
@@ -2984,7 +3140,7 @@ function varModal(idx){
     : `<input class="inp" id="vSheet" list="sheetList" value="${esc(rp.sheet)}" placeholder="Assumptions" oninput="updRangePrev()"><datalist id="sheetList">${knownSheets.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>`;
   const chips = others.map(o=>`<button type="button" class="tok insert-chip" data-name="${esc((o.name||'').toLowerCase())}" data-key="${esc((o.key||'').toLowerCase())}" onclick="insTok('${o.key}')" title="${esc(o.name)} (${esc(o.key)})">${esc(o.name||o.key)}</button>`).join('');
   showModal(`<div class="mhead"><h3>${idx==null?'Add variable':'Edit variable'}</h3><button class="x" onclick="closeModal()">×</button></div>
-    <div class="mbody">
+    <div class="mbody variable-editor">
       <div class="edit-sec" style="border-top:0;padding-top:0;margin-top:0">
         <div class="edit-sec-h"><span class="edit-sec-n">1</span> Basic details</div>
         <div class="frow two">
@@ -3033,7 +3189,7 @@ function varModal(idx){
         </div>
       </div>
       <div class="edit-sec">
-        <div class="edit-sec-h"><span class="edit-sec-n">3</span> Forecast line <span class="mut" style="font-weight:500;text-transform:none;letter-spacing:0">(required for Confirmed)</span></div> <span class="mut" style="text-transform:none;font-weight:400;letter-spacing:0">(required for Confirmed)</span></p>
+        <div class="edit-sec-h"><span class="edit-sec-n">3</span> Forecast line <span class="mut" style="font-weight:500">(required for Confirmed)</span></div>
       ${scanCatalog().length?`<div class="field"><label>Sheet line</label><select class="inp" id="vPickLine" onchange="onEditPickForecast()">${['<option value="">— pick a sheet line —</option>'].concat(scanCatalog().map(c=>{ const lab=(c.metric?c.metric+' · ':'')+c.name; const sel=(c.range===v.range)?'selected':''; return `<option value="${esc(c.id)}" ${sel}>${esc(lab)} · ${esc(c.range)}</option>`; })).join('')}</select></div>
       <div class="rangeprev" id="rangePrev">${v.range?`→ maps to <b>${esc(v.range)}</b>`:'<span class="mut">Pick a sheet line from Scan</span>'}</div>
       <details style="margin-top:8px"><summary class="mut fz11" style="cursor:pointer">Last resort — type cells only if Scan missed</summary>
@@ -3084,7 +3240,7 @@ function varModal(idx){
       })()}
       </div>
       <div id="vErr" class="negv fz11" style="margin-top:8px"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save changes'}</button></div>
+      <div class="editor-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveVar(${idx==null?'null':idx})">${idx==null?'Add':'Save changes'}</button></div>
     </div>`);
   varKindToggle(); updRangePrev(); updActualPrev();
 }
@@ -3160,7 +3316,7 @@ function saveVar(idx){
   if(!range) range=buildRange((document.getElementById('vSheet')||{}).value||'', (document.getElementById('vCol')||{}).value||'', (document.getElementById('vRow')||{}).value||'', P());
   const prev = idx!=null ? model.vars[idx] : {};
   const v={key,name,unit,kind,range};
-  ['phase','ramp','good','favOverride','actuals','actualRange','forecast','read','metric','account','group','srcLine','mapStatus','solveMode','solveDriver','pins','sheetFormula'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
+  ['phase','ramp','good','favOverride','actuals','actualRange','actualSpan','actualPeriods','forecast','read','metric','account','group','srcLine','mapStatus','solveMode','solveDriver','pins','sheetFormula'].forEach(p=>{ if(prev[p]!==undefined) v[p]=prev[p]; });
   const aggSel=(document.getElementById('vAgg')||{}).value; if(aggSel) v.agg=aggSel; else delete v.agg;
   const aPick=(document.getElementById('vPickActual')||{}).value;
   if(aPick!=null && document.getElementById('vPickActual')){
@@ -3250,7 +3406,7 @@ function viewForecast(){
       </div>
       <div class="linechips" id="lineChips"></div>
       <div class="fcbar">
-        <div class="drag-hint" id="dragHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Drag open months — dashed = baseline, solid = scenario · closed months locked</div>
+        <div class="drag-hint" id="dragHint" title="${esc(closedPeriodExplanation())}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Drag open months — dashed = baseline, solid = scenario · ${esc(closedPeriodExplanation())}</div>
         <button class="solveby" id="solveBtn" onclick="openSolveMenu()"></button>
       </div>
       <div class="chart-wrap"><svg id="chart" viewBox="0 0 760 265" preserveAspectRatio="none"></svg></div>
@@ -3860,6 +4016,23 @@ function hasActuals(){ return model.vars.some(v=>v.actuals&&v.actuals.some(x=>x!
 function hasForecastSrc(){ return model.vars.some(v=>v.forecast&&v.forecast.some(x=>x!=null&&x!=='')); }
 /* last period (inclusive) that has any actual recorded, else -1 */
 function lastActualIdx(){ let m=-1; model.vars.forEach(v=>{ if(v.actuals) for(let p=0;p<v.actuals.length;p++) if(v.actuals[p]!=null&&v.actuals[p]!=='') m=Math.max(m,p); }); return m; }
+/* Keep a system-derived actuals cutoff separate from a user's explicit timeline lock.
+   This prevents an old 12-month actuals scan from silently locking a later plan. */
+function syncClosedFromActuals(){
+  model.uiState=model.uiState||{};
+  const last=lastActualIdx();
+  if(last>=0){ model.closed=Math.min(P(),last+1); model.uiState.closedMode='actuals'; }
+  else if(model.uiState.closedMode==='actuals'){ model.closed=0; delete model.uiState.closedMode; }
+  return model.closed|0;
+}
+function closedPeriodExplanation(){
+  const n=Math.max(0,model.closed|0);
+  if(!n) return 'No closed periods';
+  const through=model.periods[Math.min(P()-1,n-1)]||'';
+  return model.uiState&&model.uiState.closedMode==='actuals'
+    ? `${n} period${n===1?'':'s'} locked from loaded actuals${through?' through '+through:''}`
+    : `${n} period${n===1?'':'s'} manually locked${through?' through '+through:''}`;
+}
 const PRIOR_LABEL={1:'Previous month',3:'Previous quarter',12:'Previous year'};
 function versionData(which,ctxA){
   if(which==='scenario') return evalModel(true);
@@ -4026,26 +4199,78 @@ function bridge(key,A,B,win){
     return {start:st,end:en,steps:[{key:v.key,name:v.name,delta:en-st}],residual:0};
   }
   const c=compile(v.expr), deps=c.deps.map(d=>vget(d)).filter(Boolean);
-  const startArr=[],endArr=[],stepArr={}; deps.forEach(d=>stepArr[d.key]=[]);
+  const startArr=[],endArr=[],stepArr={},missingDeps=new Set(); deps.forEach(d=>stepArr[d.key]=[]);
   for(let p=win[0];p<=win[1];p++){
-    const val=(sub)=>{ const scope={}; deps.forEach(d=>{ scope[d.key.toLowerCase()]=(sub.has(d.key)?A:B)[d.key][p]; });
+    const paired=(d,q,sub)=>{
+      const av=(A[d.key]||[])[q], bv=(B[d.key]||[])[q];
+      const ha=av!=null&&av!==''&&Number.isFinite(Number(av));
+      const hb=bv!=null&&bv!==''&&Number.isFinite(Number(bv));
+      if(!(ha&&hb)){
+        missingDeps.add(d.key);
+        /* Hold an unavailable driver constant at the known side. Never turn a
+           missing actual into zero and manufacture a bridge contribution. */
+        return hb?Number(bv):ha?Number(av):0;
+      }
+      return Number((sub.has(d.key)?A:B)[d.key][q]);
+    };
+    const val=(sub)=>{ const scope={}; deps.forEach(d=>{ scope[d.key.toLowerCase()]=paired(d,p,sub); });
       return evalRPN(c.rpn,scope,{period:p, lookup:(key,q)=>{
         if(q<0) return 0;
         const sk=String(key).toLowerCase();
         if(q===p && (sk in scope)) return scope[sk];
-        const useA=[...sub].some(k=>k.toLowerCase()===sk);
-        const src=useA?A:B;
-        const kk=Object.keys(src).find(x=>x.toLowerCase()===sk);
-        if(!kk) return 0;
-        const raw=(src[kk]||[])[q];
-        return raw==null?0:raw;
+        const d=deps.find(x=>String(x.key).toLowerCase()===sk);
+        return d?paired(d,q,sub):0;
       }}); };
     let prev=val(new Set()); startArr.push(prev); const used=new Set();
     deps.forEach(d=>{ used.add(d.key); const now=val(used); stepArr[d.key].push(now-prev); prev=now; });
     endArr.push(prev);
   }
-  const start=aggArr(startArr,m), endComputed=aggArr(endArr,m), endActual=vAgg(A,key,win);
-  return {start,end:endActual,steps:deps.map(d=>({key:d.key,name:d.name,delta:aggArr(stepArr[d.key],m)})),residual:endActual-endComputed};
+  const computedStart=aggArr(startArr,m), computedEnd=aggArr(endArr,m);
+  /* The selected line's mapped figures are authoritative endpoints. Driver
+     substitution explains the movement between them; missing driver actuals
+     belong in residual, never as a fabricated zero Actuals total. */
+  const startActual=vAgg(B,key,win), endActual=vAgg(A,key,win);
+  const steps=deps.map(d=>({key:d.key,name:d.name,delta:aggArr(stepArr[d.key],m)}));
+  const explained=computedEnd-computedStart;
+  return {start:startActual,end:endActual,steps,residual:(endActual-startActual)-explained,computedStart,computedEnd,missingDeps:[...missingDeps]};
+}
+
+function gapShareLabel(delta,total){
+  if(!Number.isFinite(delta)||!Number.isFinite(total)||Math.abs(total)<1e-9) return '';
+  const ratio=delta/total, mag=Math.abs(ratio);
+  if(mag<=2) return Math.round(ratio*100)+'% of gap';
+  const times=(Math.round(mag*10)/10).toFixed(1).replace(/\.0$/,'');
+  return ratio<0?`offsets ${times}× net gap`:`${times}× net gap`;
+}
+
+function pendingFormulaLines(rootKey){
+  const out=[],seen=new Set();
+  const walk=key=>{
+    const v=vget(key); if(!v||seen.has(v.key))return; seen.add(v.key);
+    const st=mapStatusOf(v);
+    if(st==='suggested'||st==='unmapped') out.push(v);
+    if(v.kind==='formula'){
+      let deps=[]; try{ deps=(v.compiled&&v.compiled.deps)||compile(v.expr||'').deps||[]; }catch(e){}
+      deps.forEach(walk);
+    }
+  };
+  walk(rootKey);
+  return out;
+}
+function bridgeResidualInfo(v,br,totVar){
+  const pending=pendingFormulaLines(v.key);
+  const missing=(br.missingDeps||[]).map(vget).filter(Boolean);
+  const material=Math.abs(br.residual)>Math.max(1,Math.abs(totVar)*.001);
+  if(!material) return {label:'Other / unexplained',detail:'',pending,missing};
+  if(missing.length){
+    const names=missing.slice(0,4).map(x=>x.name).join(', ')+(missing.length>4?` and ${missing.length-4} more`:``);
+    return {label:'Driver actuals unavailable',detail:`Actuals are missing for ${names}. Add or map these base series to attribute the gap.`,pending,missing};
+  }
+  if(pending.length){
+    const names=pending.slice(0,4).map(x=>x.name).join(', ')+(pending.length>4?` and ${pending.length-4} more`:``);
+    return {label:`Formula review required · ${pending.length}`,detail:`${names} ${pending.length===1?'needs':'need'} confirmation before this bridge can be trusted.`,pending,missing};
+  }
+  return {label:'Formula reconciliation gap',detail:'The mapped driver formula does not reproduce the endpoint values. Review this line’s formula or mappings before relying on a root-cause split.',pending,missing};
 }
 
 
@@ -4111,7 +4336,11 @@ function renderXray(){
   const br=periodContributions(key,A,B,period);
   const tot=br.end-br.start, fav=isFav(v,tot);
   const parts=br.steps.filter(s=>Math.abs(s.delta)>1e-9).slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
-  if(Math.abs(br.residual)>Math.max(1,Math.abs(br.end)*1e-4)) parts.push({key:'__resid',name:'Other / unexplained',delta:br.residual});
+  if(Math.abs(br.residual)>Math.max(1,Math.abs(br.end)*1e-4)) parts.push({
+    key:'__resid',
+    name:(br.missingDeps&&br.missingDeps.length)?'Unattributed · driver actuals missing':'Other / unexplained',
+    delta:br.residual
+  });
   const drvA=driverPeriodVals(key,A,period), drvB=driverPeriodVals(key,B,period);
   const drvMap={}; drvB.forEach(d=>drvMap[d.key]={b:d}); drvA.forEach(d=>{ (drvMap[d.key]=drvMap[d.key]||{}).a=d; });
   let formulaHtml='';
@@ -4199,13 +4428,12 @@ function rfIsGrowthLike(v){
   return /(?:^|\s)(growth|mom|yoy|qoq|cagr)(?:\s|$)/.test(s) || /growth\s*\(?\s*mom/.test(s);
 }
 function rfOutcomeKeys(){
+  /* Model-agnostic: selected analysis line first, then terminal calculated outcomes. */
   const keys=[];
-  const prefer=[/commission\s*revenue/i,/net\s*revenue/i,/gross\s+platform\s+revenue/i,/subscription\s*revenue/i,/ebitda/i];
-  prefer.forEach(re=>{
-    const hit=(model.vars||[]).find(v=>v&&v.kind==='formula'&&re.test(String(v.name||'')));
-    if(hit) keys.push(hit.key);
-  });
-  if(_vState.line && vget(_vState.line)) keys.unshift(_vState.line);
+  if(_vState.line && vget(_vState.line)) keys.push(_vState.line);
+  const consumed=new Set();
+  formulas().forEach(v=>(v.compiled&&v.compiled.deps||[]).forEach(k=>consumed.add(String(k).toLowerCase())));
+  formulas().filter(v=>!consumed.has(String(v.key).toLowerCase())).forEach(v=>keys.push(v.key));
   return [...new Set(keys)];
 }
 function rfPriorityLeafKeys(){
@@ -4239,66 +4467,130 @@ function rfBridgeMostlyUnexplained(win){
     return resid/tot >= 0.6;
   }catch(e){ return false; }
 }
+function rfMedian(values){
+  const a=(values||[]).filter(Number.isFinite).slice().sort((x,y)=>x-y);
+  if(!a.length) return null;
+  const m=Math.floor(a.length/2);
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function rfLeafEvidence(v, plan, win){
+  const rows=[];
+  for(let p=win[0];p<=win[1];p++){
+    const av=v.actuals&&v.actuals[p], pv=(plan[v.key]||[])[p];
+    if(av==null||av===''||pv==null||pv===''||!Number.isFinite(Number(av))||!Number.isFinite(Number(pv))) continue;
+    rows.push({p,actual:Number(av),plan:Number(pv),gap:Number(av)-Number(pv)});
+  }
+  if(!rows.length) return null;
+  const median=rfMedian(rows.map(r=>r.actual));
+  const planMedian=rfMedian(rows.map(r=>r.plan));
+  const direction=Math.sign(rows.reduce((s,r)=>s+r.gap,0));
+  const aligned=rows.filter(r=>Math.sign(r.gap)===direction&&Math.abs(r.gap)>=rfAbsFloor(v.unit||'')*.25).length;
+  return {
+    rows, obs_min:Math.min(...rows.map(r=>r.actual)), obs_max:Math.max(...rows.map(r=>r.actual)),
+    obs_mid:median, plan_value:planMedian, persistence:direction?aligned/rows.length:0,
+    direction, periods_observed:rows.length
+  };
+}
+/* Recompute any outcome from its formula graph while swapping only proven leaf actuals.
+   Missing actuals remain at plan; cycles/errors fail closed with NaN. */
+function rfOutcomeAt(outcomeKey, period, swappedLeaves, plan){
+  const memo=new Map(), active=new Set();
+  const find=k=>vget(k)||(model.vars||[]).find(x=>String(x.key).toLowerCase()===String(k).toLowerCase());
+  const at=(key,p)=>{
+    if(p<0) return 0;
+    const v=find(key); if(!v) return NaN;
+    const id=String(v.key).toLowerCase()+'@'+p;
+    if(memo.has(id)) return memo.get(id);
+    if(active.has(id)) return NaN;
+    active.add(id);
+    let value=NaN;
+    if(v.kind==='input'){
+      const av=v.actuals&&v.actuals[p];
+      value=swappedLeaves.has(String(v.key).toLowerCase())&&av!=null&&av!==''&&Number.isFinite(Number(av))
+        ? Number(av) : Number((plan[v.key]||[])[p]);
+    }else if(v.kind==='formula'){
+      try{
+        const c=v.compiled&&v.compiled.rpn?v.compiled:compile(v.expr||'');
+        const scope={}; (c.deps||[]).forEach(k=>{ scope[String(k).toLowerCase()]=at(k,p); });
+        value=evalRPN(c.rpn,scope,{period:p,lookup:(k,q)=>at(k,q)});
+      }catch(e){ value=NaN; }
+    }else value=Number((plan[v.key]||[])[p]);
+    active.delete(id); memo.set(id,value); return value;
+  };
+  return at(outcomeKey,period);
+}
+/* Two-direction Shapley approximation: forward and reverse substitution are averaged.
+   Their contributions exactly reconcile to the leaf-modeled gap while reducing order bias. */
+function rfLeafAttribution(outcomeKey, win){
+  const outcome=vget(outcomeKey), plan=versionData('plan');
+  if(!outcome||outcome.kind!=='formula') return null;
+  const leaves=leavesOf(outcomeKey).map(vget).filter(v=>v&&v.kind==='input'&&v.writable!==false&&!rfIsGrowthLike(v));
+  if(!leaves.length) return null;
+  const effects={}, orderSpread={}; leaves.forEach(v=>{ effects[v.key]=[]; orderSpread[v.key]=[]; });
+  const actualOutcome=[], planOutcome=[], modeledOutcome=[];
+  let valid=0;
+  for(let p=win[0];p<=win[1];p++){
+    const actual=outcome.actuals&&outcome.actuals[p];
+    if(actual==null||actual===''||!Number.isFinite(Number(actual))) continue;
+    const available=leaves.filter(v=>v.actuals&&v.actuals[p]!=null&&v.actuals[p]!==''&&Number.isFinite(Number(v.actuals[p])));
+    if(!available.length) continue;
+    const base=rfOutcomeAt(outcomeKey,p,new Set(),plan);
+    const allSet=new Set(available.map(v=>String(v.key).toLowerCase()));
+    const modeled=rfOutcomeAt(outcomeKey,p,allSet,plan);
+    if(!Number.isFinite(base)||!Number.isFinite(modeled)) continue;
+    const runs=[];
+    [available,available.slice().reverse()].forEach(order=>{
+      const set=new Set(), run={}; let prev=base;
+      order.forEach(v=>{ set.add(String(v.key).toLowerCase()); const now=rfOutcomeAt(outcomeKey,p,set,plan); run[v.key]=Number.isFinite(now)?now-prev:0; prev=now; });
+      runs.push(run);
+    });
+    leaves.forEach(v=>{
+      const f=runs[0][v.key]||0, r=runs[1][v.key]||0;
+      effects[v.key].push((f+r)/2); orderSpread[v.key].push(Math.abs(f-r)/2);
+    });
+    actualOutcome.push(Number(actual)); planOutcome.push(base); modeledOutcome.push(modeled); valid++;
+  }
+  if(!valid) return null;
+  const method=aggMethod(outcome), reduce=a=>aggArr(a,method);
+  const actualGap=reduce(actualOutcome)-reduce(planOutcome);
+  const modeledGap=reduce(modeledOutcome)-reduce(planOutcome);
+  const residual=actualGap-modeledGap;
+  const contributions={}, orderSensitivity={};
+  leaves.forEach(v=>{
+    contributions[v.key]=reduce(effects[v.key]);
+    orderSensitivity[v.key]=Math.abs(actualGap)>1e-9?Math.abs(reduce(orderSpread[v.key]))/Math.abs(actualGap):1;
+  });
+  const coverage=Math.abs(actualGap)>1e-9?Math.max(0,Math.min(1,1-Math.abs(residual)/Math.abs(actualGap))):0;
+  return {outcome,leaves,plan,actualGap,modeledGap,residual,coverage,contributions,orderSensitivity,periods:valid};
+}
 function collectRollForwardSuggestions(win){
   const w=win||(_vState.win||[0,Math.max(0,P()-1)]);
-  const plan=versionData('plan');
   const futures=openFuturePeriods();
   if(!futures.length) return [];
-  /* Trust bar: if bridge is mostly unexplained, no auto Apply cards — Mark-a-driver only */
-  if(rfBridgeMostlyUnexplained(w)) return [];
-  const matPct=Math.max(0.05, (model.matThresh||5)/100);
-  const priority=rfPriorityLeafKeys();
+  const outcomeKey=rfOutcomeKeys().find(k=>{ const v=vget(k); return v&&v.kind==='formula'; });
+  const attr=rfLeafAttribution(outcomeKey,w);
+  if(!attr||Math.abs(attr.actualGap)<1e-9) return [];
+  const minShare=Math.max(0.05,(model.matThresh||5)/100);
   const out=[];
-  inputs().forEach(v=>{
-    if(!v || v.writable===false) return;
+  attr.leaves.forEach(v=>{
     ensurePolarity(v);
-    if((!v.unit || v.unit==='₹') && rfIsGrowthLike(v)) v.unit='%';
-    /* Auto suggestions: skip growth/MoM noise — user can Mark manually if they want */
-    if(rfIsGrowthLike(v)) return;
-    const vals=[];
-    for(let p=w[0];p<=w[1];p++){
-      if(v.actuals&&v.actuals[p]!=null&&v.actuals[p]!==''){
-        const n=Number(v.actuals[p]);
-        if(Number.isFinite(n)) vals.push(n);
-      }
-    }
-    if(!vals.length) return;
-    const obs_min=Math.min(...vals), obs_max=Math.max(...vals);
-    const obs_mid=(obs_min+obs_max)/2;
-    const planVals=[];
-    for(let p=w[0];p<=w[1];p++){
-      if(!(v.actuals&&v.actuals[p]!=null&&v.actuals[p]!=='')) continue;
-      const pv=(plan[v.key]||[])[p];
-      if(pv!=null&&pv!==''&&Number.isFinite(Number(pv))) planVals.push(Number(pv));
-    }
-    if(!planVals.length){
-      const pv=(plan[v.key]||[])[w[1]];
-      if(pv==null||pv===''||!Number.isFinite(Number(pv))) return;
-      planVals.push(Number(pv));
-    }
-    const plan_value=planVals.reduce((a,b)=>a+b,0)/planVals.length;
-    const gap=Math.abs(plan_value-obs_mid);
-    const floor=rfAbsFloor(v.unit||'');
-    if(gap<1e-12) return;
-    if(Math.abs(plan_value)<floor && Math.abs(obs_mid)<floor) return;
-    if(gap<floor) return;
-    const outside=plan_value<obs_min-floor*0.25 || plan_value>obs_max+floor*0.25;
-    const denom=Math.max(Math.abs(plan_value), Math.abs(obs_mid), floor);
-    const material=gap/denom >= matPct;
-    if(!outside && !material) return;
-    const inPri=priority.size?priority.has(v.key):true;
-    /* If we know outcome leaves, only auto-suggest those — fail closed on random inputs */
-    if(priority.size && !inPri) return;
+    const evidence=rfLeafEvidence(v,attr.plan,w); if(!evidence) return;
+    const contribution=attr.contributions[v.key]||0;
+    const share=Math.abs(contribution)/Math.abs(attr.actualGap);
+    if(share<minShare||evidence.persistence<.6) return;
+    const order_sensitivity=attr.orderSensitivity[v.key]||0;
+    const confidence=attr.coverage>=.7&&evidence.persistence>=.75&&evidence.periods_observed>=Math.min(3,attr.periods)&&order_sensitivity<=.15?'high':'review';
     out.push({
       driver_id:v.key, name:v.name, unit:v.unit||'',
-      obs_min, obs_max, obs_mid, plan_value,
-      periods_open:futures.slice(),
-      _gap:gap, _pri:inPri
+      obs_min:evidence.obs_min, obs_max:evidence.obs_max, obs_mid:evidence.obs_mid, plan_value:evidence.plan_value,
+      periods_open:futures.slice(), periods_observed:evidence.periods_observed, persistence:evidence.persistence,
+      outcome_key:attr.outcome.key, outcome_name:attr.outcome.name, outcome_unit:attr.outcome.unit,
+      outcome_gap:attr.actualGap, contribution, contribution_share:share, coverage:attr.coverage,
+      residual:attr.residual, order_sensitivity, confidence
     });
   });
-  out.sort((a,b)=>b._gap-a._gap);
-  return out.slice(0,6).map(({_gap,_pri,...rest})=>rest)
-    .filter(sg=>{ const vv=vget(sg.driver_id); return vv && !rfIsGrowthLike(vv); });
+  out.sort((a,b)=>Math.abs(b.contribution)-Math.abs(a.contribution));
+  return out.slice(0,6);
 }
 function rfToneVerb(s){
   if(s.plan_value>s.obs_max) return 'tone future periods down';
@@ -4308,57 +4600,65 @@ function rfToneVerb(s){
 function renderRollForward(){
   const el=document.getElementById('vRollForward'); if(!el) return;
   if(!hasActuals()){
-    el.innerHTML=`<div class="rf-wrap"><div class="rf-head"><div><p class="eyebrow" style="margin:0 0 4px">Roll-forward</p><h2 style="font-size:16px;margin:0">Learnings → next forecast</h2></div></div>
+    el.innerHTML=`<div class="rf-wrap"><div class="rf-head"><div><p class="eyebrow" style="margin:0 0 4px">Root cause · forecast decision</p><h2 style="font-size:16px;margin:0">What drove the variance?</h2></div></div>
       <p class="rf-empty">Load actuals to unlock roll-forward suggestions. Map actuals cells, refresh actuals, then return here.</p></div>`;
     return;
   }
   const win=_vState.win||[0,P()-1];
   const suggestions=collectRollForwardSuggestions(win);
   const futures=openFuturePeriods();
+  const rootLeaves=[...rfPriorityLeafKeys()].map(vget).filter(v=>v&&v.kind==='input');
+  const mappedRootLeaves=rootLeaves.filter(v=>v.actuals&&v.actuals.some(x=>x!=null&&x!==''));
   const winLabel = win[0]===win[1]? (model.periods[win[0]]||'') : `${(model.periods[win[0]]||'').split(' ')[0]}–${(model.periods[win[1]]||'').split(' ')[0]}`;
   const cards=suggestions.length? suggestions.map(s=>{
     const rangeTxt = s.obs_min===s.obs_max ? rfFmt(s.obs_mid,s.unit) : `${rfFmt(s.obs_min,s.unit)} – ${rfFmt(s.obs_max,s.unit)}`;
+    const share=Math.round(s.contribution_share*100), persistence=Math.round(s.persistence*100), coverage=Math.round(s.coverage*100), stability=Math.max(0,Math.round((1-s.order_sensitivity)*100));
+    const trusted=s.confidence==='high';
     return `<div class="rf-card" data-driver="${esc(s.driver_id)}">
       <h3>${esc(s.name)} <span class="keychip">${esc(s.driver_id)}</span></h3>
-      <p class="rf-meta">Observed ${esc(s.name.toLowerCase())} ran <b>${rangeTxt}</b> in ${esc(winLabel)} vs <b>${rfFmt(s.plan_value,s.unit)}</b> in the plan. ${rfToneVerb(s)} to <b>${rfFmt(s.obs_mid,s.unit)}</b> for ${s.periods_open.length} open future period${s.periods_open.length===1?'':'s'}?</p>
+      <p class="rf-contribution"><b>${esc(s.name)}</b> explains approximately <b>${share}%</b> of the ${esc(s.outcome_name)} variance (${fmtDelta(s.contribution,s.outcome_unit)} of ${fmtDelta(s.outcome_gap,s.outcome_unit)}).</p>
+      <div class="rf-proof"><span class="rf-proof-chip ${trusted?'high':'review'}">${trusted?'High-confidence insight':'Review before applying'}</span><span class="rf-proof-chip">${persistence}% persistent · ${s.periods_observed} period${s.periods_observed===1?'':'s'}</span><span class="rf-proof-chip">${coverage}% model coverage</span><span class="rf-proof-chip">${stability}% attribution stability</span></div>
+      <p class="rf-meta">Actuals held at <b>${rangeTxt}</b> in ${esc(winLabel)} versus a plan median of <b>${rfFmt(s.plan_value,s.unit)}</b>. ${rfToneVerb(s)} to the observed median of <b>${rfFmt(s.obs_mid,s.unit)}</b> for ${s.periods_open.length} open future period${s.periods_open.length===1?'':'s'}?</p>
       <div class="rf-stats">
-        <div class="rf-stat"><label>Obs min</label><b>${rfFmt(s.obs_min,s.unit)}</b></div>
-        <div class="rf-stat"><label>Obs max</label><b>${rfFmt(s.obs_max,s.unit)}</b></div>
-        <div class="rf-stat"><label>Obs mid</label><b>${rfFmt(s.obs_mid,s.unit)}</b></div>
-        <div class="rf-stat"><label>Plan</label><b>${rfFmt(s.plan_value,s.unit)}</b></div>
+        <div class="rf-stat"><label>Actual low</label><b>${rfFmt(s.obs_min,s.unit)}</b></div>
+        <div class="rf-stat"><label>Actual high</label><b>${rfFmt(s.obs_max,s.unit)}</b></div>
+        <div class="rf-stat"><label>Actual median</label><b>${rfFmt(s.obs_mid,s.unit)}</b></div>
+        <div class="rf-stat"><label>Plan median</label><b>${rfFmt(s.plan_value,s.unit)}</b></div>
       </div>
       <div class="rf-actions">
-        <button class="btn primary sm" onclick="rollForwardApply('${jesc(s.driver_id)}')">Apply to open forecast</button>
-        <button class="btn sm" onclick="rollForwardKeepPrompt('${jesc(s.driver_id)}')">Keep plan</button>
+        ${trusted?`<button class="btn primary sm" onclick="rollForwardApply('${jesc(s.driver_id)}')">Apply actual median to open forecast</button>`:''}
+        <button class="btn sm" onclick="rollForwardKeepPrompt('${jesc(s.driver_id)}')">Reject · keep plan</button>
         <button class="btn sm" onclick="rollForwardCustomPrompt('${jesc(s.driver_id)}')">Custom…</button>
       </div>
       <div class="rf-reason" id="rfReason_${esc(s.driver_id)}" style="display:none"></div>
     </div>`;
-  }).join('') : `<p class="rf-empty">${rfBridgeMostlyUnexplained(win)
-    ? 'Bridge is mostly <b>Other / unexplained</b> for the selected line — no auto Apply (trust bar). Use <b>Mark a driver yourself</b> below (e.g. take rate).'
-    : 'No material leaf-driver gaps in this window — or only growth/MoM noise, which we never auto-suggest. Use <b>Mark a driver yourself</b> if you want to bake one in.'}</p>`;
+  }).join('') : `<p class="rf-empty">${!mappedRootLeaves.length&&rootLeaves.length
+    ? 'The result has a formula tree, but none of its lowest-level drivers has actuals yet. Add those base metrics (for example take rate or account volume) to any period-based tab in the actuals workbook and reconnect; we will exact-match them and surface the dominant cause automatically.'
+    : rfBridgeMostlyUnexplained(win)
+      ? 'Bridge is mostly <b>Other / unexplained</b> for the selected line — no auto Apply (trust bar). Use <b>Mark a driver yourself</b> below (e.g. take rate).'
+      : 'No material, persistent leaf-driver gap clears the trust bar in this window. Use <b>Mark a driver yourself</b> if you want to record a deliberate forecast decision.'}</p>`;
 
   const leafOpts=inputs().filter(v=>v&&v.writable!==false).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
     .map(v=>`<option value="${esc(v.key)}">${esc(v.name)}</option>`).join('');
-  const markHtml=`<div class="rf-card" style="border-style:dashed">
+  const markHtml=`<div class="rf-card manual">
       <h3>Mark a driver yourself</h3>
       <p class="rf-meta">See take rate (or any leaf) off plan? Pick it, set the value to bake into open months, and Apply — formulas keep flowing. Or Keep plan with a reason.</p>
-      <div class="frow two">
+      <div class="rf-manual-grid">
         <div class="field"><label>Driver</label><select class="inp" id="rfMarkDriver" onchange="rfMarkDriverChanged()"><option value="">— pick a leaf driver —</option>${leafOpts}</select></div>
         <div class="field"><label>Value for open months</label><input class="inp" id="rfMarkVal" type="number" step="any" placeholder="e.g. 0.015 or 1.5 if %"></div>
+        <div class="field note"><label>Note (optional for Apply · required for Keep)</label><input class="inp" id="rfMarkNote" placeholder="e.g. Take rate ran ~1.5–1.6% in actuals"></div>
       </div>
-      <div class="field" style="margin-top:8px"><label>Note (optional for Apply · required for Keep)</label><input class="inp" id="rfMarkNote" placeholder="e.g. Take rate ran ~1.5–1.6% in actuals"></div>
       <div class="rf-actions" style="margin-top:10px">
         <button class="btn primary sm" onclick="rollForwardManualApply()">Apply to open forecast</button>
         <button class="btn sm" onclick="rollForwardManualKeep()">Keep plan + reason</button>
       </div>
-      <p class="mut fz11" style="margin:8px 0 0" id="rfMarkHint">Tip: for % drivers enter 1.5 for 1.5%, or 0.015 — we’ll detect from the driver’s unit.</p>
+      <p class="rf-tip" id="rfMarkHint">For % drivers enter 1.5 for 1.5%, or 0.015 — we’ll detect from the driver’s unit.</p>
     </div>`;
   el.innerHTML=`<div class="rf-wrap">
     <div class="rf-head">
-      <div><p class="eyebrow" style="margin:0 0 4px">Roll-forward</p>
-        <h2 style="font-size:16px;margin:0">Bake variance into the open forecast</h2>
-        <p class="mut fz12" style="margin:6px 0 0;max-width:560px">Auto cards only for leaf drivers of Commission / Net revenue (and the selected bridge line) with real actuals gaps. Growth/MoM is never auto-suggested — mark it yourself if you mean it. Apply writes open months only.</p></div>
+      <div class="rf-head-copy"><p class="eyebrow" style="margin:0 0 4px">Root cause · forecast decision</p>
+        <h2 style="font-size:16px;margin:0">What drove the variance—and should the forecast change?</h2>
+        <p class="mut fz12" style="margin:6px 0 0;max-width:620px">We trace the selected outcome to its lowest mapped input metrics, rank them by share of the gap, and test persistence. Apply revises open months only; Reject keeps the plan and records the reason for review.</p></div>
       <div class="mut fz11">${futures.length? futures.length+' open period'+(futures.length===1?'':'s') : 'No open future periods — raise timeline or lower “Closed / actual so far”'}</div>
     </div>
     ${cards}
@@ -4431,10 +4731,13 @@ function rollForwardAudit(entry){
 }
 function rollForwardApply(driver_id){
   const s=rfFindSuggestion(driver_id); if(!s){ toast('Suggestion no longer available'); renderRollForward(); return; }
+  if(s.confidence!=='high'){ toast('Review-only insight — use Custom or keep the plan'); return; }
   const periods=s.periods_open.slice();
   periods.forEach(p=>setOv(driver_id, p, s.obs_mid));
   rollForwardAudit({
     driver_id, obs_min:s.obs_min, obs_max:s.obs_max, obs_mid:s.obs_mid, plan_value:s.plan_value,
+    outcome_key:s.outcome_key, outcome_gap:s.outcome_gap, contribution:s.contribution,
+    contribution_share:s.contribution_share, persistence:s.persistence, coverage:s.coverage, order_sensitivity:s.order_sensitivity,
     action:'apply', applied_value:s.obs_mid, reason:'', periods_touched:periods
   });
   saveModel(); renderVariance(); toast('Applied '+s.name+' → open forecast');
@@ -4456,6 +4759,8 @@ function rollForwardKeep(driver_id){
   if(!text){ toast('A short reason is required to keep the plan'); return; }
   rollForwardAudit({
     driver_id, obs_min:s.obs_min, obs_max:s.obs_max, obs_mid:s.obs_mid, plan_value:s.plan_value,
+    outcome_key:s.outcome_key, outcome_gap:s.outcome_gap, contribution:s.contribution,
+    contribution_share:s.contribution_share, persistence:s.persistence, coverage:s.coverage, order_sensitivity:s.order_sensitivity,
     action:'keep', applied_value:null, reason:text, periods_touched:[]
   });
   /* also stash on variance note for posterity next to the line */
@@ -4488,6 +4793,8 @@ function rollForwardCustom(driver_id){
   periods.forEach(p=>setOv(driver_id, p, raw));
   rollForwardAudit({
     driver_id, obs_min:s.obs_min, obs_max:s.obs_max, obs_mid:s.obs_mid, plan_value:s.plan_value,
+    outcome_key:s.outcome_key, outcome_gap:s.outcome_gap, contribution:s.contribution,
+    contribution_share:s.contribution_share, persistence:s.persistence, coverage:s.coverage, order_sensitivity:s.order_sensitivity,
     action:'custom', applied_value:raw, reason:note, periods_touched:periods
   });
   saveModel(); renderVariance(); toast('Custom value applied to open forecast');
@@ -4502,8 +4809,8 @@ function viewVariance(){
     </div>
   </div>
   <div class="panel panel-pad" id="vControls" style="margin-top:16px"></div>
-  <div class="panel panel-pad" id="vRollForward" style="margin-top:14px"></div>
   <div class="panel panel-pad" id="vBridge" style="margin-top:14px"></div>
+  <div class="panel panel-pad" id="vRollForward" style="margin-top:14px"></div>
   <div class="panel panel-pad" id="vTable" style="margin-top:14px"></div>
   <div class="vscrim" id="vScrim" onclick="closeCommentary()"></div>
   <aside class="vdrawer" id="vDrawer"><div id="vDrawerIn"></div></aside>`;
@@ -4543,6 +4850,18 @@ function toggleGood(k){ const v=vget(k); v.good=goodDir(v)==='up'?'down':'up'; r
 function setVerPrior(n){ _vState.priorN=+n; saveModel(); renderVariance(); }
 function ragOf(r){ if(Math.abs(r.d)<1e-9||r.b===0) return 'na'; if(r.fav) return 'g'; return Math.abs(r.pct)>=10?'r':'a'; }
 const RAG_TITLE={g:'On track / favourable',a:'Watch — moderate unfavourable',r:'Alert — large unfavourable',na:'No material variance'};
+/* A line is "auto-explained" when its own driver formula reconciles the whole
+   variance (formula line, drivers present, residual immaterial). Splits coverage
+   into driver-explained vs manually-tagged. */
+function isAutoExplained(v,A,B,win){
+  if(!v||v.kind!=='formula') return false;
+  let br; try{ br=bridge(v.key,A,B,win); }catch(e){ return false; }
+  const totVar=br.end-br.start;
+  if(Math.abs(totVar)<1e-9) return false;
+  if(br.missingDeps&&br.missingDeps.length) return false;
+  if(!(br.steps&&br.steps.some(s=>Math.abs(s.delta)>1e-9))) return false;
+  return Math.abs(br.residual)<=Math.max(1,Math.abs(totVar)*0.01);
+}
 function renderVariance(){
   const A=versionData(_vState.A), win0=_vState.win.slice();
   // prior-period: B = A shifted back N; restrict the window to periods that have history
@@ -4565,8 +4884,12 @@ function renderVariance(){
   const mat=model.matThresh||0;
   // explained-% coverage — over monetary lines only, so ₹ and unit counts aren't mixed
   const moneyRows=rows.filter(r=>r.v.unit==='₹'&&r.d!=null); const covRows=moneyRows.length?moneyRows:rows.filter(r=>r.d!=null);
-  let totAbs=0, explAbs=0; covRows.forEach(r=>{ if(Math.abs(r.d)>1e-9){ totAbs+=Math.abs(r.d); if(vnote(r.v.key).reason) explAbs+=Math.abs(r.d); } });
-  const explPct = totAbs>0?Math.round(explAbs/totAbs*100):100;
+  let totAbs=0, autoAbs=0, tagAbs=0; covRows.forEach(r=>{ if(Math.abs(r.d)>1e-9){ totAbs+=Math.abs(r.d);
+    if(isAutoExplained(r.v,A,B,win)) autoAbs+=Math.abs(r.d);
+    else if(vnote(r.v.key).reason) tagAbs+=Math.abs(r.d); } });
+  const autoPct = totAbs>0?Math.round(autoAbs/totAbs*100):0;
+  const tagPct = totAbs>0?Math.round(tagAbs/totAbs*100):0;
+  const explPct = Math.min(100, autoPct+tagPct);
   const tbl=rows.map(r=>{ const sel=r.v.key===_vState.line; const fu=r.fav==null?null:r.fav; const nt=vnote(r.v.key); const rag=r.noData?'na':ragOf(r);
     const immat = mat>0 && r.b && Math.abs(r.pct||0)<mat;
     return `<tr class="vrow ${sel?'sel':''} ${immat?'immaterial':''} ${r.noData?'nodata':''}" data-k="${r.v.key}" onclick="pickVLine('${r.v.key}')" ondblclick="event.stopPropagation();openAccount('${jesc(r.v.account||r.v.name)}')">
@@ -4579,21 +4902,28 @@ function renderVariance(){
       <td class="rowacts"><button class="cbtn ${nt.remark?'has':''}" title="${nt.remark?'Commentary: '+esc(nt.remark):'Commentary & line settings'}" onclick="event.stopPropagation();openCommentary('${r.v.key}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button><button class="cbtn del" title="Remove line" onclick="event.stopPropagation();deleteLine('${r.v.key}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></td>
     </tr>`; }).join('');
   document.getElementById('vControls').innerHTML=`
-    <div class="selrow2">
+    <div class="variance-toolbar">
+    <div class="variance-toolbar-main selrow2">
       <div class="field"><label>Compare</label><select onchange="setVer('A',this.value)">${opts(_vState.A,false)}</select></div>
       <span class="vsvs">vs</span>
       <div class="field"><label>against</label><select onchange="setVer('B',this.value)">${opts(_vState.B,true)}</select></div>
       ${_vState.B==='prior'?`<div class="field"><label>Prior</label><select onchange="setVerPrior(this.value)">${[[1,'Month (MoM)'],[3,'Quarter (QoQ)'],[12,'Year (YoY)']].map(([n,l])=>`<option value="${n}" ${(_vState.priorN||1)==n?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
       <div class="field"><label>Period</label><select onchange="setVWin(this.value)">${perOpts}</select></div>
       <div class="field"><label>Materiality</label><select onchange="setMat(this.value)">${[['0','All'],['1','≥1%'],['5','≥5%'],['10','≥10%']].map(([v,l])=>`<option value="${v}" ${(model.matThresh||0)==+v?'selected':''}>${l}</option>`).join('')}</select></div>
-      <div style="flex:1"></div>
-      <span class="explbadge" title="Share of variance with a reason tagged"><span class="explbar"><span style="width:${explPct}%"></span></span>${explPct}% explained</span>
+      <span class="explbadge" title="Coverage · ${autoPct}% auto-explained by drivers · ${tagPct}% manually tagged · ${Math.max(0,100-autoPct-tagPct)}% still unexplained"><span class="explbar"><span class="seg auto" style="width:${autoPct}%"></span><span class="seg tag" style="width:${tagPct}%"></span></span><span class="explnums"><b class="autoc">${autoPct}%</b> auto · <b class="tagc">${tagPct}%</b> tagged</span></span>
+    </div>
+    <div class="variance-toolbar-foot">
+    <div class="variance-actions">
       ${model.sources?`<button class="btn sm" onclick="importSources2()" title="Re-read both files">↻ Refresh</button>`:''}
       <button class="btn sm" onclick="openSources()">${model.sources?'Sources':'＋ Import 2 files'}</button>
       <button class="btn sm indigo" onclick="refreshActuals()" title="Re-read actuals from your actuals sheet"${conn.actualsSsid?'':' disabled style="opacity:.55"'}">↻ Refresh actuals</button>
+    </div>
+    <div class="variance-actions-secondary">
       <button class="btn sm" onclick="openVersions()">Versions${(model.versions||[]).length?` · ${model.versions.length}`:''}</button>
       <button class="btn sm" onclick="saveVersionModal()">＋ Save version</button>
       <button class="btn sm" onclick="openPromoteModal(null)" title="Write scenario inputs or dump drivers to Sheets">Promote to Sheets</button>
+    </div>
+    </div>
     </div>
     ${(()=>{ const forkHint=([_vState.A,_vState.B].some(w=>w&&w.slice(0,2)==='v:'&&(model.versions||[]).find(x=>x.id===w.slice(2)&&x.drivers)));
       const bits=[];
@@ -4626,6 +4956,39 @@ function varSpark(key,A,B,win){
     <svg viewBox="0 0 100 ${H}" preserveAspectRatio="none" class="vspark"><line x1="0" y1="${zeroY.toFixed(2)}" x2="100" y2="${zeroY.toFixed(2)}" stroke="#d5d9e4" stroke-width="0.5"/>${bars}</svg>
     <div class="sparkx">${model.periods.map((m,i)=>`<span style="${i%every?'visibility:hidden':''}">${m.split(' ')[0]}</span>`).join('')}</div></div>`;
 }
+/* Full leaf-tree driver coverage for a line: every raw driver its formula chain
+   reaches, classified ok (data both sides) / noactual / notinmodel. Powers the
+   "are all drivers picked up?" readout and the assisted-mapping rung. */
+function driverCoverage(rootKey, A, B, win){
+  const nodes=[], seen=new Set();
+  const hasData=(key)=>{
+    for(const data of [A,B]){
+      let any=false;
+      for(let p=win[0];p<=win[1];p++){ const x=(data[key]||[])[p]; if(x!=null&&x!==''&&Number.isFinite(Number(x))){ any=true; break; } }
+      if(!any) return false;
+    }
+    return true;
+  };
+  const walk=(key,parentKey,parentName)=>{
+    const v=vget(key);
+    if(!v){ nodes.push({key,name:key,status:'notinmodel',parentKey,parentName}); return; }
+    if(seen.has(v.key)) return; seen.add(v.key);
+    if(v.kind==='formula'){
+      let deps=[]; try{ deps=(v.compiled&&v.compiled.deps)||compile(v.expr||'').deps||[]; }catch(e){}
+      deps.forEach(d=>walk(d, v.key, v.name));
+      return;
+    }
+    nodes.push({key:v.key,name:v.name,status:hasData(v.key)?'ok':'noactual',parentKey,parentName});
+  };
+  walk(rootKey,null,null);
+  return nodes;
+}
+function fixMissingDriver(parentKey, missingKey){
+  switchTab('setup');
+  try{ if(parentKey&&vget(parentKey)) selectSetupLine(parentKey); }catch(e){}
+  const pn=parentKey&&vget(parentKey)?vget(parentKey).name:parentKey;
+  toast('“'+missingKey+'” is referenced'+(pn?' by '+pn:'')+' but isn’t in the model — add it or re-scan.');
+}
 function renderBridge(A,B,win,winLabel){
   const el=document.getElementById('vBridge'); if(!el) return;
   const v=vget(_vState.line);
@@ -4638,9 +5001,26 @@ function renderBridge(A,B,win,winLabel){
   const note=vnote(_vState.line);
   const br=bridge(_vState.line,A,B,win);
   const totVar=br.end-br.start, fav=isFav(v,totVar);
+  const residualInfo=bridgeResidualInfo(v,br,totVar);
+  const materialResid=Math.abs(br.residual)>Math.max(1,Math.abs(totVar)*.001);
   const parts=br.steps.filter(s=>Math.abs(s.delta)>1e-9).slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
-  if(Math.abs(br.residual)>Math.max(1,Math.abs(br.end)*1e-4)) parts.push({key:'__resid',name:'Other / unexplained',delta:br.residual});
+  if(Math.abs(br.residual)>Math.max(1,Math.abs(br.end)*1e-4)) parts.push({key:'__resid',name:residualInfo.label,delta:br.residual});
   const isFlat=v.kind!=='formula';
+  const cov = isFlat ? [] : driverCoverage(v.key, A, B, win);
+  const covOk = cov.filter(n=>n.status==='ok'), covGaps = cov.filter(n=>n.status!=='ok');
+  const covHtml = (cov.length) ? (()=>{
+    const gapRows = covGaps.map(n=>{ const isMiss=n.status==='notinmodel';
+      const st = isMiss?`<span class="st miss" title="Referenced but not in the model">✕</span>`:`<span class="st warn" title="In the model but no actuals loaded">⚠</span>`;
+      const label = isMiss?'not in model':'no actuals';
+      const btn = isMiss
+        ? `<button class="fixbtn" onclick="fixMissingDriver('${jesc(n.parentKey||'')}','${jesc(n.key)}')">Fix in setup →</button>`
+        : `<button class="fixbtn" onclick="openConfirmClassify('${jesc(n.key)}')">Point to sheet →</button>`;
+      return `<div class="drvrow">${st}<span class="dn">${esc(n.name)} <span class="dpar">· ${label}${n.parentName?` · in ${esc(n.parentName)}`:''}</span></span>${btn}</div>`;
+    }).join('');
+    const okDetails = covOk.length?`<details><summary>Show ${covOk.length} mapped driver${covOk.length>1?'s':''}</summary>${covOk.map(n=>`<div class="drvrow"><span class="st ok">✓</span><span class="dn">${esc(n.name)}</span></div>`).join('')}</details>`:'';
+    if(!covGaps.length) return `<div class="drvcov"><span class="drvcov-all">✓ All ${cov.length} driver${cov.length>1?'s':''} mapped with actuals — fully driver-explained.</span>${okDetails}</div>`;
+    return `<div class="drvcov"><div class="drvcov-head">Driver coverage · <b>${covOk.length}/${cov.length}</b> mapped with actuals · <span style="color:var(--red);font-weight:600">${covGaps.length} need${covGaps.length===1?'s':''} attention</span></div>${gapRows}${okDetails}</div>`;
+  })() : '';
 
   // waterfall geometry
   const vals=[br.start].concat(parts.map(p=>p.delta)); let run=br.start; const bars=[];
@@ -4650,14 +5030,15 @@ function renderBridge(A,B,win,winLabel){
   const X=i=>28+i*(BW+gap), Y=val=>H-(val-lo)/((hi-lo)||1)*H;
   const bar=(i,from,to,cls,label,val)=>{ const y0=Y(Math.max(from,to)),y1=Y(Math.min(from,to)); return `<g><rect x="${X(i)}" y="${y0}" width="${BW}" height="${Math.max(2,y1-y0)}" rx="3" class="wf ${cls}"/><text class="wfv" x="${X(i)+BW/2}" y="${y0-6}" text-anchor="middle">${label}</text></g>`; };
   let svg=`<svg viewBox="0 0 ${Wc} ${H+46}" style="width:100%;min-width:${Wc}px">`;
-  svg+=bar(0,lo,br.start,'base','',0)+`<text class="wfx" x="${X(0)+BW/2}" y="${H+16}" text-anchor="middle">${verShort(_vState.B)}</text><text class="wfb" x="${X(0)+BW/2}" y="${H+32}" text-anchor="middle">${fmtVar(br.start,v.unit)}</text>`;
+  /* Total columns must rise/fall from the true zero baseline. `lo` is only chart padding. */
+  svg+=bar(0,0,br.start,'base','',0)+`<text class="wfx" x="${X(0)+BW/2}" y="${H+16}" text-anchor="middle">${verShort(_vState.B)}</text><text class="wfb" x="${X(0)+BW/2}" y="${H+32}" text-anchor="middle">${fmtVar(br.start,v.unit)}</text>`;
   // connector + step bars
   bars.forEach((b,idx)=>{ const i=idx+1; const up=b.delta>=0; svg+=bar(i,b.from,b.to,up?'up':'down',fmtDelta(b.delta,v.unit),b.delta);
     svg+=`<line class="wfc" x1="${X(i-1)+BW}" y1="${Y(b.from)}" x2="${X(i)}" y2="${Y(b.from)}"/>`;
     const short=b.name.length>16?b.name.slice(0,15)+'…':b.name;
     svg+=`<text class="wfx" x="${X(i)+BW/2}" y="${H+16}" text-anchor="middle">${short}</text>`;
     if(b.key!=='__resid'&&vget(b.key)&&vget(b.key).kind==='formula') svg+=`<text class="wfdrill" x="${X(i)+BW/2}" y="${H+31}" text-anchor="middle" onclick="pickVLine('${b.key}')">drill ›</text>`; });
-  const li=parts.length+1; svg+=bar(li,lo,br.end,'end','',0)+`<line class="wfc" x1="${X(li-1)+BW}" y1="${Y(bars.length?bars[bars.length-1].to:br.start)}" x2="${X(li)}" y2="${Y(bars.length?bars[bars.length-1].to:br.start)}"/><text class="wfx" x="${X(li)+BW/2}" y="${H+16}" text-anchor="middle">${verShort(_vState.A)}</text><text class="wfb" x="${X(li)+BW/2}" y="${H+32}" text-anchor="middle">${fmtVar(br.end,v.unit)}</text>`;
+  const li=parts.length+1; svg+=bar(li,0,br.end,'end','',0)+`<line class="wfc" x1="${X(li-1)+BW}" y1="${Y(bars.length?bars[bars.length-1].to:br.start)}" x2="${X(li)}" y2="${Y(bars.length?bars[bars.length-1].to:br.start)}"/><text class="wfx" x="${X(li)+BW/2}" y="${H+16}" text-anchor="middle">${verShort(_vState.A)}</text><text class="wfb" x="${X(li)+BW/2}" y="${H+32}" text-anchor="middle">${fmtVar(br.end,v.unit)}</text>`;
   svg+=`</svg>`;
 
   const narr=bridgeNarrative({lineName:v.name, baseLabel:verShort(_vState.B), totVar, fav, unit:v.unit, steps:parts, fmtDelta});
@@ -4673,9 +5054,11 @@ function renderBridge(A,B,win,winLabel){
     </div>
     ${varSpark(_vState.line,A,B,win)}
     ${isFlat?`<p class="mut fz12" style="margin:8px 0 10px">${v.name} ${v.kind==='input'?'is an input':'is read straight from your sheet'}, so its variance is the change in the line itself — no drivers to decompose. ${v.kind==='input'?'':'Add a formula to break it into drivers, or '}pick a formula line below to see a driver bridge.</p>`:''}
-    ${(note.reason||note.remark)?`<div class="bridgenote"><span class="rtag">${esc(note.reason||'tagged')}</span>${note.remark?`<span class="bnrem">${esc(note.remark)}</span>`:''}<button class="cdrill" onclick="openCommentary('${v.key}')">edit ›</button></div>`:''}
+    ${residualInfo.detail&&materialResid?`<div class="bridgenote"><span class="rtag">Reason data incomplete</span><span class="bnrem">${esc(residualInfo.detail)}</span>${residualInfo.pending.length?`<button class="cdrill" onclick="switchTab('setup')">Review ${residualInfo.pending.length} line${residualInfo.pending.length===1?'':'s'} ›</button>`:''}</div>`:''}
+    ${covHtml}
+    ${(materialResid||isFlat||note.reason||note.remark)?`<div class="bridgetag ${note.reason?'set':''}"><div class="bridgetag-row"><label>Reason</label><select class="minisel wide ${note.reason?'set':''}" onclick="event.stopPropagation()" onchange="setReason('${v.key}',this.value)"><option value="">— pick a reason —</option>${allReasons().map(rr=>`<option ${note.reason===rr?'selected':''}>${esc(rr)}</option>`).join('')}<option value="__add__">＋ Add…</option></select>${note.reason?`<span class="tagpill">tagged manually</span>`:`<span class="mut fz11">No driver breakdown here — tag the reason yourself.</span>`}</div><input class="inp bridgetag-note" placeholder="Add a note explaining this variance (optional)" value="${esc(note.remark||'')}" onchange="setRemark('${v.key}',this.value)"></div>`:''}
     <div class="scrollx"><div class="wfwrap">${svg}</div></div>
-    ${parts.length?`<div class="contrib">${parts.map(p=>{ const drill=p.key!=='__resid'&&vget(p.key)&&vget(p.key).kind==='formula'; return `<div class="crow"><span class="cdot ${p.delta>=0?'up':'down'}"></span><span class="cn">${p.name}${drill?` <button class="cdrill" onclick="pickVLine('${p.key}')">drill in ›</button>`:''}</span><span class="cv ${p.delta>=0?'pos':'negv'}">${fmtDelta(p.delta,v.unit)}</span><span class="cp mut">${totVar!==0?(p.delta/totVar*100).toFixed(0)+'% of gap':''}</span></div>`; }).join('')}</div>`:''}
+    ${parts.length?`<div class="contrib">${parts.map(p=>{ const drill=p.key!=='__resid'&&vget(p.key)&&vget(p.key).kind==='formula'; return `<div class="crow"><span class="cdot ${p.delta>=0?'up':'down'}"></span><span class="cn">${p.name}${drill?` <button class="cdrill" onclick="pickVLine('${p.key}')">drill in ›</button>`:''}</span><span class="cv ${p.delta>=0?'pos':'negv'}">${fmtDelta(p.delta,v.unit)}</span><span class="cp mut">${gapShareLabel(p.delta,totVar)}</span></div>`; }).join('')}</div>`:''}
   `;
 }
 
@@ -5276,12 +5659,14 @@ async function doConnect(){
     try{
       const tabEl=document.getElementById('cnTab');
       const ing=await ingestFromConnectedSheet({tab:(tabEl&&tabEl.value)||''});
-      const actPlace=ing.actualsPlaced?` · ${ing.actualsPlaced} actuals mapped`:(actualsRaw?' · actuals linked (map pending)':'');
+      if(!actualsRaw) syncClosedFromActuals();
+      if(actualsRaw){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); }
+      const actPlace=ing.actualsPlaced?` · ${ing.actualsPlaced} actuals mapped${ing.actualsTab?` from “${esc(ing.actualsTab)}”`:''}`:(actualsRaw?' · actuals linked (no matching lines yet)':'');
       fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}${actPlace}</div>`;
       setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:'')+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):''));},1100);
     }catch(scanErr){
       fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
-        <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}. Open Connect and use Scan &amp; load lines.</div>`;
+        <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}</div>`;
       setTimeout(()=>{closeModal();render();},1800);
     }
   }catch(err){
@@ -5297,10 +5682,31 @@ async function refreshActuals(){
   if(!mapped.length){ toast('Map at least one line’s actuals cell in Model setup.'); return; }
   toast('Reading actuals…');
   try{
+    /* Old scans could store a 24-month forecast range against a 12-month actuals
+       sheet. Repair those ranges before reading so Refresh matches initial Scan. */
+    const primary=model.sources&&model.sources.actual;
+    mapped.forEach(v=>{
+      const pr=parseRange(v.actualRange);
+      let span=Number(v.actualSpan)||0;
+      if(!span && primary && nrm(pr.sheet)===nrm(primary.tab||'')) span=Number(primary.months)||0;
+      if(span>0 && pr.sheet&&pr.col&&pr.row){
+        v.actualRange=buildRange(pr.sheet,pr.col,pr.row,span);
+        v.actualSpan=span;
+      }
+    });
     const ranges=[...new Set(mapped.map(v=>v.actualRange))];
     const data=await fetch(`${conn.url}?action=read&token=${encodeURIComponent(conn.token)}&ssid=${encodeURIComponent(conn.actualsSsid)}&ranges=${encodeURIComponent(ranges.join('|'))}`,{redirect:'follow'}).then(r=>r.json());
     if(!data.ok) throw new Error(data.error||'read failed');
-    mapped.forEach(v=>{ const raw=(data.values[v.actualRange]&&data.values[v.actualRange][0])||[]; let N=raw.length; while(N>0&&(raw[N-1]===''||raw[N-1]==null))N--; v.actuals=raw.slice(0,N).map(x=>toNum(x,conn.scale)); });
+    mapped.forEach(v=>{
+      const raw=(data.values[v.actualRange]&&data.values[v.actualRange][0])||[];
+      const vals=raw.map(x=>x==null||x===''?null:toNum(x,conn.scale));
+      const heads=(v.actualPeriods||[]).map(fmtPeriodLabel), byPeriod={};
+      heads.forEach((h,i)=>{ const k=nrm(h); if(k)byPeriod[k]=vals[i]; });
+      v.actuals=heads.length
+        ? model.periods.map((h,i)=>Object.prototype.hasOwnProperty.call(byPeriod,nrm(h))?byPeriod[nrm(h)]:null)
+        : model.periods.map((_,i)=>i<vals.length?vals[i]:null);
+    });
+    syncClosedFromActuals();
     saveModel(); toast(`Actuals refreshed for ${mapped.length} line(s).`); if(uiTab==='variance'){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); renderVariance(); }
   }catch(err){ toast('Actuals read failed: '+(err.message||err)); }
 }
@@ -5409,6 +5815,9 @@ async function ingestFromConnectedSheet(opts){
       if(/range not found/i.test(msg)){
         throw new Error('Scan hit a bad sheet cell ref (Range not found). Usually a formula points at a missing tab/cell. Redeploy latest Code.gs (skips bad ranges), Clear all → Connect & Scan. Detail: '+msg);
       }
+      if(/No P&L lines found/i.test(msg)){
+        throw new Error('No period table was detected. We tried every workbook tab. In Advanced, select the intended tab and confirm it has a label column plus at least two month columns.');
+      }
       throw new Error(msg+( /formula|includeFormulas|Apps Script/i.test(msg) ? '' : ' Redeploy Apps Script Code.gs with includeFormulas, then Clear all → Connect & Scan.'));
     }
   }
@@ -5475,7 +5884,7 @@ async function ingestFromConnectedSheet(opts){
       nIn++;
     } else { nOut++; }
     const prev=p.prev||{};
-    ['good','favOverride','agg','group','actuals','actualRange','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
+    ['good','favOverride','agg','group','actuals','actualRange','actualSpan','actualPeriods','solveMode','solveDriver','pins'].forEach(pp=>{ if(prev[pp]!==undefined) v[pp]=prev[pp]; });
     if(prev.kind==='formula' && prev.expr && cls.kind!=='formula'){ v.kind='formula'; v.expr=prev.expr; v.mapStatus=prev.mapStatus||'manual'; }
     if(prev.mapStatus==='manual' && prev.range){ v.range=prev.range; v.mapStatus='manual'; }
     demoteConfirmedWithoutRange(v);
@@ -5723,15 +6132,58 @@ function applyClassifyToVar(v, cls){
   applyRollupHeuristic(v);
   return v;
 }
+function scanSheetMeta(src){
+  const ssid=String((src&&src.ssid)||'');
+  const isActual=!!(conn.actualsSsid&&ssid&&ssid===String(conn.actualsSsid));
+  const list=isActual?(conn.actualsSheets||[]):(conn.sheets||[]);
+  const tab=String((src&&src.tab)||'').trim().toLowerCase();
+  if(tab) return list.find(s=>String(s.name||'').trim().toLowerCase()===tab)||null;
+  return list.length===1?list[0]:null;
+}
+function rankedSheetTabs(sheets, preferred){
+  const names=(sheets||[]).map(s=>s&&s.name).filter(Boolean);
+  const score=name=>{
+    const n=String(name).trim();
+    if(preferred&&n.toLowerCase()===String(preferred).trim().toLowerCase()) return 100;
+    if(/^p\s*&\s*l$/i.test(n)||/^pnl$/i.test(n)) return 90;
+    if(/p\s*&\s*l|\bpnl\b|profit\s*(?:&|and)?\s*loss|income\s*statement/i.test(n)) return 80;
+    if(/actual/i.test(n)) return 30;
+    if(/pricing|assumption|cash\s*flow|balance\s*sheet/i.test(n)) return -20;
+    return 0;
+  };
+  return [...new Set((preferred?[preferred]:[]).concat(names))].sort((a,b)=>score(b)-score(a));
+}
+async function discoverPnlSource(opts){
+  opts=opts||{};
+  const candidates=rankedSheetTabs(opts.sheets||[],opts.tab||'');
+  const errors=[];
+  for(const tab of candidates){
+    try{
+      const found=await autoDetectAndRead({ssid:opts.ssid||'',tab});
+      if(found&&found.lines&&found.lines.length) return found;
+    }catch(e){ errors.push(String((e&&e.message)||e)); }
+  }
+  if(!candidates.length){
+    try{
+      const found=await autoDetectAndRead({ssid:opts.ssid||'',tab:''});
+      if(found&&found.lines&&found.lines.length) return found;
+    }catch(e){ errors.push(String((e&&e.message)||e)); }
+  }
+  if(errors.length) throw new Error(errors[0]);
+  return null;
+}
 /* Read a broad block, detect the layout, and parse the lines — the "just works" path. */
 async function autoDetectAndRead(src){
-  const cap=300, wideCol='BZ';
+  const meta=scanSheetMeta(src);
+  const cap=Math.max(1,Math.min(300,Number(meta&&meta.rows)||300));
+  const wideCol=numToCol(Math.max(1,Math.min(colToNum('BZ'),Number(meta&&meta.cols)||colToNum('BZ'))));
   const qt = src.tab ? ((/[^A-Za-z0-9_]/.test(src.tab)?`'${src.tab}'`:src.tab)+'!') : '';
   const rng=`${qt}A1:${wideCol}${cap}`;
   let data;
   try{ data=await gasReadRanges([rng],{ssid:src.ssid||'', includeFormulas:true}); }
   catch(e){ data=await gasReadRanges([rng],{ssid:src.ssid||'', includeFormulas:false}); }
   const grid=data.values[rng]||[];
+  if(!grid.length&&data.skipped&&data.skipped.length) throw new Error('Sheet range could not be read: '+data.skipped[0]);
   const fgrid=(data.formulas&&data.formulas[rng])||null;
   const det=detectLayoutFromGrid(grid);
   if(!det) return null;
@@ -6105,5 +6557,3 @@ render();
 </script>
 </body>
 </html>
-
-

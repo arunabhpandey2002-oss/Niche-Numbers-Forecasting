@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+
+# local backups created before edits
+*.bak-*
+
+# node
+node_modules/
