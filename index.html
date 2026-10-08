@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:onboard-periods-20261008a -->
+<!-- NN_BUILD:onboard-tieout-20261008b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -600,6 +600,18 @@
   .confirm-classify .cc-k{color:var(--muted);min-width:110px}
   .confirm-classify .cc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
 
+  .tieout{margin:12px 0;padding:12px 14px;border-radius:10px;border:1px solid #f0cdd2;background:#fff0f1;color:#5a1e27;font-size:12.5px;line-height:1.5}
+  .tieout.ok{border-color:#cfe8da;background:#effaf3;color:#14532d}
+  .tieout.warn{border-color:#f2dfb5;background:#fff8ec;color:#6b4a12}
+  .tieout b.h{font-size:13.5px}
+  .tieout ul{margin:6px 0 0 18px;padding:0}
+  .tieout li{margin:2px 0}
+  .tieout .sub{margin-top:8px}
+  .tieout code{background:rgba(0,0,0,.05);padding:0 4px;border-radius:4px}
+  .lock-note{display:block;margin-top:4px;color:#a33d4d;font-size:11.5px}
+  .nr-note{margin:4px 0 6px;padding:4px 8px;border-radius:6px;background:#fff0f1;color:#a33d4d;font-size:11.5px}
+  .nr-val{color:#a33d4d}
+  button[data-locked="1"]{opacity:.5;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -640,11 +652,12 @@ const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec
 function genMonths(n,startM=8,startY=26){ let m=startM,y=startY,out=[]; for(let i=0;i<n;i++){ out.push(MN[m]+" ’"+y); m++; if(m>11){m=0;y++;} } return out; }
 
 /* ---- expression compiler (shunting-yard → RPN) + FP&A helpers ---- */
-const NN_FN_ARITY={lag:2, if:3, sum_periods:1, sum:1, pct:2, max:2, min:2};
+/* -1 = variadic (arg count taken from the call). xsum, max, min, round(up/down), abs and iferror mirror the sheet's SUM/MAX/MIN/ROUND/ABS/IFERROR. */
+const NN_FN_ARITY={lag:2, if:3, sum_periods:1, sum:1, pct:2, max:-1, min:-1, xsum:-1, round:2, roundup:2, rounddown:2, abs:1, iferror:2};
 const NN_FN_VREF=new Set(['lag','sum_periods','sum']); /* first arg is a variable reference */
 function compile(expr){
-  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[(),+\-*/]/g))||[];
-  const out=[],ops=[],prec={'+':1,'-':1,'*':2,'/':2};
+  const toks=(String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|<=|>=|<>|[(),+\-*/<>=]/g))||[];
+  const out=[],ops=[],prec={'+':1,'-':1,'*':2,'/':2,'<':0,'>':0,'<=':0,'>=':0,'<>':0,'=':0};
   const arityStack=[];
   const flushOp=o=>{
     if(typeof o==='object'&&o&&o.fn) return {fn:o.fn, arity:NN_FN_ARITY[o.fn]||o.arity||0};
@@ -675,8 +688,11 @@ function compile(expr){
       if(ops.length && typeof ops[ops.length-1]==='object' && ops[ops.length-1].fn){
         const f=ops.pop(); const expect=NN_FN_ARITY[f.fn];
         const got=arityStack.length?arityStack.pop():expect;
-        if(expect!=null && got!==expect) throw new Error(f.fn+'() expects '+expect+' arg(s)');
-        out.push({fn:f.fn, arity:expect});
+        if(expect===-1){ if(!(got>=1)) throw new Error(f.fn+'() needs at least 1 arg'); out.push({fn:f.fn, arity:got}); }
+        else {
+          if(expect!=null && got!==expect) throw new Error(f.fn+'() expects '+expect+' arg(s)');
+          out.push({fn:f.fn, arity:expect});
+        }
       }
     }
     else {
@@ -721,6 +737,7 @@ function evalRPN(rpn,scope,ctx){
     const raw=scope[String(key).toLowerCase()];
     return raw;
   };
+  const softDiv=rpn.some(x=>x&&x.fn==='iferror');   /* IFERROR(a/0, b) → b, like the sheet */
   const pushNum=raw=>{
     if(raw===undefined || raw===null || (typeof raw==='number' && Number.isNaN(raw))) st.push(NaN);
     else st.push(nnToMicro(Number(raw)));
@@ -746,14 +763,21 @@ function evalRPN(rpn,scope,ctx){
         const cond=args[0], a=args[1], b=args[2];
         if(!Number.isFinite(cond)) st.push(NaN);
         else st.push(cond!==0 ? a : b);
-      } else if(x.fn==='max'){
-        const a=args[0], b=args[1];
-        if(!Number.isFinite(a) || !Number.isFinite(b)) st.push(NaN);
-        else st.push(Math.max(a,b));
-      } else if(x.fn==='min'){
-        const a=args[0], b=args[1];
-        if(!Number.isFinite(a) || !Number.isFinite(b)) st.push(NaN);
-        else st.push(Math.min(a,b));
+      } else if(x.fn==='max' || x.fn==='min' || x.fn==='xsum'){
+        if(args.some(a=>!Number.isFinite(a))) st.push(NaN);
+        else st.push(x.fn==='max'?Math.max(...args):x.fn==='min'?Math.min(...args):args.reduce((s,a)=>s+a,0));
+      } else if(x.fn==='round' || x.fn==='roundup' || x.fn==='rounddown'){
+        const a=args[0], d=args[1];
+        if(!Number.isFinite(a) || !Number.isFinite(d)){ st.push(NaN); continue; }
+        const digits=Math.round(nnFromMicro(d));
+        if(digits>=8){ st.push(a); continue; }
+        const unit=Math.pow(10, 8-digits), sg=a<0?-1:1, q=Math.abs(a)/unit;
+        const r=x.fn==='round'?Math.round(q):x.fn==='roundup'?Math.ceil(q-1e-9):Math.floor(q+1e-9);
+        st.push(sg*r*unit);
+      } else if(x.fn==='abs'){
+        const a=args[0]; st.push(Number.isFinite(a)?Math.abs(a):NaN);
+      } else if(x.fn==='iferror'){
+        const a=args[0], b=args[1]; st.push(Number.isFinite(a)?a:b);
       } else if(x.fn==='pct'){
         const a=args[0], b=args[1];
         if(!Number.isFinite(a) || !Number.isFinite(b)){ st.push(NaN); continue; }
@@ -770,9 +794,16 @@ function evalRPN(rpn,scope,ctx){
       else if(x.op==='-') r=a-b;
       else if(x.op==='*') r=Math.round((a*b)/NN_SCALE);
       else if(x.op==='/'){
-        if(b===0) throw new Error('Division by zero');
+        if(b===0){ if(softDiv){ st.push(NaN); continue; } throw new Error('Division by zero'); }
         r=Math.round((a*NN_SCALE)/b);
-      } else r=NaN;
+      }
+      else if(x.op==='<') r=a<b?NN_SCALE:0;
+      else if(x.op==='>') r=a>b?NN_SCALE:0;
+      else if(x.op==='<=') r=a<=b?NN_SCALE:0;
+      else if(x.op==='>=') r=a>=b?NN_SCALE:0;
+      else if(x.op==='<>') r=a!==b?NN_SCALE:0;
+      else if(x.op==='=') r=a===b?NN_SCALE:0;
+      else r=NaN;
       st.push(r);
     }
   }
@@ -859,6 +890,7 @@ function tokenizeSheetFormula(src){
     const ch=s[i];
     if(/\s/.test(ch)){ i++; continue; }
     if('+-*/(),'.includes(ch)){ toks.push({t:'op', v:ch}); i++; continue; }
+    if('<>='.includes(ch)){ const two=s.slice(i,i+2); if(two==='<='||two==='>='||two==='<>'){ toks.push({t:'op', v:two}); i+=2; } else { toks.push({t:'op', v:ch}); i++; } continue; }
     if(/[0-9.]/.test(ch)){
       let j=i+1; while(j<s.length && /[0-9.]/.test(s[j])) j++;
       toks.push({t:'num', v:s.slice(i,j)}); i=j; continue;
@@ -904,11 +936,12 @@ function sheetFormulaToExpr(formula, cellMap, defaultSheet){
   const toks=tokenizeSheetFormula(formula);
   if(!toks.length) return {ok:false, reason:'empty'};
   if(toks.some(t=>t.t==='bad')) return {ok:false, reason:'unsupported token'};
-  const EXCEL_FN={IF:'if', SUM:'sum', MAX:'max', MIN:'min'};
+  /* Sheet SUM(a,b,…) is a plain sum (xsum) — NOT the app's running-total sum() */
+  const EXCEL_FN={IF:'if', SUM:'xsum', MAX:'max', MIN:'min', ROUND:'round', ROUNDUP:'roundup', ROUNDDOWN:'rounddown', ABS:'abs', IFERROR:'iferror'};
   const parts=[]; const deps=[]; const unresolved=[]; const unsupported=[];
   const ds=String(defaultSheet||'').trim();
   for(const t of toks){
-    if(t.t==='op'){ parts.push(t.v==='/'?' / ':t.v==='*'?' * ':t.v==='+'?' + ':t.v==='-'?' - ':t.v); continue; }
+    if(t.t==='op'){ parts.push(t.v==='/'?' / ':t.v==='*'?' * ':t.v==='+'?' + ':t.v==='-'?' - ':/^[<>=]/.test(t.v)?' '+t.v+' ':t.v); continue; }
     if(t.t==='num'){ parts.push(t.v); continue; }
     if(t.t==='ident'){
       const mapped=EXCEL_FN[String(t.v||'').toUpperCase()];
@@ -998,7 +1031,13 @@ function enqueueFormulaDeps(n, nodes, queue, maxNodes, stats){
   extractSheetRefs(n.formula, n.sheet).forEach(ref=>{
     const id=cellId(ref.sheet, ref.a1);
     if(nodes.has(id)) return;
-    if(nodes.size>=maxNodes){ if(stats){ stats.skipped=(stats.skipped||0)+1; } return; }
+    if(nodes.size>=maxNodes){
+      /* Past the cap: keep the cell as a boundary node so the parent formula still resolves; its values are read
+         from the sheet (series read) and it is reported as "map stopped here" — never a silent ₹0 input. */
+      if(stats){ stats.skipped=(stats.skipped||0)+1; }
+      nodes.set(id, {id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, absCol:!!ref.absCol, label:'', seed:false, formula:'', value:null, kind:'boundary'});
+      return;
+    }
     const child={id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, absCol:!!ref.absCol, label:'', seed:false, formula:'', value:null, kind:'pending'};
     nodes.set(id, child); queue.push(child);
   });
@@ -1008,7 +1047,7 @@ async function hydrateSeedFormulas(seeds){
   if(!list.length) return seeds;
   const ranges=list.map(s=>quoteSheetRange(s.sheet, s.a1));
   let data=null;
-  try{ data=await gasReadRanges(ranges,{includeFormulas:true}); }
+  try{ data=await gasReadChunked(ranges,{includeFormulas:true}); if(!data.formulasField) data=null; }
   catch(e){ data=null; }
   if(!data||!data.formulas){
     return {seeds, formulasAvailable:false, hydrated:0};
@@ -1041,17 +1080,23 @@ async function walkFormulaGraph(seeds, opts){
     if(n.kind==='formula') enqueueFormulaDeps(n, nodes, queue, maxNodes, stats);
   });
   let guard=0;
-  while(queue.length && guard++<60){
-    const batch=queue.splice(0,40);
+  const readLog={batches:0, failedBatches:0, retried:0, errors:[]};
+  const maxRounds=Math.ceil(maxNodes/GAS_CHUNK)+20;
+  while(queue.length && guard++<maxRounds){
+    /* One wave = up to 3 chunks of 40 cells read in parallel; each chunk retries once, then its cells are "not read" */
+    const batch=queue.splice(0,GAS_CHUNK*GAS_PARALLEL);
     const ranges=batch.map(n=>quoteSheetRange(n.sheet, n.a1));
-    let data={values:{}, formulas:{}};
-    try{ data=await gasReadRanges(ranges,{includeFormulas:true}); }
-    catch(e){
-      try{ data=await gasReadRanges(ranges,{includeFormulas:false}); }
-      catch(e2){ data={values:{}, formulas:{}}; }
-    }
+    const data=await gasReadChunked(ranges,{includeFormulas:true});
+    readLog.batches+=data.batches; readLog.failedBatches+=data.failedBatches; readLog.retried+=data.retried; if(data.lastError) readLog.errors.push(data.lastError);
     batch.forEach((n,i)=>{
       const rng=ranges[i];
+      if(data.unread.has(rng)){
+        /* Read failed twice: keep a known formula (seed) and walk on; otherwise the cell is NOT READ — not an input, not ₹0 */
+        n.readFailed=true;
+        if(n.formula && String(n.formula).startsWith('=')){ n.kind='formula'; enqueueFormulaDeps(n, nodes, queue, maxNodes, stats); }
+        else n.kind='unread';
+        return;
+      }
       const valRow=lookupGridCell(data.values, rng);
       const fRow=lookupGridCell(data.formulas, rng);
       const readFormula=String((fRow&&fRow[0])||'').trim();
@@ -1081,7 +1126,7 @@ async function walkFormulaGraph(seeds, opts){
     if(!rows.length) continue;
     const labelRanges=rows.map(r=>quoteSheetRange(sh,'A'+r));
     try{
-      const lab=await gasReadRanges(labelRanges,{includeFormulas:false});
+      const lab=await gasReadChunked(labelRanges,{includeFormulas:false});
       rows.forEach((r,i)=>{
         const rng=labelRanges[i];
         const row=lookupGridCell(lab.values, rng);
@@ -1092,8 +1137,8 @@ async function walkFormulaGraph(seeds, opts){
     }catch(e){}
   }
   /* Cells queued but never read (batch guard hit) stay 'pending' — report them, don't pass them off as inputs */
-  const unread=[...nodes.values()].filter(n=>n.kind==='pending').length;
-  return {nodes:[...nodes.values()], cellMap:{}, skipped:stats.skipped, unread, maxNodes};
+  const unread=[...nodes.values()].filter(n=>n.kind==='pending'||n.kind==='unread').length;
+  return {nodes:[...nodes.values()], cellMap:{}, skipped:stats.skipped, unread, maxNodes, readLog};
 }
 
 /**
@@ -1339,8 +1384,11 @@ async function ingestFormulaGraphFromSheet(opts){
   if(more.length){
     const moreWalk=await walkFormulaGraph(more.map(n=>({sheet:n.sheet,a1:n.a1,col:n.col,row:n.row,absCol:!!n.absCol,label:n.label||'',formula:'',seed:false})), {maxNodes:GRAPH_MAX_NODES});
     moreSkipped=moreWalk.skipped||0; moreUnread=moreWalk.unread||0;
-    moreWalk.nodes.forEach(n=>{ if(!nodeMap.has(n.id)){ nodeMap.set(n.id,n); walked.nodes.push(n); } });
+    moreWalk.nodes.forEach(n=>{ const prev=nodeMap.get(n.id); if(!prev || prev.kind==='pending' || prev.kind==='boundary') nodeMap.set(n.id,n); });
+    if(moreWalk.readLog&&walked.readLog){ ['batches','failedBatches','retried'].forEach(k=>{ walked.readLog[k]+=moreWalk.readLog[k]||0; }); walked.readLog.errors=walked.readLog.errors.concat(moreWalk.readLog.errors||[]); }
   }
+  /* Every node in the map (incl. boundary cells created at the cap) becomes a var */
+  walked.nodes=[...nodeMap.values()];
   const refsNotFollowed=(walked.skipped||0)+(moreStats.skipped||0)+moreSkipped;
   const cellsUnread=(walked.unread||0)+moreUnread;
   const graphWarn=(refsNotFollowed||cellsUnread)
@@ -1389,17 +1437,26 @@ async function ingestFormulaGraphFromSheet(opts){
       account:n.seed?(n.label||''):undefined, metric:n.seed?'':(n.sheet||''),
       group:n.sheet||sheetName, mapStatus:'auto'
     };
+    if(n.absCol) v.absConst=true;
     if(n.kind==='formula' && n.formula){
       const parsed=sheetFormulaToExpr(n.formula, cellMap, n.sheet||sheetName);
       if(parsed.ok){
         v.kind='formula'; v.expr=parsed.expr; v.mapStatus='auto'; v.classifyConfidence='high'; nForm++;
       } else {
-        v.kind='formula'; v.expr=''; v.mapStatus='suggested'; v.classifyConfidence='low';
+        /* The app can't recompute this formula: hold it at the sheet's own values (never evaluate an empty expr as ₹0) */
+        v.kind='formula'; v.expr=''; v.mapStatus='suggested'; v.classifyConfidence='low'; v.held=true; v.heldReason=parsed.reason;
         v.classifyNote=parsed.reason; v._suggestedExpr=n.formula.replace(/^[=\s]+/,'').trim(); nSug++; nForm++;
       }
-    } else {
+    } else if(n.kind==='input'){
       v.kind='input'; v.writable=true; v.base=toNum(n.value, conn.scale||1); v.steps=[]; v.delta=0;
       v.mapStatus='auto'; v.classifyConfidence='high'; nIn++;
+    } else {
+      /* unread (read failed twice), boundary (map cap) or pending (never reached): values come from the series read
+         below; until then the cell is NOT READ. Never writable — it may be a formula cell we couldn't open. */
+      v.kind='input'; v.writable=false; v.base=null; v.steps=[]; v.delta=0; v.unread=true;
+      v.mapStatus='suggested'; v.classifyConfidence='low';
+      if(n.kind==='unread'){ v.walkUnread=true; v.classifyNote='Cell could not be read from the sheet'; }
+      else { v.boundary=true; v.classifyNote='Formula map stopped here — value from the sheet, deeper drivers not followed'; }
     }
     demoteConfirmedWithoutRange(v);
     applyRollupHeuristic(v);
@@ -1408,32 +1465,55 @@ async function ingestFormulaGraphFromSheet(opts){
   /* Keep the workbook's full forecast series on every graph node. The formula
      graph explains lineage; it must not replace the authoritative forecast
      with a reconstruction from only the first input cell. */
-  try{
+  let seriesLog={batches:0, failedBatches:0, retried:0};
+  {
     const graphRanges=[...new Set(newVars.map(v=>v.range).filter(Boolean))];
-    const graphData=await gasReadRanges(graphRanges,{ssid,includeFormulas:false});
+    let graphData=null;
+    try{ graphData=await gasReadChunked(graphRanges,{ssid,includeFormulas:true}); }
+    catch(seriesErr){ graphData={values:{}, formulas:{}, unread:new Set(graphRanges), batches:0, failedBatches:1, retried:0, formulasField:false}; }
+    seriesLog={batches:graphData.batches, failedBatches:graphData.failedBatches, retried:graphData.retried, error:graphData.lastError||''};
     newVars.forEach(v=>{
-      const raw=(graphData.values&&graphData.values[v.range]&&graphData.values[v.range][0])||[];
+      if(!v.range || graphData.unread.has(v.range)){
+        /* Series read failed twice: this row is NOT READ (shown as such, blocks save/write-back) */
+        v.unread=true; v.read=null;
+        if(v.kind==='input'){ v.base=null; v.steps=[]; }
+        return;
+      }
+      const raw=(lookupGridCell(graphData.values, v.range)||[])[0]||[];
+      const fraw=graphData.formulasField?((lookupGridCell(graphData.formulas||{}, v.range)||[])[0]||[]):null;
       /* % rows (margins, rates) are ratios, not money: never apply the ₹ unit scale; text/dash cells are blanks, not 0 */
       const sc=v.unit==='%'?1:(conn.scale||1);
       const series=periods.map((_,i)=>{
         const x=raw[i]; return isRealNum(x)?toNum(x,sc):null;
       });
+      v.read=series.slice();
+      if(v.unread){ v.unread=false; }   /* boundary / walk-unread cell: values now known from the sheet */
       if(series.some(x=>x!=null)){
         v.forecast=series;
-        v.read=series.slice();
         if(v.kind==='input'){
-          const first=series.findIndex(x=>x!=null);
-          if(first>=0){
-            v.base=series[first]; v.steps=[];
-            for(let i=first+1;i<series.length;i++){
-              if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]});
+          if(v.absConst){
+            /* $C$5-style fixed cell: one constant (the range only spans the row for display) */
+            const first=series.findIndex(x=>x!=null);
+            if(first>=0){
+              v.base=series[first]; v.steps=[];
+              for(let i=first+1;i<series.length;i++){
+                if(series[i]!=null&&series[i-1]!=null&&Math.abs(series[i]-series[i-1])>1e-9) v.steps.push({from:i,value:series[i]});
+              }
             }
+          } else {
+            /* A blank cell in a read row is 0 in the sheet's own maths — never carry the previous value forward */
+            const lvl=series.map(x=>x==null?0:x);
+            v.base=lvl[0]; v.steps=[];
+            for(let i=1;i<lvl.length;i++) if(Math.abs(lvl[i]-lvl[i-1])>1e-9) v.steps.push({from:i,value:lvl[i]});
           }
         }
+      } else if(v.kind==='input' && v.base==null){ v.base=0; v.steps=[]; }   /* read OK, row genuinely blank = 0 */
+      /* Formula rows with hardcoded periods (e.g. period 1 typed as 0, formulas from period 2): keep the sheet's value there */
+      if(v.kind==='formula' && fraw && !v.absConst){
+        const hard=periods.map((_,i)=>{ const f=String(fraw[i]==null?'':fraw[i]).trim(); return f.startsWith('=')?null:(series[i]==null?0:series[i]); });
+        if(hard.some(x=>x!=null) && hard.some(x=>x==null)) v.hard=hard; else delete v.hard;
       }
     });
-  }catch(seriesErr){
-    console.warn('graph forecast series read failed',seriesErr);
   }
   /* Prefer seed P&L order first, then other graph nodes */
   newVars.sort((a,b)=>(b.srcLine?1:0)-(a.srcLine?1:0));
@@ -1513,8 +1593,12 @@ async function ingestFormulaGraphFromSheet(opts){
     const sample=(actInfo.misses||[]).slice(0,4).join(', ');
     actInfo.warn=(actInfo.warn?actInfo.warn+' · ':'')+actInfo.missCount+' P&L line(s) left unmapped (fail-closed)'+(sample?': '+sample:'');
   }
+  const tie=runTieOut();
+  tie.readLog={walk:walked.readLog||null, series:seriesLog};
+  model.uiState.tieOut=tie;
   saveModel();
   return {
+    tieOut:{ok:tie.ok, tied:tie.tied, total:tie.total, unread:tie.unreadCells.length, held:tie.held.length, shallow:tie.shallow.length},
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
     name:F.name||sheetName, mode:'formula-graph', graphWarn,
@@ -1783,9 +1867,16 @@ function evalModel(scenario){
   leftover.forEach(v=>{ v.err=v.err||'Circular or unresolved dependency'; });
   for(let p=0;p<n;p++){
     const scope={};
-    inputs().forEach(v=>{ const val=inputVal(v,p,scenario); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
-    outputs().forEach(v=>{ const val=(v.read&&v.read[p])||0; scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
+    inputs().forEach(v=>{ const val=(v.unread||v.base==null&&v.srcGraph)?null:inputVal(v,p,scenario); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
+    outputs().forEach(v=>{ const val=v.unread?null:((v.read&&v.read[p])||0); scope[v.key.toLowerCase()]=val; res[v.key][p]=val; });
     order.forEach(v=>{
+      /* Period typed as a value on the sheet (no formula there) → the sheet's value, like the sheet does */
+      if(v.hard && v.hard[p]!=null){ scope[v.key.toLowerCase()]=v.hard[p]; res[v.key][p]=v.hard[p]; return; }
+      /* Graph formula the app can't recompute (unsupported function): hold at the sheet's values; not read → null */
+      if(v.srcGraph && !String(v.expr||'').trim()){
+        const r=v.unread||!v.read?null:(v.read[p]==null?0:v.read[p]);
+        scope[v.key.toLowerCase()]=r; res[v.key][p]=r; return;
+      }
       const deps=v.compiled?.deps||[];
       const missing=deps.filter(d=>!(d.toLowerCase() in scope));
       if(missing.length){
@@ -1794,16 +1885,21 @@ function evalModel(scenario){
         scope[v.key.toLowerCase()]=NaN;
         return;
       }
+      /* Any input not read from the sheet → this result is "not read" too (null), never a number built on a fake 0 */
+      if(deps.some(d=>scope[d.toLowerCase()]===null)){ scope[v.key.toLowerCase()]=null; res[v.key][p]=null; return; }
       try{
+        let hitNull=false;
         const val=evalRPN(v.compiled.rpn, scope, {period:p, lookup:(key,q)=>{
           if(q<0||q>=n) return 0;
           const sk=String(key).toLowerCase();
-          if(q===p && (sk in scope)) return scope[sk];
+          if(q===p && (sk in scope)){ if(scope[sk]===null) hitNull=true; return scope[sk]; }
           const kk=Object.keys(res).find(x=>x.toLowerCase()===sk);
           if(!kk) return 0;
           const raw=res[kk][q];
+          if(raw===null){ const dv=vget(kk); if(dv&&(dv.unread||(dv.base==null&&dv.srcGraph&&dv.kind==='input'))) hitNull=true; }
           return raw==null?0:raw;
         }});
+        if(hitNull){ scope[v.key.toLowerCase()]=null; res[v.key][p]=null; return; }
         if(Number.isNaN(val)){ v.err=v.err||'Evaluation produced NaN'; }
         scope[v.key.toLowerCase()]=val;
         res[v.key][p]=val;
@@ -1825,7 +1921,7 @@ function pctDisplay(v){ const x=Number(v)||0; /* sheet rates often stored as 0.0
   if(Math.abs(x)<=1.5) return (x*100).toFixed(1)+'%';
   return x.toFixed(1)+'%';
 }
-function fmtVar(v,unit){ if(unit==="#")return fmtNum(v); if(unit==="%")return pctDisplay(v); return fmtMoney(v); }
+function fmtVar(v,unit){ if(v===null) return 'not read'; if(typeof v==='number'&&Number.isNaN(v)) return 'error'; if(unit==="#")return fmtNum(v); if(unit==="%")return pctDisplay(v); return fmtMoney(v); }
 function fmtDelta(v,unit){ const s=v>=0?"+":"−",a=Math.abs(v); if(unit==="#")return s+fmtNum(a); if(unit==="%"){ const x=Math.abs(a)<=1.5?a*100:a; return s+x.toFixed(1)+'%'; } const m=fmtMoney(a); return s+m.replace("₹","₹"); }
 function fmtPct(v){ return (v>=0?"+":"")+v.toFixed(1)+"%"; }
 
@@ -2164,7 +2260,7 @@ function viewPricingGraphOffer(outcome){
     <div class="pricing-card" style="margin-top:14px">
       <div class="result-foot" style="margin:0;border:0;padding:0">
         <div class="txt"><strong>Same write-back trust as Forecasting</strong><span>Review write-back lists these leaf drivers only — never hardcodes ${esc(outcome.name)}.</span></div>
-        <div class="acts"><button class="btn sm" onclick="openWriteback()">Review write-back</button><button class="btn sm primary" onclick="switchTab('forecast')">See on chart</button></div>
+        <div class="acts"><button class="btn sm" ${lockAttr()} onclick="openWriteback()">Review write-back</button><button class="btn sm primary" onclick="switchTab('forecast')">See on chart</button></div>
       </div>
     </div>
   </div>`;
@@ -2500,7 +2596,7 @@ function modelExprToSheetFormulaAt(expr, p, targetSheet){
   let deps=[];
   try{ deps=(compile(raw).deps||[]).map(String); }catch(e){ return {ok:false, reason:String(e.message||e)}; }
   const keys=deps.slice().sort((a,b)=>b.length-a.length);
-  let out='='+raw;
+  let out='='+raw.replace(/\bxsum\(/gi,'SUM(');
   const missing=[];
   keys.forEach(k=>{
     const v=vget(k);
@@ -2681,7 +2777,7 @@ function viewSetup(){
   <div class="panel" style="margin-top:16px">
     <div class="card-heading"><div><p class="eyebrow" style="margin-bottom:4px">Variables &amp; formulas</p><h2>What each number is, and where it lives</h2></div>
       <div style="display:flex;gap:8px">${model.vars.length?`<button class="btn sm" onclick="clearModel()" title="Remove every line and start blank">Clear all</button>`:''}<button class="btn sm indigo" onclick="addVar()">+ Add variable</button></div></div>
-    ${staleBanner}${actBanner}<div class="panel-pad" style="padding-bottom:0">${banner}</div>
+    ${staleBanner}${tieOutBannerHtml()}${actBanner}<div class="panel-pad" style="padding-bottom:0">${banner}</div>
     <div style="overflow-x:auto"><table class="vtbl">
       <thead><tr><th>Variable</th><th>Type</th><th>Definition</th><th>Sheet cell(s)</th><th>Mapping</th><th></th></tr></thead>
       <tbody>${rows||`<tr><td colspan="6" class="mut fz12">No lines in this filter.</td></tr>`}</tbody>
@@ -2953,7 +3049,7 @@ function clearModel(){ showModal(`<div class="mhead"><h3>Clear the whole model?<
 function doClearModel(){ model.vars=[]; model.nodePos={}; model.displayVars=[]; model.pages=['Page 1']; model.canvasPage=0;
   _pan={x:0,y:0}; _zoom=1; _vState.line=null; if(typeof _cState==='object'&&_cState) _cState.line=null;
   if(model.sources) model.sources.graph=false;
-  if(model.uiState){ model.uiState.graphIngestVersion=0; model.uiState.scanCatalog=[]; }
+  if(model.uiState){ model.uiState.graphIngestVersion=0; model.uiState.scanCatalog=[]; delete model.uiState.tieOut; }
   try{ disablePricingSeed({strip:false}); }catch(e){ try{ if(typeof pricing==='object'&&pricing){ pricing.link_revenue=false; pricing.seedInModel=false; if(typeof savePricing==='function') savePricing(); } }catch(_){ } }
   recompileAll(); saveModel(); closeModal(); render(); toast('Model cleared — blank slate'); }
 
@@ -3475,6 +3571,7 @@ function viewForecast(){
       </div>
     </div>
   </div>
+  ${tieOutBannerHtml()}
   <div class="grid-forecast" style="margin-top:16px">
     <div class="panel panel-pad">
       <div class="results-head" style="margin-bottom:6px"><div><p class="eyebrow">Drivers</p><h2 style="font-size:16px" id="asmTitle">First-order drivers</h2>
@@ -3505,8 +3602,8 @@ function viewForecast(){
       <div class="solvemsg" id="solveMsg" hidden></div>
       <div class="serieslegend" id="serieslegend"></div>
       <div class="result-foot" style="margin-top:12px">
-        <div class="txt"><strong>Scenario is a plan, not yet saved</strong><span>Write-back changes leaf drivers only — P&amp;L formula cells keep their <code>=</code> formulas and recompute.</span></div>
-        <div class="acts"><button class="btn sm" onclick="saveVersionModal()">Save as version</button><button class="btn sm" onclick="openWriteback()">Review write-back</button><button class="btn sm" onclick="openPromoteModal(null)">Promote to Sheets</button></div>
+        <div class="txt"><strong>Scenario is a plan, not yet saved</strong><span>Write-back changes leaf drivers only — P&amp;L formula cells keep their <code>=</code> formulas and recompute.</span>${tieOutLock()?`<span class="lock-note" id="tieLockNote">🔒 ${esc(tieOutLock())}</span>`:''}</div>
+        <div class="acts"><button class="btn sm" id="btnSaveVersion" ${lockAttr()} onclick="saveVersionModal()">Save as version</button><button class="btn sm" id="btnWriteback" ${lockAttr()} onclick="openWriteback()">Review write-back</button><button class="btn sm" id="btnPromote" ${lockAttr()} onclick="openPromoteModal(null)">Promote to Sheets</button></div>
       </div>
     </div>
   </div>`;
@@ -3737,7 +3834,7 @@ function renderAssumptions(){
     const v=vget(dk);
     if(!v) return `<div class="asm"><div class="asm-head"><strong>${esc(dk)}</strong></div><div class="asm-empty">Missing from model</div></div>`;
     if(v.kind==='input') return asmInputCard(v);
-    const val=base[v.key]?fmtVar(base[v.key][0]||0,v.unit):'';
+    const val=base[v.key]?fmtVar(base[v.key][0],v.unit):'';
     const n=driversOf(v).length;
     return `<div class="asm formula-drv" onclick="forecastDrillInto('${v.key}')" title="See drivers of ${esc(v.name)}">
       <div class="asm-head"><div><strong>${esc(v.name)}</strong> <span class="k">${esc(v.key)}</span></div>
@@ -3755,9 +3852,11 @@ function asmInputCard(v){
   const shapeChip = rampOn?`<span class="shapechip" onclick="openShape('${v.key}')">↗ Ramp ${fmtVar(v.ramp.from!=null?v.ramp.from:0,v.unit)}→${fmtVar(v.ramp.to!=null?v.ramp.to:v.base,v.unit)} · ${v.ramp.months}mo</span>`
     : seasonOn?`<span class="shapechip" onclick="openShape('${v.key}')">∿ Seasonal shape</span>`
     : `<span class="stepadd" onclick="openShape('${v.key}')">＋ shape (ramp / seasonal)</span>`;
+  const nrNote=(v.unread||(v.srcGraph&&v.base==null))?`<div class="nr-note">Now <b>not read</b> — ${esc(v.range||'cell')} could not be read from the sheet. It is not ₹0; Scan again.</div>`
+    : v.boundary?`<div class="mut fz11">Value from the sheet (${esc(v.range||'')}) — formula map stopped here.</div>`:'';
   return `<div class="asm">
     <div class="asm-head"><div><strong>${esc(v.name)}</strong> <span class="k">${esc(v.key)}</span></div>
-      ${hasOv(v.key)?`<span class="change-pill">edited</span>`:''}</div>
+      ${hasOv(v.key)?`<span class="change-pill">edited</span>`:''}</div>${nrNote}
     <div class="asm-base"><span class="lab">${rampOn?'Target':'Base'}</span><input class="inp num" type="number" step="any" value="${v.base}" onchange="setBase('${v.key}',this.value)"><span class="lab">${esc(v.unit||'')}</span></div>
     <div class="steps">${rampOn?'':steps+`<span class="stepadd" onclick="addStep('${v.key}')">＋ step change</span>`}${shapeChip}</div>
     ${ovChips?`<div class="steps" style="margin-top:2px">${ovChips}</div>`:''}
@@ -3838,7 +3937,7 @@ let _dragging=false, _domains={};
 
 /* per-series y-domain, padded; flat lines get a ±band so they're still draggable */
 function seriesDomain(baseArr,scenArr){
-  const all=(baseArr||[]).concat(scenArr||[]).filter(x=>isFinite(x));
+  const all=(baseArr||[]).concat(scenArr||[]).filter(x=>typeof x==='number'&&Number.isFinite(x));
   let lo=all.length?Math.min(...all):0, hi=all.length?Math.max(...all):1;
   const mag=Math.max(Math.abs(hi),Math.abs(lo),1);
   if(hi-lo<1e-9){ lo=hi-mag*0.75; hi=hi+mag*1.25; } /* room to forecast higher than a flat line */
@@ -3889,7 +3988,11 @@ function renderForecast(){
   drawChart(base,scen);
   const leg=document.getElementById('serieslegend');
   if(leg) leg.innerHTML=keys.map((k,si)=>{ const v=vget(k),col=COLORS[si%COLORS.length];
-    const bL=(base[k]||[])[L]||0, sL=(scen[k]||[])[L]||0, imp=sL-bL, pct=bL!==0?imp/Math.abs(bL)*100:0;
+    const rb=(base[k]||[])[L], rs=(scen[k]||[])[L];
+    if(rb===null||rs===null||rb===undefined||rs===undefined||Number.isNaN(rb)||Number.isNaN(rs)){
+      return `<div class="slrow"><i style="background:${col}"></i><span class="nm">${v.name}</span><span class="vv nr-val">${fmtVar(rb===undefined?null:rb,v.unit)} → ${fmtVar(rs===undefined?null:rs,v.unit)}</span><span class="dd">—</span></div>`;
+    }
+    const bL=rb, sL=rs, imp=sL-bL, pct=bL!==0?imp/Math.abs(bL)*100:0;
     const cls=imp>0?'pos':imp<0?'negv':'';
     return `<div class="slrow"><i style="background:${col}"></i><span class="nm">${v.name}</span><span class="vv">${fmtVar(bL,v.unit)} → ${fmtVar(sL,v.unit)}</span><span class="dd ${cls}">${imp===0?'—':fmtDelta(imp,v.unit)+' ('+(pct>=0?'+':'')+pct.toFixed(1)+'%)'}</span></div>`;
   }).join('')+`<div class="mut fz11" style="margin-top:6px"><b>${esc(model.periods[L]||'')}</b> only (one month) · plan → scenario — not a ${P()}-month total. Chart window is view-only; drags still update the full model forward.</div>`;
@@ -3909,8 +4012,9 @@ function drawChart(base,scen){
   let body='';
   keys.forEach((k,si)=>{ const v=vget(k), col=COLORS[si%COLORS.length], d=_domains[k]||{lo:0,hi:1};
     const b=slice(base[k]), s=slice(scen[k]);
-    const bp=b.map((val,j)=>`${chX(j,n)},${chY(val,d)}`).join(' ');
-    const sp=s.map((val,j)=>`${chX(j,n)},${chY(val,d)}`).join(' ');
+    const okPt=x=>typeof x==='number'&&Number.isFinite(x);
+    const bp=b.map((val,j)=>okPt(val)?`${chX(j,n)},${chY(val,d)}`:'').filter(Boolean).join(' ');
+    const sp=s.map((val,j)=>okPt(val)?`${chX(j,n)},${chY(val,d)}`:'').filter(Boolean).join(' ');
     body+=`<polyline points="${bp}" fill="none" stroke="${col}" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.4" stroke-linejoin="round"/>`;
     body+=`<polyline id="scen_${k}" points="${sp}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linejoin="round"/>`;
     const drag=v.kind!=='output';
@@ -3919,6 +4023,7 @@ function drawChart(base,scen){
       const i=idxs[j];
       const locked=i<closed;
       const can=drag&&!locked;
+      if(!okPt(val)) return '';
       return `<circle class="scenario-dot" data-key="${k}" data-i="${i}" data-j="${j}" data-locked="${locked?1:0}" cx="${chX(j,n)}" cy="${chY(val,d)}" r="4.2" style="fill:#fff;stroke:${col};${can?'cursor:ns-resize':(locked?'cursor:not-allowed;opacity:.32':'cursor:default;opacity:.45')}"></circle>`;
     }).join('');
   });
@@ -4209,6 +4314,7 @@ const FU_OPTS=[['higher','Higher is better'],['lower','Lower is better'],['neutr
 /* ---- saved versions (snapshots you can compare against) ---- */
 function deepClone(o){ return JSON.parse(JSON.stringify(o==null?null:o)); }
 function saveVersionModal(){
+  if(!guardTieOut()) return;
   model.versions=model.versions||[];
   const suggested = model.versions.some(v=>/budget/i.test(v.name))?'':'Budget FY';
   showModal(`<div class="mhead"><h3>Save this plan as a version</h3><button class="x" onclick="closeModal()">×</button></div>
@@ -4220,6 +4326,7 @@ function saveVersionModal(){
   setTimeout(()=>{const e=document.getElementById('verName'); if(e){e.focus();e.select();}},30);
 }
 function commitSaveVersion(){
+  if(!guardTieOut()) return;
   const name=(document.getElementById('verName').value||'').trim(); if(!name){ return; }
   model.versions=model.versions||[];
   const scen=evalModel(true), n=P(), data={}; model.vars.forEach(v=>data[v.key]=scen[v.key].slice(0,n));
@@ -4254,11 +4361,11 @@ function deleteVersion(id){ model.versions=(model.versions||[]).filter(v=>v.id!=
   ['A','B'].forEach(s=>{ if(_vState[s]==='v:'+id) _vState[s]= s==='A'?'scenario':'plan'; }); saveModel(); renderVariance(); }
 function openVersions(){
   model.versions=model.versions||[];
-  const rows=model.versions.length? model.versions.map(v=>`<div class="pinrow" style="flex-wrap:wrap;gap:6px"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}${v.drivers?' · scenario fork':''}</span><span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="pinbtn" onclick="applyScenarioFork('${v.id}')">Load as working scenario</button><button class="pinbtn" onclick="openPromoteModal('${v.id}')">Promote to Sheets</button><button class="pinbtn" onclick="deleteVersion('${v.id}')">Delete</button></span></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save freezes the full scenario (all drivers + overrides) so you can restore or compare later.</p>';
+  const rows=model.versions.length? model.versions.map(v=>`<div class="pinrow" style="flex-wrap:wrap;gap:6px"><b>${esc(v.name)}</b> <span class="mut fz11">${new Date(v.at).toLocaleDateString()}${v.drivers?' · scenario fork':''}</span><span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="pinbtn" onclick="applyScenarioFork('${v.id}')">Load as working scenario</button><button class="pinbtn" ${lockAttr()} onclick="openPromoteModal('${v.id}')">Promote to Sheets</button><button class="pinbtn" onclick="deleteVersion('${v.id}')">Delete</button></span></div>`).join('') : '<p class="mut fz12">No saved versions yet. Save freezes the full scenario (all drivers + overrides) so you can restore or compare later.</p>';
   showModal(`<div class="mhead"><h3>Saved versions</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody"><p class="mut fz12" style="margin:0 0 10px">Each save freezes the full scenario (drivers + overrides) and a series snapshot. Variance compare uses the stored series; <b>Load as working scenario</b> restores drivers for live editing. <b>Promote to Sheets</b> writes a fork’s inputs (or a driver dump tab) back to Google Sheets.</p>
       <div style="border:1px solid var(--line);border-radius:10px;padding:4px 12px">${rows}</div>
-      <div style="display:flex;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px"><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="saveVersionModal()">＋ Save current plan</button><button class="btn" onclick="openPromoteModal(null)">Promote working scenario</button></div><button class="btn primary" onclick="closeModal()">Done</button></div>
+      <div style="display:flex;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px"><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" ${lockAttr()} onclick="saveVersionModal()">＋ Save current plan</button><button class="btn" ${lockAttr()} onclick="openPromoteModal(null)">Promote working scenario</button></div><button class="btn primary" onclick="closeModal()">Done</button></div>
     </div>`);
 }
 
@@ -5013,7 +5120,7 @@ function renderVariance(){
     <div class="variance-actions-secondary">
       <button class="btn sm" onclick="openVersions()">Versions${(model.versions||[]).length?` · ${model.versions.length}`:''}</button>
       <button class="btn sm" onclick="saveVersionModal()">＋ Save version</button>
-      <button class="btn sm" onclick="openPromoteModal(null)" title="Write scenario inputs or dump drivers to Sheets">Promote to Sheets</button>
+      <button class="btn sm" ${lockAttr()} onclick="openPromoteModal(null)" title="Write scenario inputs or dump drivers to Sheets">Promote to Sheets</button>
     </div>
     </div>
     </div>
@@ -5267,7 +5374,7 @@ function renderCompare(){
   const cmpOpts=vers.map(k=>`<option value="${k}" ${k===_cState.cmp?'selected':''}>${verLabel(k)}</option>`).join('');
   const perOpts=`<option value="all" ${win[0]===0&&win[1]===P()-1?'selected':''}>Full timeline</option>`+model.periods.map((m,i)=>`<option value="${i}" ${win[0]===win[1]&&win[0]===i?'selected':''}>${m}</option>`).join('');
   const forkList=(model.versions||[]);
-  const forkStrip=forkList.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Saved forks</span>${forkList.map(v=>`<button class="tok ${(_cState.base==='v:'+v.id||_cState.cmp==='v:'+v.id)?'op':''}" onclick="setCCmp('v:${v.id}')" title="Set as fork">${esc(v.name)}</button>`).join('')}<button class="btn sm" onclick="openPromoteModal(null)">Promote to Sheets</button></div>`:`<p class="mut fz11" style="margin:10px 0 0">Only Plan and your working scenario so far — save a few named versions (Budget, Upside, Downside) to line up more here.</p>`;
+  const forkStrip=forkList.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center"><span class="mut fz10" style="text-transform:uppercase;letter-spacing:.06em">Saved forks</span>${forkList.map(v=>`<button class="tok ${(_cState.base==='v:'+v.id||_cState.cmp==='v:'+v.id)?'op':''}" onclick="setCCmp('v:${v.id}')" title="Set as fork">${esc(v.name)}</button>`).join('')}<button class="btn sm" ${lockAttr()} onclick="openPromoteModal(null)">Promote to Sheets</button></div>`:`<p class="mut fz11" style="margin:10px 0 0">Only Plan and your working scenario so far — save a few named versions (Budget, Upside, Downside) to line up more here.</p>`;
   const cinemaOn=!!_cState.cinema;
   document.getElementById('cControls').innerHTML=`<div class="selrow2">
     <div class="field"><label>Line to compare</label><select onchange="setCLine(this.value)">${lineOpts}</select></div>
@@ -5398,6 +5505,7 @@ function promoteSourceLabel(verId){
   return ver?ver.name:'(missing version)';
 }
 function openPromoteModal(verId){
+  if(!guardTieOut()) return;
   const versions=model.versions||[];
   const initial=verId||'';
   const opts=`<option value="" ${!initial?'selected':''}>Working scenario (current)</option>`+versions.map(v=>`<option value="${v.id}" ${v.id===initial?'selected':''}>${esc(v.name)}${v.drivers?' · fork':''}</option>`).join('');
@@ -5431,6 +5539,7 @@ function safeSheetName(name){
   return String(name||'Scenario').replace(/[:\/?*\[\]]/g,'').slice(0,80) || 'Scenario';
 }
 function previewPromote(){
+  if(!guardTieOut()) return;
   const _pm=document.querySelector('input[name=pmMode]:checked');
   if(_pm && _pm.value==='pricing'){
     const fb=document.getElementById('pmFeedback');
@@ -5469,6 +5578,7 @@ function previewPromote(){
   }
 }
 async function confirmPromote(){
+  if(!guardTieOut()) return;
   const verId=(document.getElementById('pmVer')||{}).value||'';
   const mode=(document.querySelector('input[name="pmMode"]:checked')||{}).value||'inputs';
   const fb=document.getElementById('pmFeedback'); if(!fb) return;
@@ -5514,6 +5624,7 @@ function driverOvSummaryRows(){
   });
 }
 function openWriteback(){
+  if(!guardTieOut()) return;
   const edited=inputs().filter(v=>v.writable!==false && hasOv(v.key));   // only inputs you actually changed
   const mapped=edited.filter(v=>v.range);
   if(!edited.length){
@@ -5535,6 +5646,7 @@ function openWriteback(){
     </div>`);
 }
 async function confirmWriteback(){
+  if(!guardTieOut()) return;
   const fb=document.getElementById('wbFeedback');
   const writes=inputs().filter(v=>v.writable!==false && hasOv(v.key) && v.range).map(v=>({range:v.range, values:[ scenRow(v) ]}));
   if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — ${writes.length} assumption(s) ready. Connect a sheet to write for real.</div>`; setTimeout(()=>{closeModal();toast('Dry run complete');},1200); return; }
@@ -5660,8 +5772,8 @@ async function confirmScanLayout(){
     if(conn.actualsSsid){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); } else syncClosedFromActuals();
     setStatus(ing.name||'Connected',true);
     const pm=(model.uiState&&model.uiState.scanMeta&&model.uiState.scanMeta.periodMode==='index')?` · Period 1 = ${model.periods[0]}`:'';
-    fb.innerHTML=`<div class="write-feedback success">✓ Scanned “${escH(ing.name||'your sheet')}” · ${ing.catalog} lines placed${pm}${ing.graphWarn?` · ${escH(ing.graphWarn)}`:''}</div>`;
-    setTimeout(()=>{ closeModal(); render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):'')+(ing.graphWarn?(' · '+ing.graphWarn):'')); },1100);
+    fb.innerHTML=`<div class="write-feedback success">✓ Scanned “${escH(ing.name||'your sheet')}” · ${ing.catalog} lines placed${pm}${escH(tieSummaryText(ing))}${ing.graphWarn?` · ${escH(ing.graphWarn)}`:''}</div>`;
+    setTimeout(()=>{ closeModal(); render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):'')+(ing.graphWarn?(' · '+ing.graphWarn):'')+tieSummaryText(ing)); },1100);
   }catch(err){
     fb.innerHTML=`<div class="conn-err">Scan did not finish: ${escH(classifyConnectError(err,'model'))}</div>`;
   }
@@ -5697,7 +5809,7 @@ async function scanModelSheet(){
       const meta=model.uiState&&model.uiState.scanMeta; const src=model.sources&&model.sources.forecast;
       if(src){ if(src.labelCol) g('cnLabel').value=src.labelCol; if(src.headerRow) g('cnHeader').value=String(src.headerRow); if(src.firstCol) g('cnFirst').value=src.firstCol; if(src.months) g('cnMonths').value=String(src.months); }
     }
-    fb.innerHTML=`<div class="write-feedback success">✓ Placed ${ing.catalog} lines${ing.keepMatched?` · matched ${ing.keepMatched} existing drivers`:''}${ing.formulas?` · ${ing.formulas} formulas`:''} from “${ing.name||'your sheet'}”${ing.graphWarn?` · ${escH(ing.graphWarn)}`:''}. Closing…</div>`;
+    fb.innerHTML=`<div class="write-feedback success">✓ Placed ${ing.catalog} lines${ing.keepMatched?` · matched ${ing.keepMatched} existing drivers`:''}${ing.formulas?` · ${ing.formulas} formulas`:''} from “${ing.name||'your sheet'}”${escH(tieSummaryText(ing))}${ing.graphWarn?` · ${escH(ing.graphWarn)}`:''}. Closing…</div>`;
     setStatus(ing.name||'Connected',true);
     setTimeout(()=>{ closeModal(); render(); toast(`Scan placed ${ing.catalog} lines — Confirm to accept`); },1100);
   }catch(err){
@@ -5754,11 +5866,11 @@ async function doConnect(){
       errKind='model';
       const ranges=[...new Set(mapped.map(v=>v.range))];
       let data;
-      try{ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:true}); }
-      catch(e){ data=await gasReadRanges(ranges,{url,token,ssid,includeFormulas:false}); }
-      if(!data||!data.ok) throw new Error((data&&data.error)||'Model sheet read failed');
+      data=await gasReadChunked(ranges,{url,token,ssid,includeFormulas:true});
+      if(!data || data.unread.size>=ranges.length) throw new Error((data&&data.lastError)||'Model sheet read failed');
       sheetName=sheetName||data.spreadsheet||"";
       mapped.forEach(v=>{
+        if(data.unread.has(v.range)) return;   /* not read: leave the row as it was — never overwrite with 0 */
         const raw=(data.values[v.range]&&data.values[v.range][0])||[];
         let N=raw.length; while(N>0&&(raw[N-1]===''||raw[N-1]==null))N--;
         const arr=raw.slice(0,N).map(x=>toNum(x,scale));
@@ -5810,7 +5922,7 @@ async function doConnect(){
       if(actualsRaw){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); }
       const actPlace=ing.actualsPlaced?` · ${ing.actualsPlaced} actuals mapped${ing.actualsTab?` from “${esc(ing.actualsTab)}”`:''}`:(actualsRaw?' · actuals linked (no matching lines yet)':'');
       fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}${actPlace}</div>`;
-      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:'')+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):'')+(ing.graphWarn?(' · '+ing.graphWarn):''));},1100);
+      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:'')+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):'')+(ing.graphWarn?(' · '+ing.graphWarn):'')+tieSummaryText(ing));},1100);
     }catch(scanErr){
       fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
         <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}</div>`;
@@ -6246,11 +6358,63 @@ async function gasReadRanges(ranges, opts){
     const data=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),redirect:'follow'}).then(r=>r.json());
     if(data&&data.ok) return data;
   }catch(e){}
+  /* GET fallback: never build a URL past GAS_GET_MAX chars — split the list into several short GETs */
   const sq=ssid?`&ssid=${q(ssid)}`:'';
   const fq=includeFormulas?`&includeFormulas=true`:'';
-  const data=await fetch(`${url}?action=read&token=${q(token)}${sq}${fq}&ranges=${q(list.join('|'))}`,{redirect:'follow'}).then(r=>r.json());
-  if(!data.ok) throw new Error(data.error||'read failed');
-  return data;
+  const head=`${url}?action=read&token=${q(token)}${sq}${fq}&ranges=`;
+  const groups=[]; let cur=[], len=head.length;
+  list.forEach(r=>{
+    const add=q(r).length+(cur.length?3:0);
+    if(cur.length && len+add>GAS_GET_MAX){ groups.push(cur); cur=[]; len=head.length; }
+    if(head.length+q(r).length>GAS_GET_MAX) throw new Error('Range too long to read: '+r);
+    cur.push(r); len+=q(r).length+(cur.length>1?3:0);
+  });
+  if(cur.length) groups.push(cur);
+  const merged={ok:true, values:{}, skipped:[]}; if(includeFormulas) merged.formulas={};
+  for(const g of groups){
+    const data=await fetch(head+q(g.join('|')),{redirect:'follow'}).then(r=>r.json());
+    if(!data||!data.ok) throw new Error((data&&data.error)||'read failed');
+    merged.spreadsheet=data.spreadsheet;
+    Object.assign(merged.values, data.values||{});
+    if(includeFormulas){ if(data.formulas) Object.assign(merged.formulas, data.formulas); else delete merged.formulas; }
+    if(data.skipped) merged.skipped=merged.skipped.concat(data.skipped);
+  }
+  if(!merged.skipped.length) delete merged.skipped;
+  return merged;
+}
+/* Read many ranges safely: batches of GAS_CHUNK, GAS_PARALLEL at a time, one retry per batch.
+   A batch that fails twice (or a range Apps Script skipped) lands in `unread` — callers must show it as
+   "not read", never as 0. */
+const GAS_CHUNK=40, GAS_PARALLEL=3, GAS_GET_MAX=6000;
+async function gasReadChunked(ranges, opts){
+  opts=opts||{};
+  const uniq=[...new Set((ranges||[]).filter(r=>r!=null&&String(r).trim()))];
+  const size=Math.max(1,opts.chunk||GAS_CHUNK);
+  const chunks=[]; for(let i=0;i<uniq.length;i+=size) chunks.push(uniq.slice(i,i+size));
+  const out={ok:true, values:{}, formulas:opts.includeFormulas?{}:undefined, unread:new Set(), skipped:[], formulasField:false,
+    batches:chunks.length, failedBatches:0, retried:0, lastError:''};
+  const runOne=async chunk=>{
+    let data=null, err=null;
+    for(let attempt=0;attempt<2 && !data;attempt++){
+      if(attempt) out.retried++;
+      try{ const d=await gasReadRanges(chunk, opts); if(d && d.ok!==false) data=d; else err=new Error((d&&d.error)||'read failed'); }
+      catch(e){ err=e; }
+    }
+    if(!data){ out.failedBatches++; out.lastError=String((err&&err.message)||err||'read failed'); chunk.forEach(r=>out.unread.add(r)); return; }
+    if(data.spreadsheet) out.spreadsheet=data.spreadsheet;
+    if(opts.includeFormulas && data.formulas) out.formulasField=true;
+    const sk=(data.skipped||[]).map(String);
+    chunk.forEach(r=>{
+      if(sk.some(x=>x.startsWith(r+': '))){ out.unread.add(r); out.skipped.push(sk.find(x=>x.startsWith(r+': '))); return; }
+      const v=lookupGridCell(data.values||{}, r);
+      if(v==null){ out.unread.add(r); return; }
+      out.values[r]=v;
+      if(out.formulas && data.formulas){ const f=lookupGridCell(data.formulas, r); if(f!=null) out.formulas[r]=f; }
+    });
+  };
+  for(let i=0;i<chunks.length;i+=GAS_PARALLEL) await Promise.all(chunks.slice(i,i+GAS_PARALLEL).map(runOne));
+  if(opts.includeFormulas && !out.formulasField) out.formulas=undefined;
+  return out;
 }
 /**
  * Attach parsed sheet formulas onto scanned line objects.
@@ -6593,6 +6757,118 @@ function isStaleFakePnLInput(v){
   /* Totals / rollups that should be formulas */
   if(!/\b(total|net|gross|operating)\b/i.test(nm) && !/\brevenue\b/i.test(nm)) return false;
   return true;
+}
+/* ============================ TIE-OUT (app vs sheet, every P&L line, every period) ============================ */
+const TIE_TOL_ABS=1, TIE_TOL_REL=0.0005;   /* max(₹1, 0.05% of the sheet value) absorbs decimal cells */
+function tieLines(){
+  return (model.vars||[]).filter(v=>v&&v.srcGraph&&v.srcLine&&String(v.account||'').trim()&&v.unit!=='%');
+}
+/* Leaves a line really reaches: true inputs vs cells where the walk stopped (held formula, map cap, not read). */
+function lineLeaves(key){
+  const seen=new Set(), leaves=[];
+  const byLower={}; (model.vars||[]).forEach(x=>{ if(x&&x.key) byLower[String(x.key).toLowerCase()]=x; });
+  const walk=k=>{
+    const kl=String(k).toLowerCase(); if(seen.has(kl)) return; seen.add(kl);
+    const v=byLower[kl];
+    if(!v){ leaves.push({key:k, name:k, range:'', kind:'missing'}); return; }
+    if(v.kind==='formula'){
+      if(!String(v.expr||'').trim()){ leaves.push({key:v.key, name:v.name, range:v.range||'', kind:'held', why:v.heldReason||v.classifyNote||''}); return; }
+      const ds=driversOf(v);
+      if(!ds.length){ leaves.push({key:v.key, name:v.name, range:v.range||'', kind:'constant'}); return; }
+      ds.forEach(walk); return;
+    }
+    if(v.kind==='input'){
+      leaves.push({key:v.key, name:v.name, range:v.range||'', kind:v.unread?'unread':((v.boundary||v.walkUnread)?'boundary':'input')});
+      return;
+    }
+    leaves.push({key:v.key, name:v.name, range:v.range||'', kind:'output'});
+  };
+  walk(key);
+  return leaves;
+}
+function lineDepthReport(){
+  return tieLines().map(v=>{
+    const leaves=lineLeaves(v.key);
+    const stops=leaves.filter(l=>l.kind!=='input'&&l.kind!=='constant');
+    return {key:v.key, name:v.name, ok:!stops.length && leaves.some(l=>l.kind==='input'), inputs:leaves.filter(l=>l.kind==='input').length, stops};
+  });
+}
+function runTieOut(){
+  const res=evalModel(false), n=P();
+  const lines=tieLines().map(v=>{
+    const o={key:v.key, name:v.name, range:v.range||'', ok:true};
+    if(v.unread||!Array.isArray(v.read)){ o.ok=false; o.notRead=true; return o; }
+    for(let p=0;p<n;p++){
+      const app=(res[v.key]||[])[p];
+      const sheet=v.read[p]==null?0:v.read[p];
+      if(app===null){ o.ok=false; o.notRead=true; o.p=p; return o; }
+      const tol=Math.max(TIE_TOL_ABS, Math.abs(sheet)*TIE_TOL_REL);
+      if(typeof app!=='number'||!Number.isFinite(app)||Math.abs(app-sheet)>tol){
+        o.ok=false; o.p=p; o.sheet=sheet; o.app=(typeof app==='number'&&Number.isFinite(app))?app:null; o.err=v.err||''; return o;
+      }
+    }
+    return o;
+  });
+  const g=(model.vars||[]).filter(v=>v&&v.srcGraph);
+  const pick=v=>({key:v.key, name:v.name, range:v.range||''});
+  /* walkUnread = the cell's formula couldn't be read (values may have come through): still a needed cell not read */
+  const unreadCells=g.filter(v=>v.unread||v.walkUnread).map(v=>Object.assign(pick(v),{formulaOnly:!v.unread}));
+  const held=g.filter(v=>v.kind==='formula'&&!String(v.expr||'').trim()&&v.unit!=='%').map(v=>Object.assign(pick(v),{formula:v.sheetFormula||'', why:v.heldReason||''}));
+  const boundary=g.filter(v=>v.boundary&&!v.unread).map(pick);
+  const shallow=lineDepthReport().filter(r=>!r.ok);
+  const tied=lines.filter(l=>l.ok).length;
+  return {at:Date.now(), periods:n, total:lines.length, tied, lines, unreadCells, held, boundary, shallow,
+    ok:tied===lines.length && !unreadCells.length};
+}
+function tieOutLock(){
+  const t=model.uiState&&model.uiState.tieOut;
+  if(!t || !(model.sources&&model.sources.graph)) return '';
+  if(t.ok) return '';
+  const bits=[];
+  if(t.tied<t.total) bits.push(`${t.tied} of ${t.total} P&L lines tie to the sheet`);
+  if(t.unreadCells&&t.unreadCells.length) bits.push(`${t.unreadCells.length} sheet row(s) not read`);
+  return 'Locked until the model ties to the sheet: '+bits.join(' · ')+'. See the tie-out check at the top of the page.';
+}
+function lockAttr(){ const r=tieOutLock(); return r?`disabled data-locked="1" title="${esc(r)}"`:''; }
+function guardTieOut(){ const r=tieOutLock(); if(r){ try{ toast(r); }catch(e){} return false; } return true; }
+function recheckTieOut(){
+  const old=(model.uiState&&model.uiState.tieOut)||{};
+  model.uiState=model.uiState||{};
+  model.uiState.tieOut=Object.assign(runTieOut(),{readLog:old.readLog||null});
+  saveModel(); render();
+  const t=model.uiState.tieOut; toast(`${t.tied} of ${t.total} P&L lines tie to the sheet`+(t.unreadCells.length?` · ${t.unreadCells.length} not read`:''));
+}
+function tieSummaryText(ing){
+  const t=ing&&ing.tieOut; if(!t) return '';
+  return ` · ${t.tied} of ${t.total} P&L lines tie to the sheet${t.unread?` · ${t.unread} row(s) not read`:''}${t.ok?'':' — saving locked, see the tie-out check'}`;
+}
+function tieOutBannerHtml(){
+  const t=model.uiState&&model.uiState.tieOut;
+  if(!t || !(model.sources&&model.sources.graph)) return '';
+  const per=i=>esc(model.periods[i]||('period '+(i+1)));
+  const money=x=>x==null?'not read':((x<0?'−':'')+'₹'+fmtNum(Math.abs(x)));
+  const rng=r=>r?`<code>${esc(r)}</code>`:'';
+  const list=(arr,fn,max)=>`<ul>${arr.slice(0,max).map(fn).join('')}${arr.length>max?`<li>…and ${arr.length-max} more</li>`:''}</ul>`;
+  const fails=(t.lines||[]).filter(l=>!l.ok);
+  const unread=t.unreadCells||[], held=t.held||[], boundary=t.boundary||[], shallow=t.shallow||[];
+  const warn=held.length||boundary.length||shallow.length;
+  let h='';
+  if(t.ok){
+    h+=`<div class="tieout ${warn?'warn':'ok'}" id="tieoutBanner"><b class="h">✓ ${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> in every period (within ₹1 or 0.05%). Save as version, Review write-back and Promote to Sheets are unlocked.`;
+  } else {
+    h+=`<div class="tieout" id="tieoutBanner"><b class="h">${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> — Save as version, Review write-back and Promote to Sheets stay locked until every line ties in every period and every cell is read.`;
+    if(fails.length) h+=`<div class="sub"><b>Lines that don't tie</b>${list(fails,l=>`<li><b>${esc(l.name)}</b> — ${l.notRead?`not read${l.p!=null?` from ${per(l.p)}`:''} ${rng(l.range)}`:`first off in ${per(l.p)}: sheet ${money(l.sheet)} · app ${l.app==null?('error'+(l.err?' ('+esc(l.err)+')':'')):money(l.app)}`}</li>`,15)}</div>`;
+    if(unread.length) h+=`<div class="sub"><b>Not read from the sheet (${unread.length})</b> — shown as “not read”, never ₹0. Scan again; if it repeats, the Apps Script timed out or the range doesn't exist.${list(unread,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.formulaOnly?' — formula not read (values came through)':''}</li>`,12)}</div>`;
+  }
+  if(shallow.length) h+=`<div class="sub"><b>Lines that don't reach their real inputs yet (${shallow.length})</b>${list(shallow,r=>`<li><b>${esc(r.name)}</b> stops at ${r.stops.slice(0,3).map(x=>`${rng(x.range)} ${x.kind==='held'?'(formula the app can\'t recompute yet — held at sheet values)':x.kind==='boundary'?'(map stopped here — value from the sheet)':x.kind==='unread'?'(not read)':'('+esc(x.kind)+')'}`).join(', ')}${r.stops.length>3?'…':''}</li>`,10)}</div>`;
+  else if(held.length) h+=`<div class="sub"><b>Held at sheet values (${held.length})</b> — the app can't recompute these formulas yet, so drivers below them won't move them.${list(held,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.why?' — '+esc(c.why):''}</li>`,8)}</div>`;
+  const rl=t.readLog;
+  if(rl&&(rl.walk||rl.series)){
+    const b=(rl.walk?rl.walk.batches:0)+(rl.series?rl.series.batches:0), r=(rl.walk?rl.walk.retried:0)+(rl.series?rl.series.retried:0), f=(rl.walk?rl.walk.failedBatches:0)+(rl.series?rl.series.failedBatches:0);
+    h+=`<div class="sub mut fz11">Sheet reads: ${b} batch(es) of up to ${GAS_CHUNK} ranges · ${r} retried · ${f} failed.</div>`;
+  }
+  h+=`<div class="sub"><button class="btn sm" onclick="recheckTieOut()">Re-check tie-out</button></div></div>`;
+  return h;
 }
 function staleGraphModel(){
   const fakes=(model.vars||[]).filter(isStaleFakePnLInput);
