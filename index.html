@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:onboard-tieout-20261008b -->
+<!-- NN_BUILD:onboard-linelock-20261008c -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -1824,7 +1824,8 @@ function inputVal(v,p,scenario){
   }
   return sched[p];
 }
-function setOv(key,p,val){ if(!model.ov) model.ov={}; if(!model.ov[key]) model.ov[key]={}; model.ov[key][p]=+(+val).toFixed(4); }
+function isStopCell(v){ return !!(v&&v.srcGraph&&(v.unread||v.boundary||v.walkUnread||(v.kind==='formula'&&!String(v.expr||'').trim()))); }
+function setOv(key,p,val){ if(model.sources&&model.sources.graph&&isStopCell(vget(key))) return; if(!model.ov) model.ov={}; if(!model.ov[key]) model.ov[key]={}; model.ov[key][p]=+(+val).toFixed(4); }
 function delOv(key,p){ if(model.ov&&model.ov[key]){ delete model.ov[key][p]; if(!Object.keys(model.ov[key]).length) delete model.ov[key]; } }
 function hasOv(key){ return model.ov&&model.ov[key]&&Object.keys(model.ov[key]).length; }
 function clearScenario(){ model.ov={}; renderAssumptions(); renderForecast(); saveModel(); }
@@ -4129,6 +4130,7 @@ function outAt(key,period){ return (evalModel(true)[key]||[])[period]||0; }
 
 function applyDrag(key,period,target){
   const v=vget(key); if(!v) return;
+  { const lr=editLockReason(key); if(lr){ _solveMsg=lr; _lastDragXray=null; return; } }
   if(period < (model.closed|0)){ _solveMsg='Closed months are locked.'; return; }
   expandDomainForDrag(key, target);
   if(v.kind==='input'){ setOv(key,period,target); _solveMsg=''; _lastDragXray=null; return; }
@@ -5524,7 +5526,7 @@ function openPromoteModal(verId){
     </div>`);
 }
 function promoteWrites(verId){
-  return inputs().filter(v=>v.writable!==false && v.range).map(v=>({range:v.range, values:[ scenRowForPromote(verId,v) ], name:v.name, key:v.key}));
+  return inputs().filter(v=>v.writable!==false && v.range && !editLockReason(v.key)).map(v=>({range:v.range, values:[ scenRowForPromote(verId,v) ], name:v.name, key:v.key}));
 }
 function promoteGrid(verId){
   const n=P();
@@ -5625,7 +5627,7 @@ function driverOvSummaryRows(){
 }
 function openWriteback(){
   if(!guardTieOut()) return;
-  const edited=inputs().filter(v=>v.writable!==false && hasOv(v.key));   // only inputs you actually changed
+  const edited=inputs().filter(v=>v.writable!==false && hasOv(v.key) && !editLockReason(v.key));   // only inputs you actually changed
   const mapped=edited.filter(v=>v.range);
   if(!edited.length){
     showModal(`<div class="mhead"><h3>Review write-back</h3><button class="x" onclick="closeModal()">×</button></div>
@@ -5648,7 +5650,7 @@ function openWriteback(){
 async function confirmWriteback(){
   if(!guardTieOut()) return;
   const fb=document.getElementById('wbFeedback');
-  const writes=inputs().filter(v=>v.writable!==false && hasOv(v.key) && v.range).map(v=>({range:v.range, values:[ scenRow(v) ]}));
+  const writes=inputs().filter(v=>v.writable!==false && hasOv(v.key) && v.range && !editLockReason(v.key)).map(v=>({range:v.range, values:[ scenRow(v) ]}));
   if(!conn.connected){ fb.innerHTML=`<div class="write-feedback success">✓ Dry run OK — ${writes.length} assumption(s) ready. Connect a sheet to write for real.</div>`; setTimeout(()=>{closeModal();toast('Dry run complete');},1200); return; }
   fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Writing assumptions to your sheet…</div>`;
   try{
@@ -6793,6 +6795,16 @@ function lineDepthReport(){
     return {key:v.key, name:v.name, ok:!stops.length && leaves.some(l=>l.kind==='input'), inputs:leaves.filter(l=>l.kind==='input').length, stops};
   });
 }
+/* CFO rule: a line that ties but stops short of its real inputs is fine to view and report variance on,
+   but drag, Apply and write-back must not land on a formula cell. Lock edits on that line only. */
+function editLockReason(key){
+  if(!(model.sources&&model.sources.graph)) return '';
+  const v=vget(key); if(!v) return '';
+  let stops=[]; try{ stops=lineLeaves(key).filter(l=>l.kind!=='input'&&l.kind!=='constant'); }catch(e){ return ''; }
+  if(!stops.length) return '';
+  const at=stops.slice(0,2).map(x=>x.range||x.name).join(', ')+(stops.length>2?'…':'');
+  return `${v.name} doesn't reach its real inputs yet (stops at ${at}). You can view it and report variance on it, but drag, Apply and write-back are locked on this line. See the tie-out check at the top of the page.`;
+}
 function runTieOut(){
   const res=evalModel(false), n=P();
   const lines=tieLines().map(v=>{
@@ -6860,7 +6872,7 @@ function tieOutBannerHtml(){
     if(fails.length) h+=`<div class="sub"><b>Lines that don't tie</b>${list(fails,l=>`<li><b>${esc(l.name)}</b> — ${l.notRead?`not read${l.p!=null?` from ${per(l.p)}`:''} ${rng(l.range)}`:`first off in ${per(l.p)}: sheet ${money(l.sheet)} · app ${l.app==null?('error'+(l.err?' ('+esc(l.err)+')':'')):money(l.app)}`}</li>`,15)}</div>`;
     if(unread.length) h+=`<div class="sub"><b>Not read from the sheet (${unread.length})</b> — shown as “not read”, never ₹0. Scan again; if it repeats, the Apps Script timed out or the range doesn't exist.${list(unread,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.formulaOnly?' — formula not read (values came through)':''}</li>`,12)}</div>`;
   }
-  if(shallow.length) h+=`<div class="sub"><b>Lines that don't reach their real inputs yet (${shallow.length})</b>${list(shallow,r=>`<li><b>${esc(r.name)}</b> stops at ${r.stops.slice(0,3).map(x=>`${rng(x.range)} ${x.kind==='held'?'(formula the app can\'t recompute yet — held at sheet values)':x.kind==='boundary'?'(map stopped here — value from the sheet)':x.kind==='unread'?'(not read)':'('+esc(x.kind)+')'}`).join(', ')}${r.stops.length>3?'…':''}</li>`,10)}</div>`;
+  if(shallow.length) h+=`<div class="sub"><b>Lines that don't reach their real inputs yet (${shallow.length})</b> <span class="mut">— view and variance only; drag, Apply and write-back are locked on these lines</span>${list(shallow,r=>`<li><b>${esc(r.name)}</b> stops at ${r.stops.slice(0,3).map(x=>`${rng(x.range)} ${x.kind==='held'?'(formula the app can\'t recompute yet — held at sheet values)':x.kind==='boundary'?'(map stopped here — value from the sheet)':x.kind==='unread'?'(not read)':'('+esc(x.kind)+')'}`).join(', ')}${r.stops.length>3?'…':''}</li>`,10)}</div>`;
   else if(held.length) h+=`<div class="sub"><b>Held at sheet values (${held.length})</b> — the app can't recompute these formulas yet, so drivers below them won't move them.${list(held,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.why?' — '+esc(c.why):''}</li>`,8)}</div>`;
   const rl=t.readLog;
   if(rl&&(rl.walk||rl.series)){
