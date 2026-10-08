@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:onboard-linelock-20261008c -->
+<!-- NN_BUILD:onboard-reads-20261008e -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -1087,7 +1087,7 @@ async function walkFormulaGraph(seeds, opts){
     const batch=queue.splice(0,GAS_CHUNK*GAS_PARALLEL);
     const ranges=batch.map(n=>quoteSheetRange(n.sheet, n.a1));
     const data=await gasReadChunked(ranges,{includeFormulas:true});
-    readLog.batches+=data.batches; readLog.failedBatches+=data.failedBatches; readLog.retried+=data.retried; if(data.lastError) readLog.errors.push(data.lastError);
+    readLog.batches+=data.batches; readLog.failedBatches+=data.failedBatches; readLog.retried+=data.retried; (data.errors||[]).forEach(m=>{ if(!readLog.errors.includes(m)) readLog.errors.push(m); });
     batch.forEach((n,i)=>{
       const rng=ranges[i];
       if(data.unread.has(rng)){
@@ -1462,6 +1462,13 @@ async function ingestFormulaGraphFromSheet(opts){
     applyRollupHeuristic(v);
     return v;
   });
+  { const seenLbl=new Set();
+    const norm=x=>String(x||'').toLowerCase().replace(/\([^)]*\)/g,'').replace(/[^a-z0-9%]+/g,' ').trim();
+    newVars.filter(v=>v.srcLine).sort((a,b)=>(+parseRange(a.range).row||0)-(+parseRange(b.range).row||0)).forEach(v=>{
+      const k=norm(v.name); if(!k) return;
+      if(seenLbl.has(k)){ v.srcLine=false; v.checkRow=true; v.account=undefined; v.classifyNote='Repeats an earlier P&L line (summary or check block) — not counted as a separate line'; }
+      else seenLbl.add(k);
+    }); }
   /* Keep the workbook's full forecast series on every graph node. The formula
      graph explains lineage; it must not replace the authoritative forecast
      with a reconstruction from only the first input cell. */
@@ -1471,7 +1478,7 @@ async function ingestFormulaGraphFromSheet(opts){
     let graphData=null;
     try{ graphData=await gasReadChunked(graphRanges,{ssid,includeFormulas:true}); }
     catch(seriesErr){ graphData={values:{}, formulas:{}, unread:new Set(graphRanges), batches:0, failedBatches:1, retried:0, formulasField:false}; }
-    seriesLog={batches:graphData.batches, failedBatches:graphData.failedBatches, retried:graphData.retried, error:graphData.lastError||''};
+    seriesLog={batches:graphData.batches, failedBatches:graphData.failedBatches, retried:graphData.retried, error:graphData.lastError||'', errors:graphData.errors||[]};
     newVars.forEach(v=>{
       if(!v.range || graphData.unread.has(v.range)){
         /* Series read failed twice: this row is NOT READ (shown as such, blocks save/write-back) */
@@ -6293,7 +6300,12 @@ function intPeriodRun(row){
   for(let c=1;c<r.length;c++){
     if(asInt(r[c])!==1) continue;
     let n=1; while(c+n<r.length && asInt(r[c+n])===n+1) n++;
-    if(n>=3) return {firstColIdx:c, months:n};
+    if(n>=3){
+      /* Year 2 numbered 1,2,3… again straight after Year 1 is the same timeline, not a new table */
+      let end=c+n;
+      while(end<r.length && asInt(r[end])===1){ let k=1; while(end+k<r.length && asInt(r[end+k])===k+1) k++; if(k<3) break; end+=k; }
+      return {firstColIdx:c, months:end-c};
+    }
   }
   return null;
 }
@@ -6387,7 +6399,8 @@ async function gasReadRanges(ranges, opts){
 /* Read many ranges safely: batches of GAS_CHUNK, GAS_PARALLEL at a time, one retry per batch.
    A batch that fails twice (or a range Apps Script skipped) lands in `unread` — callers must show it as
    "not read", never as 0. */
-const GAS_CHUNK=40, GAS_PARALLEL=3, GAS_GET_MAX=6000;
+const GAS_CHUNK=20, GAS_PARALLEL=1, GAS_GET_MAX=6000, GAS_BACKOFF=[0,1000,3000];
+const gasSleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function gasReadChunked(ranges, opts){
   opts=opts||{};
   const uniq=[...new Set((ranges||[]).filter(r=>r!=null&&String(r).trim()))];
@@ -6395,19 +6408,30 @@ async function gasReadChunked(ranges, opts){
   const chunks=[]; for(let i=0;i<uniq.length;i+=size) chunks.push(uniq.slice(i,i+size));
   const out={ok:true, values:{}, formulas:opts.includeFormulas?{}:undefined, unread:new Set(), skipped:[], formulasField:false,
     batches:chunks.length, failedBatches:0, retried:0, lastError:''};
-  const runOne=async chunk=>{
-    let data=null, err=null;
-    for(let attempt=0;attempt<2 && !data;attempt++){
-      if(attempt) out.retried++;
-      try{ const d=await gasReadRanges(chunk, opts); if(d && d.ok!==false) data=d; else err=new Error((d&&d.error)||'read failed'); }
+  out.errors=[];
+  const noteErr=e=>{ const m=String((e&&e.message)||e||'read failed').slice(0,300); out.lastError=m; if(!out.errors.includes(m)) out.errors.push(m); };
+  const fetchChunk=async chunk=>{
+    let err=null;
+    for(let attempt=0;attempt<GAS_BACKOFF.length;attempt++){
+      if(attempt){ out.retried++; await gasSleep(GAS_BACKOFF[attempt]); }
+      try{ const d=await gasReadRanges(chunk, opts); if(d && d.ok!==false) return d; err=new Error((d&&d.error)||'read failed'); }
       catch(e){ err=e; }
     }
-    if(!data){ out.failedBatches++; out.lastError=String((err&&err.message)||err||'read failed'); chunk.forEach(r=>out.unread.add(r)); return; }
+    noteErr(err); return null;
+  };
+  const runOne=async chunk=>{
+    let data=await fetchChunk(chunk);
+    if(!data && chunk.length>1){
+      /* Split a failing batch in half so one bad or slow range can't sink the other 19 */
+      const mid=Math.ceil(chunk.length/2); out.batches+=2;
+      await runOne(chunk.slice(0,mid)); await runOne(chunk.slice(mid)); return;
+    }
+    if(!data){ out.failedBatches++; chunk.forEach(r=>out.unread.add(r)); return; }
     if(data.spreadsheet) out.spreadsheet=data.spreadsheet;
     if(opts.includeFormulas && data.formulas) out.formulasField=true;
     const sk=(data.skipped||[]).map(String);
     chunk.forEach(r=>{
-      if(sk.some(x=>x.startsWith(r+': '))){ out.unread.add(r); out.skipped.push(sk.find(x=>x.startsWith(r+': '))); return; }
+      if(sk.some(x=>x.startsWith(r+': '))){ out.unread.add(r); const why=sk.find(x=>x.startsWith(r+': ')); out.skipped.push(why); noteErr(why); return; }
       const v=lookupGridCell(data.values||{}, r);
       if(v==null){ out.unread.add(r); return; }
       out.values[r]=v;
@@ -6866,9 +6890,9 @@ function tieOutBannerHtml(){
   const warn=held.length||boundary.length||shallow.length;
   let h='';
   if(t.ok){
-    h+=`<div class="tieout ${warn?'warn':'ok'}" id="tieoutBanner"><b class="h">✓ ${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> in every period (within ₹1 or 0.05%). Save as version, Review write-back and Promote to Sheets are unlocked.`;
+    h+=`<div class="tieout ${warn?'warn':'ok'}" id="tieoutBanner"><b class="h">✓ ${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> in all ${t.periods} periods, ${per(0)} → ${per((t.periods||1)-1)} (within ₹1 or 0.05%). Save as version, Review write-back and Promote to Sheets are unlocked.`;
   } else {
-    h+=`<div class="tieout" id="tieoutBanner"><b class="h">${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> — Save as version, Review write-back and Promote to Sheets stay locked until every line ties in every period and every cell is read.`;
+    h+=`<div class="tieout" id="tieoutBanner"><b class="h">${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> (checked across ${t.periods} periods, ${per(0)} → ${per((t.periods||1)-1)}) — Save as version, Review write-back and Promote to Sheets stay locked until every line ties in every period and every cell is read.`;
     if(fails.length) h+=`<div class="sub"><b>Lines that don't tie</b>${list(fails,l=>`<li><b>${esc(l.name)}</b> — ${l.notRead?`not read${l.p!=null?` from ${per(l.p)}`:''} ${rng(l.range)}`:`first off in ${per(l.p)}: sheet ${money(l.sheet)} · app ${l.app==null?('error'+(l.err?' ('+esc(l.err)+')':'')):money(l.app)}`}</li>`,15)}</div>`;
     if(unread.length) h+=`<div class="sub"><b>Not read from the sheet (${unread.length})</b> — shown as “not read”, never ₹0. Scan again; if it repeats, the Apps Script timed out or the range doesn't exist.${list(unread,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.formulaOnly?' — formula not read (values came through)':''}</li>`,12)}</div>`;
   }
@@ -6878,6 +6902,8 @@ function tieOutBannerHtml(){
   if(rl&&(rl.walk||rl.series)){
     const b=(rl.walk?rl.walk.batches:0)+(rl.series?rl.series.batches:0), r=(rl.walk?rl.walk.retried:0)+(rl.series?rl.series.retried:0), f=(rl.walk?rl.walk.failedBatches:0)+(rl.series?rl.series.failedBatches:0);
     h+=`<div class="sub mut fz11">Sheet reads: ${b} batch(es) of up to ${GAS_CHUNK} ranges · ${r} retried · ${f} failed.</div>`;
+    { const errs=[...new Set([].concat((rl.walk&&rl.walk.errors)||[], (rl.series&&rl.series.errors)||[], (rl.series&&rl.series.error)?[rl.series.error]:[]))].slice(0,3);
+      if(errs.length) h+=`<div class="sub fz11"><b>Error from your Apps Script:</b> ${errs.map(e=>`<code>${esc(e)}</code>`).join(' · ')}</div>`; }
   }
   h+=`<div class="sub"><button class="btn sm" onclick="recheckTieOut()">Re-check tie-out</button></div></div>`;
   return h;
