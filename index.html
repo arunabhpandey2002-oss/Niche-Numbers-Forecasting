@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:scan-range-20260910e -->
+<!-- NN_BUILD:onboard-periods-20261008a -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -872,7 +872,7 @@ function tokenizeSheetFormula(src){
         j++;
         const m=s.slice(j).match(/^\$?[A-Za-z]+\$?\d+/);
         if(!m){ toks.push({t:'bad', v:s.slice(i)}); break; }
-        toks.push({t:'ref', sheet, a1:m[0].replace(/\$/g,'')}); i=j+m[0].length; continue;
+        toks.push({t:'ref', sheet, a1:m[0].replace(/\$/g,''), absCol:m[0].charAt(0)==='$'}); i=j+m[0].length; continue;
       }
       toks.push({t:'bad', v:s.slice(i)}); break;
     }
@@ -880,12 +880,12 @@ function tokenizeSheetFormula(src){
     const rest=s.slice(i);
     const sheetRef=rest.match(/^([A-Za-z_][A-Za-z0-9_]*)!(\$?[A-Za-z]+\$?\d+)/);
     if(sheetRef){
-      toks.push({t:'ref', sheet:sheetRef[1], a1:sheetRef[2].replace(/\$/g,'')});
+      toks.push({t:'ref', sheet:sheetRef[1], a1:sheetRef[2].replace(/\$/g,''), absCol:sheetRef[2].charAt(0)==='$'});
       i+=sheetRef[0].length; continue;
     }
     const cell=rest.match(/^\$?[A-Za-z]+\$?\d+/);
     if(cell){
-      toks.push({t:'ref', sheet:'', a1:cell[0].replace(/\$/g,'')});
+      toks.push({t:'ref', sheet:'', a1:cell[0].replace(/\$/g,''), absCol:cell[0].charAt(0)==='$'});
       i+=cell[0].length; continue;
     }
     const ident=rest.match(/^[A-Za-z_][A-Za-z0-9_.]*/);
@@ -964,7 +964,7 @@ function extractSheetRefs(formula, defaultSheet){
     if(t.t!=='ref') return;
     const cr=a1ColRow(t.a1); if(!cr) return;
     const sheet=(t.sheet||ds||'').trim();
-    out.push({sheet, col:cr.col, row:cr.row, a1:cr.col+cr.row, key:(sheet?sheet+'!':'')+cr.col+cr.row});
+    out.push({sheet, col:cr.col, row:cr.row, a1:cr.col+cr.row, key:(sheet?sheet+'!':'')+cr.col+cr.row, absCol:!!t.absCol});
   });
   return out;
 }
@@ -991,13 +991,15 @@ function lookupGridCell(map, rng){
   const hit=Object.keys(map).find(k=>norm(k)===want);
   return hit!=null?map[hit]:null;
 }
-function enqueueFormulaDeps(n, nodes, queue, maxNodes){
+/* An 18-tab model easily passes 150 cells on one walk; cap high, and count (never hide) refs we stop following. */
+const GRAPH_MAX_NODES=500;
+function enqueueFormulaDeps(n, nodes, queue, maxNodes, stats){
   if(!n||!n.formula||!String(n.formula).startsWith('=')) return;
   extractSheetRefs(n.formula, n.sheet).forEach(ref=>{
     const id=cellId(ref.sheet, ref.a1);
     if(nodes.has(id)) return;
-    if(nodes.size>=maxNodes) return;
-    const child={id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, label:'', seed:false, formula:'', value:null, kind:'pending'};
+    if(nodes.size>=maxNodes){ if(stats){ stats.skipped=(stats.skipped||0)+1; } return; }
+    const child={id, sheet:ref.sheet, a1:ref.a1, col:ref.col, row:ref.row, absCol:!!ref.absCol, label:'', seed:false, formula:'', value:null, kind:'pending'};
     nodes.set(id, child); queue.push(child);
   });
 }
@@ -1024,7 +1026,8 @@ async function hydrateSeedFormulas(seeds){
 }
 async function walkFormulaGraph(seeds, opts){
   opts=opts||{};
-  const maxNodes=Math.min(200, opts.maxNodes||120);
+  const maxNodes=Math.min(800, opts.maxNodes||120);
+  const stats={skipped:0};
   const nodes=new Map(); /* id -> node */
   const queue=[];
   (seeds||[]).forEach(s=>{
@@ -1032,13 +1035,13 @@ async function walkFormulaGraph(seeds, opts){
     const id=cellId(s.sheet, s.a1);
     if(nodes.has(id)) return;
     const known=String(s.formula||'').trim();
-    const n={id, sheet:s.sheet||'', a1:String(s.a1).toUpperCase(), col:s.col, row:s.row, label:s.label||'', seed:!!s.seed, formula:known, value:null, kind:known.startsWith('=')?'formula':'pending'};
+    const n={id, sheet:s.sheet||'', a1:String(s.a1).toUpperCase(), col:s.col, row:s.row, absCol:!!s.absCol, label:s.label||'', seed:!!s.seed, formula:known, value:null, kind:known.startsWith('=')?'formula':'pending'};
     nodes.set(id,n); queue.push(n);
     /* Expand seed formulas immediately so Pricing/Assumptions enter the queue even if cell formula read fails later */
-    if(n.kind==='formula') enqueueFormulaDeps(n, nodes, queue, maxNodes);
+    if(n.kind==='formula') enqueueFormulaDeps(n, nodes, queue, maxNodes, stats);
   });
   let guard=0;
-  while(queue.length && nodes.size<=maxNodes && guard++<60){
+  while(queue.length && guard++<60){
     const batch=queue.splice(0,40);
     const ranges=batch.map(n=>quoteSheetRange(n.sheet, n.a1));
     let data={values:{}, formulas:{}};
@@ -1058,7 +1061,7 @@ async function walkFormulaGraph(seeds, opts){
       if(readFormula){ n.formula=readFormula; }
       if(n.formula && String(n.formula).startsWith('=')){
         n.kind='formula';
-        enqueueFormulaDeps(n, nodes, queue, maxNodes);
+        enqueueFormulaDeps(n, nodes, queue, maxNodes, stats);
       } else {
         n.kind='input';
         if(!n.formula) n.formula='';
@@ -1088,7 +1091,9 @@ async function walkFormulaGraph(seeds, opts){
       });
     }catch(e){}
   }
-  return {nodes:[...nodes.values()], cellMap:{}};
+  /* Cells queued but never read (batch guard hit) stay 'pending' — report them, don't pass them off as inputs */
+  const unread=[...nodes.values()].filter(n=>n.kind==='pending').length;
+  return {nodes:[...nodes.values()], cellMap:{}, skipped:stats.skipped, unread, maxNodes};
 }
 
 /**
@@ -1213,6 +1218,28 @@ async function placeActualsOntoGraphModel(){
   return {placed, catalog:model.uiState.scanActualsCatalog.length, withSeries, name:A.name||'', tab:aSrc.tab||'', misses:unresolved.slice(0,12), missCount:unresolved.length};
 }
 
+/* Read the first few period columns of every P&L line in one call: period 1 is often a
+   hardcoded opening value (e.g. 0) while later periods hold the real formula. */
+async function probeSeedFormulaColumns(sheet, firstCol, rows, span){
+  const rr=(rows||[]).filter(r=>r>0);
+  if(!rr.length) return null;
+  const r0=Math.min(...rr), r1=Math.max(...rr);
+  const c0=colToNum(firstCol), c1=c0+Math.max(1,span)-1;
+  const rng=quoteSheetRange(sheet, firstCol+r0+':'+numToCol(c1)+r1);
+  const data=await gasReadRanges([rng],{includeFormulas:true});
+  const fg=data&&data.formulas?lookupGridCell(data.formulas, rng):null;
+  return {
+    formulasField:!!(data&&data.formulas), range:rng,
+    at:(row,k)=>{ const r=fg&&fg[row-r0]; const f=String((r&&r[k]!=null)?r[k]:'').trim(); return f.startsWith('=')?f:''; }
+  };
+}
+function scanErr(msg){ const e=new Error(msg); e.nnScan=true; return e; }
+const PNL_TAB_RE=/p\s*&\s*l|\bpnl\b|profit\s*(?:&|and)?\s*loss|income\s*statement/i;
+function sameScanLayout(a,b){
+  return !!(a&&b) && String(a.ssid||'')===String(b.ssid||'') && nrm(a.tab||'')===nrm(b.tab||'')
+    && (+a.headerRow||0)===(+b.headerRow||0) && String(a.firstCol||'').toUpperCase()===String(b.firstCol||'').toUpperCase()
+    && (+a.months||0)===(+b.months||0);
+}
 async function ingestFormulaGraphFromSheet(opts){
   opts=opts||{};
   if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
@@ -1221,29 +1248,79 @@ async function ingestFormulaGraphFromSheet(opts){
   const tabs=(conn.sheets||[]).map(s=>s.name);
   const pnlName=opts.tab||tabs.find(n=>/^p\s*&\s*l$/i.test(String(n).trim()))||tabs.find(n=>/p\s*&\s*l|\bpnl\b|profit|income/i.test(n))||tabs[0]||'';
   let F=null, src={ssid, tab:pnlName, labelCol:'A', headerRow:1, firstCol:'B', months:Math.max(12,P()||12)};
-  try{
-    const auto=await discoverPnlSource({ssid, tab:pnlName, sheets:conn.sheets||[]});
-    if(auto&&auto.lines.length){ F=auto; src=Object.assign({}, src, auto.detected, {tab:(auto.detected&&auto.detected.tab)||pnlName}); }
-  }catch(e){}
-  if(!F){ F=await readSource(src); }
+  let fallbackFrom='', fallbackDefaults=false;
+  if(opts.manualLayout && opts.headerRow && opts.firstCol){
+    /* Advanced: the founder typed the layout — use exactly that */
+    src=Object.assign({}, src, {tab:opts.tab||pnlName, labelCol:String(opts.labelCol||'A').toUpperCase(), headerRow:Math.max(1,+opts.headerRow||1), firstCol:String(opts.firstCol).toUpperCase(), months:Math.max(1,+opts.months||src.months), manual:true});
+    F=await readSource(src);
+    { let n=(F.headers||[]).length; while(n>1&&!String(F.headers[n-1]||'').trim()) n--;   /* "# months" past the last header = blank periods */
+      if(n<(F.headers||[]).length){ F.headers=F.headers.slice(0,n); F.lines.forEach(l=>{ l.series=(l.series||[]).slice(0,n); }); } }
+    src.periodMode=intPeriodRun(['x'].concat(F.headers||[]))?'index':'date';
+  } else {
+    try{
+      const auto=await discoverPnlSource({ssid, tab:pnlName, sheets:conn.sheets||[]});
+      if(auto&&auto.lines.length){ F=auto; src=Object.assign({}, src, auto.detected, {tab:(auto.detected&&auto.detected.tab)||pnlName}); }
+    }catch(e){}
+    if(F){
+      const skipped=(F.detected&&F.detected.skippedTabs)||[];
+      fallbackFrom=skipped.find(t=>PNL_TAB_RE.test(String(t)))||'';
+    } else {
+      F=await readSource(src); fallbackDefaults=true;
+      src.periodMode=intPeriodRun(['x'].concat(F.headers||[]))?'index':'date';
+    }
+  }
   if(!F.lines.length) throw new Error('No P&L lines found — pick the P&L tab and Scan again');
-  const periods=F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
   const firstCol=src.firstCol||'B';
   const sheetName=src.tab||pnlName||'';
-  /* Seed: every P&L line that has a formula (or all numeric lines for review) */
-  const seeds=[];
-  F.lines.forEach(l=>{
-    if(!l.row) return;
-    const a1=firstCol+l.row;
-    seeds.push({sheet:sheetName, a1, col:firstCol, row:l.row, label:l.name||'', seed:true, formula:l.formula||'', value:null});
-  });
-  /* Always re-read seed cell formulas — scan grid can miss getFormulas; without this P&L lines become false inputs */
-  const hyd=await hydrateSeedFormulas(seeds);
+  const nPer=Math.max(1,(F.headers||[]).length);
+  const lastCol=numToCol(colToNum(firstCol)+nPer-1);
+  src.months=nPer;
+  /* Numbered periods (1,2,3…) carry no calendar month, and a fallback tab/default layout is a guess:
+     show what we found and let the founder confirm before anything is built. Remembered per layout. */
+  const prevSrc=(model.sources&&model.sources.forecast)||{};
+  const remembered=sameScanLayout(prevSrc, src)?prevSrc:null;
+  const isIndex=src.periodMode==='index';
+  let periodStart=null;
+  if(isIndex) periodStart=opts.periodStart||(remembered&&remembered.periodStart)||null;
+  const needsLayoutOk=(fallbackFrom||fallbackDefaults) && !opts.layoutConfirmed && !(remembered&&remembered.layoutConfirmed);
+  if((isIndex&&!periodStart) || needsLayoutOk){
+    const sugg=(prevSrc.periodStart&&String(prevSrc.ssid||'')===String(ssid))?prevSrc.periodStart:{m:startMonthIdx(), y:startYear()};
+    return {needsPeriodConfirm:true, name:F.name||'', lines:F.lines.length, fallbackFrom, fallbackDefaults,
+      detected:{tab:sheetName, headerRow:src.headerRow, labelCol:src.labelCol||'A', firstCol, lastCol, months:nPer, periodMode:isIndex?'index':'date'},
+      suggest:{m:sugg.m|0, y:sugg.y|0}};
+  }
+  if(isIndex){ src.periodStart={m:periodStart.m|0, y:periodStart.y|0}; }
+  if(fallbackFrom||fallbackDefaults) src.layoutConfirmed=true;
+  const periods=isIndex
+    ? genMonths(nPer, src.periodStart.m, src.periodStart.y)
+    : F.headers.map(fmtPeriodLabel).map((h,i)=>h||('P'+(i+1)));
+  /* Seed: every P&L line, read at the period column that actually carries formulas */
+  const lineRows=F.lines.filter(l=>l.row);
+  const probeSpan=Math.max(1,Math.min(4,nPer));
+  let probe=null;
+  try{ probe=await probeSeedFormulaColumns(sheetName, firstCol, lineRows.map(l=>l.row), probeSpan); }catch(e){ probe=null; }
+  const fAt=(l,k)=>{
+    if(probe){ const f=probe.at(l.row,k); if(f) return f; }
+    const arr=Array.isArray(l.formulas)?l.formulas:(k===0?[l.formula]:[]);
+    const f=String((arr&&arr[k])||'').trim(); return f.startsWith('=')?f:'';
+  };
+  const counts=[]; for(let k=0;k<probeSpan;k++) counts.push(lineRows.filter(l=>fAt(l,k)).length);
+  let seedK=0; counts.forEach((c,k)=>{ if(c>counts[seedK]) seedK=k; });
+  const seedCol=numToCol(colToNum(firstCol)+seedK);
+  const seeds=lineRows.map(l=>({sheet:sheetName, a1:seedCol+l.row, col:seedCol, row:l.row, label:l.name||'', seed:true, formula:fAt(l,seedK), value:null}));
   const nSeedForm=seeds.filter(s=>String(s.formula||'').startsWith('=')).length;
   if(!nSeedForm){
-    throw new Error('No formulas returned for P&L lines (got values only). Redeploy Apps Script Code.gs with includeFormulas, then Connect & Scan again — do not Accept inputs that should be formulas.');
+    const formulasField=!!((probe&&probe.formulasField)||F.formulasAvailable);
+    const rows=lineRows.map(l=>l.row);
+    const checked=(probe&&probe.range)||quoteSheetRange(sheetName, firstCol+Math.min(...rows)+':'+numToCol(colToNum(firstCol)+probeSpan-1)+Math.max(...rows));
+    const where=`tab “${sheetName}”, header row ${src.headerRow}, labels in column ${src.labelCol||'A'}, periods in ${firstCol}–${lastCol} (${nPer})`;
+    const fb=fallbackFrom?` No period header row was recognised on “${fallbackFrom}”, so Scan fell back to this tab.`:(fallbackDefaults?' No period header row was recognised, so Scan used the default layout.':'');
+    if(!formulasField){
+      throw scanErr(`The Apps Script on this sheet is an older copy: it sent values but no formulas field, so Scan can’t see any formulas (it read ${where}). Paste the latest Code.gs into Extensions → Apps Script, then Deploy → Manage deployments → Edit → New version → Deploy, and Connect & Scan again.`);
+    }
+    throw scanErr(`Scan read ${where} and checked ${checked} (${rows.length} line rows × first ${probeSpan} period columns) — every cell is a plain value, no formulas. Your Apps Script is fine (it does send formulas), so the layout Scan picked is wrong.${fb} In Advanced, set the tab, header row and first period column, then Scan again.`);
   }
-  const walked=await walkFormulaGraph(seeds, {maxNodes:150});
+  const walked=await walkFormulaGraph(seeds, {maxNodes:GRAPH_MAX_NODES});
   const byId=new Map(walked.nodes.map(n=>[n.id,n]));
   seeds.forEach(s=>{
     const id=cellId(s.sheet,s.a1);
@@ -1256,12 +1333,22 @@ async function ingestFormulaGraphFromSheet(opts){
   });
   /* Second pass: ensure every formula node's deps exist as graph nodes (Pricing/Assumptions). */
   const nodeMap=new Map(walked.nodes.map(n=>[n.id,n]));
-  const more=[];
-  walked.nodes.forEach(n=>{ if(n.kind==='formula' && n.formula) enqueueFormulaDeps(n, nodeMap, more, 150); });
+  const more=[]; const moreStats={skipped:0};
+  walked.nodes.forEach(n=>{ if(n.kind==='formula' && n.formula) enqueueFormulaDeps(n, nodeMap, more, GRAPH_MAX_NODES, moreStats); });
+  let moreSkipped=0, moreUnread=0;
   if(more.length){
-    const moreWalk=await walkFormulaGraph(more.map(n=>({sheet:n.sheet,a1:n.a1,col:n.col,row:n.row,label:n.label||'',formula:'',seed:false})), {maxNodes:150});
+    const moreWalk=await walkFormulaGraph(more.map(n=>({sheet:n.sheet,a1:n.a1,col:n.col,row:n.row,absCol:!!n.absCol,label:n.label||'',formula:'',seed:false})), {maxNodes:GRAPH_MAX_NODES});
+    moreSkipped=moreWalk.skipped||0; moreUnread=moreWalk.unread||0;
     moreWalk.nodes.forEach(n=>{ if(!nodeMap.has(n.id)){ nodeMap.set(n.id,n); walked.nodes.push(n); } });
   }
+  const refsNotFollowed=(walked.skipped||0)+(moreStats.skipped||0)+moreSkipped;
+  const cellsUnread=(walked.unread||0)+moreUnread;
+  const graphWarn=(refsNotFollowed||cellsUnread)
+    ? `Formula map stopped at ${GRAPH_MAX_NODES} cells — ${refsNotFollowed+cellsUnread} reference(s) not followed; lines that depend on them stay Suggested`
+    : '';
+  /* Seeds were read at seedCol (period 1+seedK). Shift relative refs back by seedK so every range starts at period 1;
+     absolute-column refs ($C$5) point at one fixed cell and are left where they are. */
+  const rangeCol=n=>{ const c=n.col||seedCol; if(!seedK||n.absCol) return c; const num=colToNum(c)-seedK; return num>=1?numToCol(num):c; };
   /* Assign stable keys */
   const usedK={};
   const uk=name=>{ let k=slugKey(name),b=k,i=2; while(usedK[k]){k=b+'_'+i;i++;} usedK[k]=1; return k; };
@@ -1295,7 +1382,7 @@ async function ingestFormulaGraphFromSheet(opts){
   keep.forEach(v=>{ usedK[v.key]=1; });
   let nIn=0,nForm=0,nSug=0;
   const newVars=walked.nodes.map(n=>{
-    const range=buildRange(n.sheet||sheetName, n.col||firstCol, n.row, periods.length);
+    const range=buildRange(n.sheet||sheetName, rangeCol(n), n.row, periods.length);
     const v={
       key:n.key, name:n.label||(n.sheet+'!'+n.a1), unit:inferUnit(n.label||''),
       range:range||'', sheetFormula:n.formula||'', srcGraph:true, srcLine:!!n.seed,
@@ -1326,8 +1413,10 @@ async function ingestFormulaGraphFromSheet(opts){
     const graphData=await gasReadRanges(graphRanges,{ssid,includeFormulas:false});
     newVars.forEach(v=>{
       const raw=(graphData.values&&graphData.values[v.range]&&graphData.values[v.range][0])||[];
+      /* % rows (margins, rates) are ratios, not money: never apply the ₹ unit scale; text/dash cells are blanks, not 0 */
+      const sc=v.unit==='%'?1:(conn.scale||1);
       const series=periods.map((_,i)=>{
-        const x=raw[i]; return x==null||x===''?null:toNum(x,conn.scale||1);
+        const x=raw[i]; return isRealNum(x)?toNum(x,sc):null;
       });
       if(series.some(x=>x!=null)){
         v.forecast=series;
@@ -1357,7 +1446,7 @@ async function ingestFormulaGraphFromSheet(opts){
     const rp=parseRange(v.range);
     return {name:v.name, metric:v.metric||'', row:+rp.row||0, sheet:rp.sheet||'', firstCol:rp.col||firstCol, range:v.range, id:nrm(v.metric||'')+'|'+nrm(v.name||'')};
   });
-  model.uiState.scanMeta={sheet:sheetName, firstCol, months:periods.length, mode:'formula-graph'};
+  model.uiState.scanMeta={sheet:sheetName, firstCol, seedCol, months:periods.length, mode:'formula-graph', periodMode:isIndex?'index':'date', periodStart:src.periodStart||null, graphWarn};
   model.uiState.graphIngestVersion=GRAPH_INGEST_VERSION;
   model.uiState.scanActualsCatalog=model.uiState.scanActualsCatalog||[];
   {
@@ -1428,7 +1517,8 @@ async function ingestFormulaGraphFromSheet(opts){
   return {
     newLines:newVars.length, keep:keep.length, keepMatched:0,
     catalog:model.uiState.scanCatalog.length, formulas:nForm, inputs:nIn, suggested:nSug,
-    name:F.name||sheetName, mode:'formula-graph',
+    name:F.name||sheetName, mode:'formula-graph', graphWarn,
+    detected:{tab:sheetName, headerRow:src.headerRow, labelCol:src.labelCol||'A', firstCol, lastCol, months:nPer, periodMode:isIndex?'index':'date', seedCol},
     proof: proofVar?proofVar.key:'',
     proofKind: proofVar?proofVar.kind:'',
     proofDeps,
@@ -2299,6 +2389,8 @@ function render(){ if(typeof syncPricingDrivers==='function'){ try{ syncPricingD
 function pickPnlDisplayKeys(vars){
   const list=vars||model.vars||[];
   const want=[/^net\s*revenue$/i, /contribution\s*margin(?!\s*%)/i, /^ebitda$/i];
+  if(!list.some(v=>v&&v.kind==='formula'&&want[0].test(String(v.name||'').trim()))) want[0]=/^total\s*revenue\b(?!.*%)/i;
+  if(!list.some(v=>v&&v.kind==='formula'&&want[2].test(String(v.name||'').trim()))) want[2]=/^ebitda\b(?!.*(%|margin))/i;
   const out=[];
   want.forEach(re=>{
     const hit=list.find(v=>v&&v.kind==='formula'&&re.test(String(v.name||'').trim()));
@@ -5459,6 +5551,7 @@ async function confirmWriteback(){
 
 function classifyConnectError(err, kind){
   const raw=String((err&&err.message)||err||'').trim();
+  if(err&&err.nnScan) return raw;
   const m=raw.toLowerCase();
   const where=kind==='actuals'?'actuals sheet':(kind==='model'?'model sheet':'Apps Script');
   if(!raw) return `Couldn’t reach the ${where}. Check the URL and try again.`;
@@ -5526,6 +5619,53 @@ function openConnect(){
       </div>
     </div>`);
 }
+/* ---- Scan confirm step: show what was detected; numbered periods need "Period 1 = <month>" ---- */
+function escH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+let _scanConfirm=null;
+function showScanConfirm(fbId, ing, opts, headHtml){
+  _scanConfirm={fbId, ing, opts:Object.assign({}, opts||{}), headHtml:headHtml||''};
+  const fb=document.getElementById(fbId); if(!fb) return;
+  const d=ing.detected||{}, sg=ing.suggest||{m:startMonthIdx(), y:startYear()}, isIdx=d.periodMode==='index';
+  const yrs=[]; for(let y=Math.min(20,sg.y);y<=Math.max(35,sg.y);y++) yrs.push(y);
+  fb.innerHTML=`${headHtml?`<div class="write-feedback success">${headHtml}</div>`:''}
+    <div class="write-feedback" style="background:#eef0fa;color:#3a4680;margin-top:8px;text-align:left">
+      <b>Check this before Scan builds your model</b>
+      <div class="fz12" style="margin-top:6px">Tab <b>“${escH(d.tab)}”</b> · header row <b>${d.headerRow}</b> · labels in column <b>${escH(d.labelCol)}</b> · periods in <b>${escH(d.firstCol)}–${escH(d.lastCol)}</b> (${d.months}${isIdx?`, numbered 1–${d.months}`:''}) · ${ing.lines} lines</div>
+      ${ing.fallbackFrom?`<div class="fz12" style="margin-top:6px;color:#a33d4d">No period header row was recognised on “${escH(ing.fallbackFrom)}”, so Scan picked this tab instead. If that’s wrong, set the tab in Advanced.</div>`:''}
+      ${ing.fallbackDefaults?`<div class="fz12" style="margin-top:6px;color:#a33d4d">No period header row was recognised, so Scan is using the default layout. If that’s wrong, set it in Advanced.</div>`:''}
+      ${isIdx?`<div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px">
+        <div class="field"><label>Period 1 is</label><select class="inp" id="pcMonth" onchange="scanConfirmPreview()">${MN.map((m,i)=>`<option value="${i}" ${i===(sg.m|0)?'selected':''}>${m}</option>`).join('')}</select></div>
+        <div class="field"><label>Year</label><select class="inp" id="pcYear" onchange="scanConfirmPreview()">${yrs.map(y=>`<option value="${y}" ${y===(sg.y|0)?'selected':''}>20${String(y).padStart(2,'0')}</option>`).join('')}</select></div>
+      </div><div id="pcPreview" class="fz12" style="margin-top:8px"></div>`:''}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn primary sm" onclick="confirmScanLayout()">${isIdx?'Confirm &amp; build':'Looks right — build'}</button></div>
+    </div>`;
+  if(isIdx) scanConfirmPreview();
+}
+function scanConfirmPreview(){
+  const ctx=_scanConfirm, el=document.getElementById('pcPreview'); if(!ctx||!el) return;
+  const n=(ctx.ing.detected||{}).months||1;
+  const ms=genMonths(n, +document.getElementById('pcMonth').value, +document.getElementById('pcYear').value);
+  el.innerHTML=`<b>Period 1 = ${ms[0]}</b>${n>1?` · Period 2 = ${ms[1]}`:''}${n>2?` · … · Period ${n} = ${ms[n-1]}`:''}`;
+}
+async function confirmScanLayout(){
+  const ctx=_scanConfirm; if(!ctx) return;
+  const fb=document.getElementById(ctx.fbId); if(!fb) return;
+  const d=ctx.ing.detected||{};
+  const opts=Object.assign({}, ctx.opts, {layoutConfirmed:true, allowPeriodPrompt:false});
+  if(d.periodMode==='index') opts.periodStart={m:+document.getElementById('pcMonth').value, y:+document.getElementById('pcYear').value};
+  fb.innerHTML=`${ctx.headHtml?`<div class="write-feedback success">${ctx.headHtml}</div>`:''}<div class="write-feedback" style="background:#eef0fa;color:#3a4680;margin-top:8px">Building from “${escH(d.tab)}”…</div>`;
+  try{
+    const ing=await ingestFromConnectedSheet(opts);
+    _scanConfirm=null;
+    if(conn.actualsSsid){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); } else syncClosedFromActuals();
+    setStatus(ing.name||'Connected',true);
+    const pm=(model.uiState&&model.uiState.scanMeta&&model.uiState.scanMeta.periodMode==='index')?` · Period 1 = ${model.periods[0]}`:'';
+    fb.innerHTML=`<div class="write-feedback success">✓ Scanned “${escH(ing.name||'your sheet')}” · ${ing.catalog} lines placed${pm}${ing.graphWarn?` · ${escH(ing.graphWarn)}`:''}</div>`;
+    setTimeout(()=>{ closeModal(); render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):'')+(ing.graphWarn?(' · '+ing.graphWarn):'')); },1100);
+  }catch(err){
+    fb.innerHTML=`<div class="conn-err">Scan did not finish: ${escH(classifyConnectError(err,'model'))}</div>`;
+  }
+}
 function toNum(x,s){ if(typeof x==='number')return x*s; const n=parseFloat(String(x).replace(/[^0-9.\-]/g,'')); return (isNaN(n)?0:n)*s; }
 /* Scan the connected Model sheet and rebuild the line list from it — one sheet, live-connected.
    This is what makes "point at a sheet → see that sheet's lines" work. */
@@ -5545,14 +5685,19 @@ async function scanModelSheet(){
       firstCol:(g('cnFirst').value.trim()||'B').toUpperCase(),
       months:Math.max(1,parseInt(g('cnMonths').value)||12)
     };
+    /* Layout fields only count as an override when the founder changed them from what was last detected */
+    const s0=(model.sources&&model.sources.forecast)||{};
+    opts.manualLayout = opts.labelCol!==String(s0.labelCol||'A').toUpperCase() || opts.headerRow!==(+s0.headerRow||1) || opts.firstCol!==String(s0.firstCol||'B').toUpperCase();
+    opts.allowPeriodPrompt=true;
     /* mark connected for ingest; full connect flags set after success */
     conn.connected=true; saveConn();
     const ing=await ingestFromConnectedSheet(opts);
+    if(ing&&ing.needsPeriodConfirm){ showScanConfirm('cnScanFeedback', ing, opts, ''); return; }
     if(g('cnLabel')&&ing){ /* sync detected layout into form when auto path used */
       const meta=model.uiState&&model.uiState.scanMeta; const src=model.sources&&model.sources.forecast;
       if(src){ if(src.labelCol) g('cnLabel').value=src.labelCol; if(src.headerRow) g('cnHeader').value=String(src.headerRow); if(src.firstCol) g('cnFirst').value=src.firstCol; if(src.months) g('cnMonths').value=String(src.months); }
     }
-    fb.innerHTML=`<div class="write-feedback success">✓ Placed ${ing.catalog} lines${ing.keepMatched?` · matched ${ing.keepMatched} existing drivers`:''}${ing.formulas?` · ${ing.formulas} formulas`:''} from “${ing.name||'your sheet'}”. Closing…</div>`;
+    fb.innerHTML=`<div class="write-feedback success">✓ Placed ${ing.catalog} lines${ing.keepMatched?` · matched ${ing.keepMatched} existing drivers`:''}${ing.formulas?` · ${ing.formulas} formulas`:''} from “${ing.name||'your sheet'}”${ing.graphWarn?` · ${escH(ing.graphWarn)}`:''}. Closing…</div>`;
     setStatus(ing.name||'Connected',true);
     setTimeout(()=>{ closeModal(); render(); toast(`Scan placed ${ing.catalog} lines — Confirm to accept`); },1100);
   }catch(err){
@@ -5658,12 +5803,14 @@ async function doConnect(){
     fb.innerHTML=`<div class="write-feedback" style="background:#eef0fa;color:#3a4680">Connected — scanning to place cells automatically…</div>`;
     try{
       const tabEl=document.getElementById('cnTab');
-      const ing=await ingestFromConnectedSheet({tab:(tabEl&&tabEl.value)||''});
+      const scanOpts={tab:(tabEl&&tabEl.value)||'', allowPeriodPrompt:true};
+      const ing=await ingestFromConnectedSheet(scanOpts);
+      if(ing&&ing.needsPeriodConfirm){ showScanConfirm('cnFeedback', ing, scanOpts, `✓ Connected to “${escH(sheetName||'your sheet')}”${tabsMsg}${actMsg}`); return; }
       if(!actualsRaw) syncClosedFromActuals();
       if(actualsRaw){ _vState.userVer=false; _vState.winUser=false; autoDefaultVer(); }
       const actPlace=ing.actualsPlaced?` · ${ing.actualsPlaced} actuals mapped${ing.actualsTab?` from “${esc(ing.actualsTab)}”`:''}`:(actualsRaw?' · actuals linked (no matching lines yet)':'');
       fb.innerHTML=`<div class="write-feedback success">✓ Connected &amp; scanned “${ing.name||sheetName||'your sheet'}” · ${ing.catalog} lines placed${ing.keepMatched?` · ${ing.keepMatched} drivers matched`:''}${tabsMsg}${actMsg}${actPlace}</div>`;
-      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:'')+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):''));},1100);
+      setTimeout(()=>{closeModal();render(); toast((ing.mode==='formula-graph'?'Formula graph: ':'')+ing.catalog+' cells · '+(ing.inputs||0)+' inputs · '+(ing.formulas||0)+' formulas'+(ing.proof?' · proof '+ing.proof:'')+(ing.actualsPlaced?(' · '+ing.actualsPlaced+' actuals'):'')+(ing.actualsWarn?(' · '+ing.actualsWarn):'')+(ing.graphWarn?(' · '+ing.graphWarn):''));},1100);
     }catch(scanErr){
       fb.innerHTML=`<div class="write-feedback success">✓ Connected to “${sheetName||'your sheet'}”${mapMsg}${tabsMsg}${actMsg}</div>
         <div class="conn-err" style="margin-top:8px">Scan did not finish: ${esc(String(scanErr.message||scanErr))}</div>`;
@@ -5805,9 +5952,17 @@ async function ingestFromConnectedSheet(opts){
   if(!conn.connected||!conn.url||!conn.token) throw new Error('Connect a sheet first');
   /* North star: formula-graph only. Legacy classify left fake P&L Inputs + Pricing aliases and stuck the stale banner. */
   try{
-    return await ingestFormulaGraphFromSheet(opts);
+    const r=await ingestFormulaGraphFromSheet(opts);
+    if(r&&r.needsPeriodConfirm&&!opts.allowPeriodPrompt){
+      const d=r.detected||{};
+      throw scanErr(d.periodMode==='index'
+        ? `Scan needs one check first: “${d.tab}” numbers its periods 1–${d.months}, so confirm which month period 1 is in Connect sheets → Connect & Scan.`
+        : `Scan needs one check first: confirm the tab and layout it found (“${d.tab}”, header row ${d.headerRow}) in Connect sheets → Connect & Scan.`);
+    }
+    return r;
   }catch(graphErr){
     console.warn('formula-graph ingest failed', graphErr);
+    if(graphErr&&graphErr.nnScan) throw graphErr;   /* already says which tab/cells and what to do */
     if(opts.forceLegacy){
       /* explicit escape hatch only */
     } else {
@@ -5816,9 +5971,9 @@ async function ingestFromConnectedSheet(opts){
         throw new Error('Scan hit a bad sheet cell ref (Range not found). Usually a formula points at a missing tab/cell. Redeploy latest Code.gs (skips bad ranges), Clear all → Connect & Scan. Detail: '+msg);
       }
       if(/No P&L lines found/i.test(msg)){
-        throw new Error('No period table was detected. We tried every workbook tab. In Advanced, select the intended tab and confirm it has a label column plus at least two month columns.');
+        throw new Error('No period table was detected. We tried every workbook tab. In Advanced, select the intended tab and confirm it has a label column plus a header row of months (Jan-26…) or numbered periods (1, 2, 3…).');
       }
-      throw new Error(msg+( /formula|includeFormulas|Apps Script/i.test(msg) ? '' : ' Redeploy Apps Script Code.gs with includeFormulas, then Clear all → Connect & Scan.'));
+      throw new Error(msg);
     }
   }
   if(!opts.forceLegacy) throw new Error('formula-graph ingest failed');
@@ -6017,21 +6172,56 @@ function parseLines(labels, headers, grid){
   }
   return lines;
 }
+/* Numbered periods: a left-to-right run of whole numbers 1,2,3… (at least 3) in one row. No calendar month — Scan asks. */
+function intPeriodRun(row){
+  const asInt=v=>{ if(typeof v==='number') return Number.isInteger(v)?v:null; const s=String(v==null?'':v).trim(); return /^\d{1,3}$/.test(s)?+s:null; };
+  const r=row||[];
+  for(let c=1;c<r.length;c++){
+    if(asInt(r[c])!==1) continue;
+    let n=1; while(c+n<r.length && asInt(r[c+n])===n+1) n++;
+    if(n>=3) return {firstColIdx:c, months:n};
+  }
+  return null;
+}
+/* A row whose only period-like hits are bare numbers must step like a calendar (years +1, serial dates by a
+   week/month/quarter/year) — otherwise it's a data row (e.g. ₹45,000 looks like a date serial). */
+function numericPeriodStepOk(nums){
+  if(nums.length<2) return false;
+  const years=nums.every(x=>x>=1900&&x<=2100);
+  for(let i=1;i<nums.length;i++){
+    const d=nums[i]-nums[i-1];
+    if(years){ if(d!==1) return false; continue; }
+    if(!(d===7 || (d>=28&&d<=31) || (d>=89&&d<=92) || d===365 || d===366)) return false;
+  }
+  return true;
+}
 /* Find the label column, header row, first-period column and period count from a raw grid. */
 function detectLayoutFromGrid(grid){
   if(!grid||!grid.length) return null;
   const maxScan=Math.min(grid.length,40);
   let headerRowIdx=-1, bestCount=1;
-  for(let r=0;r<maxScan;r++){ const row=grid[r]||[]; let cnt=0; for(let c=1;c<row.length;c++) if(isPeriodHeader(row[c])) cnt++; if(cnt>bestCount){ bestCount=cnt; headerRowIdx=r; } }
-  if(headerRowIdx<0) return null;                       // no row had >=2 period-like headers
-  const hrow=grid[headerRowIdx]||[];
-  let firstColIdx=-1; for(let c=1;c<hrow.length;c++){ if(isPeriodHeader(hrow[c])){ firstColIdx=c; break; } }
-  if(firstColIdx<0) return null;
-  let months=0; for(let c=firstColIdx;c<hrow.length;c++){ if(isPeriodHeader(hrow[c])) months++; else break; }
-  if(months<2) return null;
+  for(let r=0;r<maxScan;r++){ const row=grid[r]||[]; let cnt=0; const nums=[]; let nonNum=0;
+    if(intPeriodRun(row)) continue;   /* "10","11"… would pass as 2-digit years — numbered rows are handled below */
+    for(let c=1;c<row.length;c++) if(isPeriodHeader(row[c])){ cnt++; if(typeof row[c]==='number') nums.push(row[c]); else nonNum++; }
+    if(cnt && !nonNum && !numericPeriodStepOk(nums)) cnt=0;
+    if(cnt>bestCount){ bestCount=cnt; headerRowIdx=r; } }
+  /* Numbered header row (1,2,3…): topmost one wins, so title/banner rows above it are skipped */
+  let idx=null;
+  for(let r=0;r<maxScan;r++){ const run=intPeriodRun(grid[r]); if(run){ idx=Object.assign({headerRowIdx:r}, run); break; } }
+  let firstColIdx=-1, months=0, periodMode='date';
+  if(headerRowIdx>=0){
+    const hrow=grid[headerRowIdx]||[];
+    for(let c=1;c<hrow.length;c++){ if(isPeriodHeader(hrow[c])){ firstColIdx=c; break; } }
+    if(firstColIdx>=0){ for(let c=firstColIdx;c<hrow.length;c++){ if(isPeriodHeader(hrow[c])) months++; else break; } }
+  }
+  /* Date headers win (Tech_Co-style) unless they're a weak 2-cell hit and a longer numbered run exists */
+  if(idx && (firstColIdx<0 || months<2 || (months<3 && idx.months>months))){
+    headerRowIdx=idx.headerRowIdx; firstColIdx=idx.firstColIdx; months=idx.months; periodMode='index';
+  }
+  if(headerRowIdx<0||firstColIdx<0||months<2) return null;   // no period header row
   let labelColIdx=0, bestText=-1;
   for(let c=0;c<firstColIdx;c++){ let t=0; for(let r=headerRowIdx+1;r<Math.min(grid.length,headerRowIdx+201);r++){ const cell=(grid[r]||[])[c]; if(cell==null) continue; const s=String(cell).trim(); if(s && !isRealNum(cell)) t++; } if(t>bestText){ bestText=t; labelColIdx=c; } }
-  return { labelColIdx, headerRowIdx, firstColIdx, months };
+  return { labelColIdx, headerRowIdx, firstColIdx, months, periodMode };
 }
 
 /* P3: fetch values (+ optional formulas) from Apps Script */
@@ -6156,12 +6346,13 @@ function rankedSheetTabs(sheets, preferred){
 async function discoverPnlSource(opts){
   opts=opts||{};
   const candidates=rankedSheetTabs(opts.sheets||[],opts.tab||'');
-  const errors=[];
+  const errors=[], tried=[];
   for(const tab of candidates){
     try{
       const found=await autoDetectAndRead({ssid:opts.ssid||'',tab});
-      if(found&&found.lines&&found.lines.length) return found;
+      if(found&&found.lines&&found.lines.length){ if(found.detected) found.detected.skippedTabs=tried.slice(); return found; }
     }catch(e){ errors.push(String((e&&e.message)||e)); }
+    tried.push(tab);
   }
   if(!candidates.length){
     try{
@@ -6187,7 +6378,7 @@ async function autoDetectAndRead(src){
   const fgrid=(data.formulas&&data.formulas[rng])||null;
   const det=detectLayoutFromGrid(grid);
   if(!det) return null;
-  const { labelColIdx, headerRowIdx, firstColIdx, months }=det;
+  const { labelColIdx, headerRowIdx, firstColIdx, months, periodMode }=det;
   const hrow=grid[headerRowIdx]||[];
   const headers=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) headers.push(String(hrow[c]==null?'':hrow[c]).trim());
   const labels=[], dgrid=[], fcol=[];
@@ -6196,7 +6387,8 @@ async function autoDetectAndRead(src){
     labels.push(String(row[labelColIdx]==null?'':row[labelColIdx]).trim());
     const dr=[]; for(let c=firstColIdx;c<firstColIdx+months;c++) dr.push(row[c]); dgrid.push(dr);
     const frow=fgrid? (fgrid[r]||[]) : [];
-    fcol.push(String((frow[firstColIdx]==null?'':frow[firstColIdx])).trim());
+    const fl=[]; for(let k=0;k<Math.min(4,months);k++){ const x=frow[firstColIdx+k]; fl.push(String(x==null?'':x).trim()); }
+    fcol.push(fl);
   }
   const lines=parseLines(labels,headers,dgrid);
   /* attach sheet row (1-based) + first-period formula for each parsed line */
@@ -6208,12 +6400,13 @@ async function autoDetectAndRead(src){
     if(nReal===0||!nm) continue;
     if(lines[li]){
       lines[li].row=headerRowIdx+2+i; /* 1-based sheet row */
-      lines[li].formula=fcol[i]||'';
+      lines[li].formulas=fcol[i]||[];
+      lines[li].formula=(fcol[i]&&fcol[i][0])||'';
     }
     li++;
   }
   return { name:data.spreadsheet||'', headers, lines,
-    detected:{ labelCol:numToCol(labelColIdx+1), headerRow:headerRowIdx+1, firstCol:numToCol(firstColIdx+1), months, tab:src.tab||'' },
+    detected:{ labelCol:numToCol(labelColIdx+1), headerRow:headerRowIdx+1, firstCol:numToCol(firstColIdx+1), months, tab:src.tab||'', periodMode:periodMode||'date' },
     formulasAvailable:!!fgrid };
 }
 async function readSource(src){
@@ -6240,6 +6433,7 @@ async function readSource(src){
     if(lines[li]){
       lines[li].row=src.headerRow+1+i;
       lines[li].formula=fgrid?String((fgrid[i]&&fgrid[i][0])||'').trim():'';
+      lines[li].formulas=fgrid?((fgrid[i]||[]).slice(0,4).map(x=>String(x==null?'':x).trim())):[];
     }
     li++;
   }
