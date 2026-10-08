@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:onboard-reads-20261008e -->
+<!-- NN_BUILD:onboard-fixedcell-20261008f -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -608,6 +608,16 @@
   .tieout li{margin:2px 0}
   .tieout .sub{margin-top:8px}
   .tieout code{background:rgba(0,0,0,.05);padding:0 4px;border-radius:4px}
+  .tieout{padding:8px 12px}
+  .tieout .tbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tieout .tbar .mut{font-size:12px;opacity:.8}
+  .tieout .tbar .sp{flex:1}
+  .tieout details{margin-top:4px}
+  .tieout summary{cursor:pointer;font-size:12px;opacity:.85}
+  .tieout table.tt{border-collapse:collapse;margin-top:4px;font-size:12px;width:100%}
+  .tieout table.tt th{text-align:left;font-weight:600;opacity:.7;padding:2px 8px 2px 0}
+  .tieout table.tt td{padding:2px 8px 2px 0;border-top:1px solid rgba(0,0,0,.06);font-variant-numeric:tabular-nums}
+  .tieout .chips{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
   .lock-note{display:block;margin-top:4px;color:#a33d4d;font-size:11.5px}
   .nr-note{margin:4px 0 6px;padding:4px 8px;border-radius:6px;background:#fff0f1;color:#a33d4d;font-size:11.5px}
   .nr-val{color:#a33d4d}
@@ -1490,9 +1500,11 @@ async function ingestFormulaGraphFromSheet(opts){
       const fraw=graphData.formulasField?((lookupGridCell(graphData.formulas||{}, v.range)||[])[0]||[]):null;
       /* % rows (margins, rates) are ratios, not money: never apply the ₹ unit scale; text/dash cells are blanks, not 0 */
       const sc=v.unit==='%'?1:(conn.scale||1);
-      const series=periods.map((_,i)=>{
-        const x=raw[i]; return isRealNum(x)?toNum(x,sc):null;
-      });
+      /* $B$29-style fixed cell: ONE value used in every period (the range only spans the row for display).
+         Reading its row would give B29 in period 1 and blanks (→ ₹0) from period 2 on. */
+      const series=v.absConst
+        ? periods.map(()=>isRealNum(raw[0])?toNum(raw[0],sc):null)
+        : periods.map((_,i)=>{ const x=raw[i]; return isRealNum(x)?toNum(x,sc):null; });
       v.read=series.slice();
       if(v.unread){ v.unread=false; }   /* boundary / walk-unread cell: values now known from the sheet */
       if(series.some(x=>x!=null)){
@@ -6884,29 +6896,31 @@ function tieOutBannerHtml(){
   const per=i=>esc(model.periods[i]||('period '+(i+1)));
   const money=x=>x==null?'not read':((x<0?'−':'')+'₹'+fmtNum(Math.abs(x)));
   const rng=r=>r?`<code>${esc(r)}</code>`:'';
-  const list=(arr,fn,max)=>`<ul>${arr.slice(0,max).map(fn).join('')}${arr.length>max?`<li>…and ${arr.length-max} more</li>`:''}</ul>`;
+  const more=(n,max)=>n>max?`<div class="mut">…and ${n-max} more</div>`:'';
   const fails=(t.lines||[]).filter(l=>!l.ok);
-  const unread=t.unreadCells||[], held=t.held||[], boundary=t.boundary||[], shallow=t.shallow||[];
-  const warn=held.length||boundary.length||shallow.length;
-  let h='';
+  const unread=t.unreadCells||[], held=t.held||[], shallow=t.shallow||[];
+  const span=`${per(0)} → ${per((t.periods||1)-1)} · ${t.periods} periods`;
+  let head, cls; let det='';
   if(t.ok){
-    h+=`<div class="tieout ${warn?'warn':'ok'}" id="tieoutBanner"><b class="h">✓ ${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> in all ${t.periods} periods, ${per(0)} → ${per((t.periods||1)-1)} (within ₹1 or 0.05%). Save as version, Review write-back and Promote to Sheets are unlocked.`;
+    cls=shallow.length?'warn':'ok';
+    head=`<b class="h">✓ ${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b><span class="mut">${span}</span>`;
   } else {
-    h+=`<div class="tieout" id="tieoutBanner"><b class="h">${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b> (checked across ${t.periods} periods, ${per(0)} → ${per((t.periods||1)-1)}) — Save as version, Review write-back and Promote to Sheets stay locked until every line ties in every period and every cell is read.`;
-    if(fails.length) h+=`<div class="sub"><b>Lines that don't tie</b>${list(fails,l=>`<li><b>${esc(l.name)}</b> — ${l.notRead?`not read${l.p!=null?` from ${per(l.p)}`:''} ${rng(l.range)}`:`first off in ${per(l.p)}: sheet ${money(l.sheet)} · app ${l.app==null?('error'+(l.err?' ('+esc(l.err)+')':'')):money(l.app)}`}</li>`,15)}</div>`;
-    if(unread.length) h+=`<div class="sub"><b>Not read from the sheet (${unread.length})</b> — shown as “not read”, never ₹0. Scan again; if it repeats, the Apps Script timed out or the range doesn't exist.${list(unread,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.formulaOnly?' — formula not read (values came through)':''}</li>`,12)}</div>`;
+    cls='';
+    head=`<b class="h">${t.total-t.tied} of ${t.total} lines off the sheet</b><span class="mut">${span}</span>`;
+    det+=`<div class="sub mut">Save, write-back and Promote stay locked until every line ties.</div>`;
   }
-  if(shallow.length) h+=`<div class="sub"><b>Lines that don't reach their real inputs yet (${shallow.length})</b> <span class="mut">— view and variance only; drag, Apply and write-back are locked on these lines</span>${list(shallow,r=>`<li><b>${esc(r.name)}</b> stops at ${r.stops.slice(0,3).map(x=>`${rng(x.range)} ${x.kind==='held'?'(formula the app can\'t recompute yet — held at sheet values)':x.kind==='boundary'?'(map stopped here — value from the sheet)':x.kind==='unread'?'(not read)':'('+esc(x.kind)+')'}`).join(', ')}${r.stops.length>3?'…':''}</li>`,10)}</div>`;
-  else if(held.length) h+=`<div class="sub"><b>Held at sheet values (${held.length})</b> — the app can't recompute these formulas yet, so drivers below them won't move them.${list(held,c=>`<li>${rng(c.range)} ${esc(c.name)}${c.why?' — '+esc(c.why):''}</li>`,8)}</div>`;
+  if(fails.length) det+=`<div class="sub"><b>Lines that don't tie</b><table class="tt"><tr><th>Line</th><th>First off</th><th>Sheet</th><th>App</th></tr>${fails.slice(0,15).map(l=>`<tr><td>${esc(l.name)}</td><td>${l.p!=null?per(l.p):''}</td><td>${l.notRead?'not read':money(l.sheet)}</td><td>${l.notRead?'not read':(l.app==null?'error':money(l.app))}</td></tr>`).join('')}</table>${more(fails.length,15)}</div>`;
+  if(unread.length) det+=`<div class="sub"><b>Not read from the sheet (${unread.length})</b> <span class="mut">shown as “not read”, never ₹0</span><div class="chips">${unread.slice(0,12).map(c=>`<span title="${esc(c.name||'')}">${rng(c.range)}</span>`).join(' ')}</div>${more(unread.length,12)}</div>`;
+  if(shallow.length) det+=`<div class="sub"><b>View-only lines (${shallow.length})</b> <span class="mut">they don't reach their real inputs yet, so drag, Apply and write-back are locked on these lines</span><table class="tt">${shallow.slice(0,12).map(r=>`<tr><td>${esc(r.name)}</td><td class="mut">stops at ${r.stops.slice(0,2).map(x=>rng(x.range)).join(', ')}${r.stops.length>2?'…':''}</td></tr>`).join('')}</table>${more(shallow.length,12)}</div>`;
+  else if(held.length) det+=`<div class="sub"><b>Held at sheet values (${held.length})</b> <span class="mut">formulas the app can't recompute yet</span><div class="chips">${held.slice(0,8).map(c=>rng(c.range)).join(' ')}</div></div>`;
   const rl=t.readLog;
   if(rl&&(rl.walk||rl.series)){
-    const b=(rl.walk?rl.walk.batches:0)+(rl.series?rl.series.batches:0), r=(rl.walk?rl.walk.retried:0)+(rl.series?rl.series.retried:0), f=(rl.walk?rl.walk.failedBatches:0)+(rl.series?rl.series.failedBatches:0);
-    h+=`<div class="sub mut fz11">Sheet reads: ${b} batch(es) of up to ${GAS_CHUNK} ranges · ${r} retried · ${f} failed.</div>`;
-    { const errs=[...new Set([].concat((rl.walk&&rl.walk.errors)||[], (rl.series&&rl.series.errors)||[], (rl.series&&rl.series.error)?[rl.series.error]:[]))].slice(0,3);
-      if(errs.length) h+=`<div class="sub fz11"><b>Error from your Apps Script:</b> ${errs.map(e=>`<code>${esc(e)}</code>`).join(' · ')}</div>`; }
+    const b=(rl.walk?rl.walk.batches:0)+(rl.series?rl.series.batches:0), f=(rl.walk?rl.walk.failedBatches:0)+(rl.series?rl.series.failedBatches:0);
+    const errs=[...new Set([].concat((rl.walk&&rl.walk.errors)||[], (rl.series&&rl.series.errors)||[], (rl.series&&rl.series.error)?[rl.series.error]:[]))].slice(0,3);
+    det+=`<div class="sub mut fz11">Sheet reads: ${b} batches · ${f} failed${errs.length?` · Error from your Apps Script: ${errs.map(e=>`<code>${esc(e)}</code>`).join(' · ')}`:''}</div>`;
   }
-  h+=`<div class="sub"><button class="btn sm" onclick="recheckTieOut()">Re-check tie-out</button></div></div>`;
-  return h;
+  const open=!t.ok&&model.uiState&&model.uiState.tieOutOpen?' open':'';
+  return `<div class="tieout ${cls}" id="tieoutBanner"><div class="tbar">${head}<span class="sp"></span><button class="btn sm" onclick="recheckTieOut()">Re-check</button></div>${det?`<details${open} ontoggle="model.uiState.tieOutOpen=this.open"><summary>Details</summary>${det}</details>`:''}</div>`;
 }
 function staleGraphModel(){
   const fakes=(model.vars||[]).filter(isStaleFakePnLInput);
