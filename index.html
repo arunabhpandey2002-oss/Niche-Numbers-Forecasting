@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:onboard-fixedcell-20261008f -->
+<!-- NN_BUILD:onboard-sheetplan-20261010g -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -1612,6 +1612,7 @@ async function ingestFormulaGraphFromSheet(opts){
     const sample=(actInfo.misses||[]).slice(0,4).join(', ');
     actInfo.warn=(actInfo.warn?actInfo.warn+' · ':'')+actInfo.missCount+' P&L line(s) left unmapped (fail-closed)'+(sample?': '+sample:'');
   }
+  model.calcBase=snapshotCalcBase();
   const tie=runTieOut();
   tie.readLog={walk:walked.readLog||null, series:seriesLog};
   model.uiState.tieOut=tie;
@@ -1879,8 +1880,31 @@ function formulaTopoOrder(){
   const leftover=fs.filter(v=>!ordered.has(v.key.toLowerCase()));
   return {order, leftover};
 }
-/* evaluate the whole graph, per period. scenario=true applies per-period input overrides */
+/* What the user sees. A scanned sheet model shows the SHEET'S OWN numbers as the plan (they tie by construction);
+   a scenario adds only the change the app's recompute produces (scenario − the recompute at scan time) on top. */
 function evalModel(scenario){
+  const raw=evalModelRaw(scenario);
+  if(!(model.sources&&model.sources.graph)) return raw;
+  const base=model.calcBase||((scenario||Object.keys(model.ov||{}).length)?evalModelRaw(false):raw);
+  model.vars.forEach(v=>{
+    if(!v.srcGraph||!Array.isArray(v.read)||!raw[v.key]) return;
+    const a=raw[v.key], b=base[v.key]||a;
+    raw[v.key]=a.map((x,p)=>{
+      const sv=v.read[p];
+      if(sv==null) return (v.unread?null:x);
+      const d=(typeof x==='number'&&isFinite(x)&&typeof b[p]==='number'&&isFinite(b[p]))?x-b[p]:0;
+      return sv+(Math.abs(d)<1e-9?0:d);
+    });
+  });
+  return raw;
+}
+function snapshotCalcBase(){
+  const r=evalModelRaw(false), out={};
+  model.vars.forEach(v=>{ if(v.srcGraph&&r[v.key]) out[v.key]=r[v.key].slice(); });
+  return out;
+}
+/* evaluate the whole graph, per period, with the app's own formulas. scenario=true applies per-period input overrides */
+function evalModelRaw(scenario){
   const n=P(), res={};
   model.vars.forEach(v=>{ res[v.key]=new Array(n).fill(0); if(v.kind==='formula') v.err=''; });
   const {order, leftover}=formulaTopoOrder();
@@ -6842,7 +6866,7 @@ function editLockReason(key){
   return `${v.name} doesn't reach its real inputs yet (stops at ${at}). You can view it and report variance on it, but drag, Apply and write-back are locked on this line. See the tie-out check at the top of the page.`;
 }
 function runTieOut(){
-  const res=evalModel(false), n=P();
+  const res=evalModelRaw(false), n=P();
   const lines=tieLines().map(v=>{
     const o={key:v.key, name:v.name, range:v.range||'', ok:true};
     if(v.unread||!Array.isArray(v.read)){ o.ok=false; o.notRead=true; return o; }
@@ -6906,8 +6930,8 @@ function tieOutBannerHtml(){
     head=`<b class="h">✓ ${t.tied} of ${t.total} P&amp;L lines tie to the sheet</b><span class="mut">${span}</span>`;
   } else {
     cls='';
-    head=`<b class="h">${t.total-t.tied} of ${t.total} lines off the sheet</b><span class="mut">${span}</span>`;
-    det+=`<div class="sub mut">Save, write-back and Promote stay locked until every line ties.</div>`;
+    head=`<b class="h">Plan shows your sheet's numbers</b><span class="mut">${span} · ${t.total-t.tied} of ${t.total} lines the app can't recalculate yet</span>`;
+    det+=`<div class="sub mut">The numbers on screen come straight from the sheet. On the lines below, the app's own recalculation doesn't match yet, so drag results there are approximate. Save, write-back and Promote stay locked until every line ties.</div>`;
   }
   if(fails.length) det+=`<div class="sub"><b>Lines that don't tie</b><table class="tt"><tr><th>Line</th><th>First off</th><th>Sheet</th><th>App</th></tr>${fails.slice(0,15).map(l=>`<tr><td>${esc(l.name)}</td><td>${l.p!=null?per(l.p):''}</td><td>${l.notRead?'not read':money(l.sheet)}</td><td>${l.notRead?'not read':(l.app==null?'error':money(l.app))}</td></tr>`).join('')}</table>${more(fails.length,15)}</div>`;
   if(unread.length) det+=`<div class="sub"><b>Not read from the sheet (${unread.length})</b> <span class="mut">shown as “not read”, never ₹0</span><div class="chips">${unread.slice(0,12).map(c=>`<span title="${esc(c.name||'')}">${rng(c.range)}</span>`).join(' ')}</div>${more(unread.length,12)}</div>`;
