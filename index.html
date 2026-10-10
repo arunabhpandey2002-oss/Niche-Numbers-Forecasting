@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- NN_BUILD:onboard-sheetplan-20261010g -->
+<!-- NN_BUILD:onboard-sheetplan-20261010h -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Niche Numbers 2.0</title>
@@ -6860,6 +6860,8 @@ function lineDepthReport(){
 function editLockReason(key){
   if(!(model.sources&&model.sources.graph)) return '';
   const v=vget(key); if(!v) return '';
+  { const t=model.uiState&&model.uiState.tieOut; const l=t&&(t.lines||[]).find(x=>x.key===key&&!x.ok);
+    if(l) return `The app's own calculation of ${v.name} doesn't match the sheet yet, so a drag here would give a wrong answer. You can view it and report variance on it, but drag, Apply and write-back are locked on this line.`; }
   let stops=[]; try{ stops=lineLeaves(key).filter(l=>l.kind!=='input'&&l.kind!=='constant'); }catch(e){ return ''; }
   if(!stops.length) return '';
   const at=stops.slice(0,2).map(x=>x.range||x.name).join(', ')+(stops.length>2?'…':'');
